@@ -94,9 +94,7 @@
                                                      a b e))}]}
           task      (sut/compile-task task-spec)
           result    (task {:config {} :state {}})
-          actual    (-> result
-                        first
-                        (get-in [:state :format-string]))]
+          actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))
       (is (nil? (second result))
           "shouldn't continue executing tasks without iterator set")))
@@ -118,9 +116,7 @@
                                                      a b e))}]}
           task      (sut/compile-task task-spec)
           result    (task {:config {} :state {}})
-          actual    (-> result
-                        first
-                        (get-in [:state :format-string]))]
+          actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with iterator"
@@ -136,3 +132,24 @@
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
       (is (= (first result) 11)))))
+
+
+(deftest pipeline-test
+  (let [pipeline-spec {:name  :test-pipeline
+                       :tasks [{:name    :task1
+                                :actions [{:type :custom
+                                           :name :action1
+                                           :fn   (constantly 1)}]}
+                               {:name    :task2
+                                :inputs  [:task1]
+                                :actions [{:type      :custom
+                                           :name      :action2
+                                           :selectors '{val1 [:inputs :task1]}
+                                           :params    '[val1]
+                                           :fn        (fn [v1]
+                                                        ;; task result is a sequable/reducible
+                                                        (-> (last v1)
+                                                            (+ 2)))}]}]}
+        pipeline      (sut/compile-pipeline pipeline-spec)
+        result        (pipeline {})]
+    (is (= (-> result :task2 last) 3))))

@@ -1,13 +1,24 @@
 (ns collet.core
   (:require
    [clojure.walk :as walk]
-   [malli.util :as mu]))
+   [malli.util :as mu]
+   [weavejester.dependency :as dep]))
 
 
 (def context-spec
   [:map
-   [:config :map]
-   [:state :map]])
+   [:config map?]
+   [:state [:map-of :keyword :any]]
+   [:inputs {:optional true}
+    [:map-of :keyword :any]]])
+
+
+(defn ->context
+  "Creates a context map from the given configuration map.
+   Context map is used to pass the configuration and the current state to the actions."
+  [config]
+  {:config config
+   :state  {}})
 
 
 (def action-spec
@@ -76,12 +87,15 @@
 (def task-spec
   [:map
    [:name :keyword]
+   [:inputs {:optional true}
+    [:vector :keyword]]
    [:setup {:optional true}
     [:vector action-spec]]
    [:actions
     [:vector {:min 1} action-spec]]
    [:iterator {:optional true}
     [:map
+     [:cat? {:optional true} :boolean]
      [:data {:description "specifies how to get the data"}
       [:maybe [:or [:vector :keyword] fn?]]]
      [:next {:optional    true
@@ -101,13 +115,15 @@
 
 (defn extract-data-fn
   "Returns a function that extracts data from the context based on the iterator spec."
-  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+  {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] :any]]}
-  [{:keys [data]}]
-  (cond
-    (nil? data) identity
-    (vector? data) (fn [context] (get-in context data))
-    :otherwise data))
+  [{:keys [actions iterator]}]
+  (let [{:keys [data]} iterator
+        last-action (-> actions last :name)]
+    (cond
+      (nil? data) (fn [context] (get-in context [:state last-action]))
+      (vector? data) (fn [context] (get-in context data))
+      :otherwise data)))
 
 
 (defn next-fn
@@ -131,6 +147,15 @@
     (constantly nil)))
 
 
+(defn lazy-concat
+  "A concat version that is completely lazy and
+   does not require to use apply."
+  [colls]
+  (lazy-seq
+   (when-first [c colls]
+     (lazy-cat c (lazy-concat (rest colls))))))
+
+
 (defn compile-task
   "Compiles a task spec into a function.
    Resulting function can be executed with a configuration map,
@@ -138,26 +163,80 @@
    Actions should run in the order they are defined in the spec."
   {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] [:sequential :any]]]}
-  [{:keys [setup actions iterator]}]
+  [{:keys [setup actions iterator] :as task}]
   (let [setup-actions  (map compile-action setup)
         task-actions   (map compile-action actions)
-        extract-data   (extract-data-fn iterator)
+        extract-data   (extract-data-fn task)
         next-iteration (next-fn iterator)]
     (fn [context]
       ;; run actions to set up the task
       (let [context' (cond->> context
-                       (seq setup-actions) (execute-actions setup-actions))]
-        (iteration (partial execute-actions task-actions)
-                   :initk context'
-                   :vf extract-data
-                   :kf next-iteration)))))
+                       (seq setup-actions) (execute-actions setup-actions))
+            result   (iteration (partial execute-actions task-actions)
+                                :initk context'
+                                :vf extract-data
+                                :kf next-iteration)]
+        (if (:cat? iterator)
+          (lazy-concat result)
+          result)))))
 
 
 (def pipeline-spec
   [:map
-   [:sources
-    [:map
-     [:tasks [:vector task-spec]]]]
-   [:sinks
-    [:map
-     [:tasks [:vector task-spec]]]]])
+   [:name :keyword]
+   [:tasks [:vector task-spec]]])
+
+
+(defn index-by
+  "Creates a map from the collection using the keyfn to extract the key."
+  [keyfn coll]
+  (persistent!
+   (reduce (fn [m v]
+             (let [k (keyfn v)]
+               (assoc! m k v)))
+           (transient {})
+           coll)))
+
+
+(defn add-task-deps
+  "Adds dependencies to the graph for the given task."
+  [graph task-key inputs]
+  (reduce
+   (fn [g input]
+     (dep/depend g task-key input))
+   graph inputs))
+
+
+(defn compile-pipeline
+  "Compiles a pipeline spec into a function.
+   Resulting function can be executed with a configuration map
+   Flat list of tasks is compiled into a graph according to the dependencies.
+   Tasks are then executed in the topological order."
+  {:malli/schema [:=> [:cat pipeline-spec]
+                  [:=> [:cat map?] map?]]}
+  [{:keys [tasks]}]
+  (let [tasks-map   (->> tasks
+                         (map (fn [task]
+                                (assoc task ::task-fn (compile-task task))))
+                         (index-by :name))
+        pipe-graph  (dep/graph)
+        tasks-order (->> tasks-map
+                         (reduce-kv
+                          (fn [graph task-key {:keys [inputs]}]
+                            (if (some? inputs)
+                              (add-task-deps graph task-key inputs)
+                              graph))
+                          pipe-graph)
+                         (dep/topo-sort))]
+    (fn [config]
+      (reduce
+       (fn [tasks-state task-key]
+         (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
+               context (reduce (fn [c i]
+                                 (assoc-in c [:inputs i] (get tasks-state i)))
+                               (->context config)
+                               inputs)]
+           (->> (task-fn context)
+                (assoc tasks-state task-key))))
+       {}
+       tasks-order))))
