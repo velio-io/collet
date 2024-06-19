@@ -1,42 +1,162 @@
 (ns collet.core
   (:require
-   [malli.dev :as dev]))
+   [clojure.walk :as walk]
+   [malli.util :as mu]))
 
 
-(dev/start!)
-
-
-(def workflow-spec
+(def context-spec
   [:map
-   [:actions [:vector map?]]
-   [:iterator [:map
-               [:type :string]
-               [:conditions :sequential]]]])
+   [:config :map]
+   [:state :map]])
 
 
 (def action-spec
-  map?)
+  [:map
+   [:name :keyword]
+   [:type :keyword]
+   [:params {:optional true}
+    [:maybe [:vector :any]]]
+   [:selectors {:optional true}
+    [:map-of :symbol [:vector :keyword]]]
+   [:fn {:optional true} fn?]])
+
+
+(defn compile-action-params
+  "Prepare the action parameters by evaluating the config values.
+   Takes the action spec and the context and returns the evaluated parameters.
+   Clojure symbols used as parameter value placeholders. If the same symbol is found in the parameters map
+   and as the selectors key it will be replaced with the corresponding value from the context."
+  {:malli/schema [:=> [:cat (mu/select-keys action-spec [:params :selectors]) context-spec]
+                  (mu/get action-spec :params)]}
+  [{:keys [params selectors]} context]
+  (walk/postwalk
+   (fn [x]
+     (if (and (symbol? x) (contains? selectors x))
+       (let [selector-path (get selectors x)]
+         (get-in context selector-path))
+       x))
+   params))
+
+
+(def actions-map
+  {:http  (fn [])
+   :jdbc  (fn [])
+   :odata (fn [])})
 
 
 (defn compile-action
   "Compiles an action spec into a function.
-   Resulting function should be executed with a workflow configuration (context).
+   Resulting function should be executed with a task context (configuration and current state).
    Action can be a producer or a consumer of data, depending on the action type."
   {:malli/schema [:=> [:cat action-spec]
-                  [:=> [:cat map?] :any]]}
-  [action]
-  (fn [config]
-    (println "Executing action")))
+                  [:=> [:cat context-spec] :any]]}
+  [{action-type :type action-name :name :as action-spec}]
+  (let [action-fn (cond
+                    ;; Clojure core functions
+                    (and (qualified-keyword? action-type)
+                         (= (namespace action-type) "clj"))
+                    (-> (name action-type) symbol resolve)
+                    ;; Custom functions
+                    (= action-type :custom)
+                    (:fn action-spec)
+                    ;; Predefined actions
+                    (contains? actions-map action-type)
+                    (get actions-map action-type)
+                    ;; Unknown action type
+                    :otherwise
+                    (throw (ex-info (str "Unknown action type: " action-type)
+                                    {:spec action-spec})))]
+    (fn [context]
+      (->> (compile-action-params action-spec context)
+           (apply action-fn)
+           (assoc-in context [:state action-name])))))
 
 
-(defn workflow
-  "Compiles a workflow spec into a function.
-   Resulting function should be executed with a specific configuration (context).
-   Workflow function should run actions in the order they are defined in the spec,
-   returning a lazy sequence of data maps produced by the actions"
-  {:malli/schema [:=> [:cat workflow-spec]
-                  [:=> [:cat map?] :sequential]]}
-  [spec]
-  (fn [config]
-    (println "Executing workflow")))
+(def task-spec
+  [:map
+   [:name :keyword]
+   [:setup {:optional true}
+    [:vector action-spec]]
+   [:actions
+    [:vector {:min 1} action-spec]]
+   [:iterator {:optional true}
+    [:map
+     [:data {:description "specifies how to get the data"}
+      [:maybe [:or [:vector :keyword] fn?]]]
+     [:next {:optional    true
+             :description "answers on the question should we iterate over task actions again"}
+      [:maybe [:vector :keyword]]]]]])
 
+
+(defn execute-actions
+  "Executes a sequence of actions with the given context."
+  [actions context]
+  (reduce
+   (fn [context action]
+     (action context))
+   context
+   actions))
+
+
+(defn extract-data-fn
+  "Returns a function that extracts data from the context based on the iterator spec."
+  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+                  [:=> [:cat context-spec] :any]]}
+  [{:keys [data]}]
+  (cond
+    (nil? data) identity
+    (vector? data) (fn [context] (get-in context data))
+    :otherwise data))
+
+
+(defn next-fn
+  "Returns a function that decides whether to continue iterating based on the context."
+  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+                  [:=> [:cat context-spec] :any]]}
+  [{:keys [data next]}]
+  (cond
+    ;; if next is not provided, but we want to extract some data
+    ;; possibly useful for infinite iterators
+    (and (nil? next) (some? data))
+    identity
+    ;; decide whether to continue based on a specific value in the context
+    (vector? next)
+    (fn [context]
+      (when (some? (get-in context next))
+        ;; TODO maybe include found key value in the context
+        context))
+    ;; don't iterate at all
+    :otherwise
+    (constantly nil)))
+
+
+(defn compile-task
+  "Compiles a task spec into a function.
+   Resulting function can be executed with a configuration map,
+   representing a single run of all actions attached to it.
+   Actions should run in the order they are defined in the spec."
+  {:malli/schema [:=> [:cat task-spec]
+                  [:=> [:cat context-spec] [:sequential :any]]]}
+  [{:keys [setup actions iterator]}]
+  (let [setup-actions  (map compile-action setup)
+        task-actions   (map compile-action actions)
+        extract-data   (extract-data-fn iterator)
+        next-iteration (next-fn iterator)]
+    (fn [context]
+      ;; run actions to set up the task
+      (let [context' (cond->> context
+                       (seq setup-actions) (execute-actions setup-actions))]
+        (iteration (partial execute-actions task-actions)
+                   :initk context'
+                   :vf extract-data
+                   :kf next-iteration)))))
+
+
+(def pipeline-spec
+  [:map
+   [:sources
+    [:map
+     [:tasks [:vector task-spec]]]]
+   [:sinks
+    [:map
+     [:tasks [:vector task-spec]]]]])

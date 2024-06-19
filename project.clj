@@ -6,5 +6,6 @@
   [[org.clojure/clojure "1.11.3"]
    [metosin/malli "0.16.1"]]
 
-  :repl-options
-  {:init-ns collet.core})
+  :profiles
+  {:dev {:source-paths ["dev/src"]
+         :repl-options {:init-ns dev}}})
