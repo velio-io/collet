@@ -1,9 +1,7 @@
 (ns collet.core
-  (:require [clojure.walk :as walk]))
-
-
-(def params-spec
-  [:maybe [:vector :any]])
+  (:require
+   [clojure.walk :as walk]
+   [malli.util :as mu]))
 
 
 (def context-spec
@@ -16,7 +14,10 @@
   [:map
    [:name :keyword]
    [:type :keyword]
-   [:params {:optional true} params-spec]
+   [:params {:optional true}
+    [:maybe [:vector :any]]]
+   [:selectors {:optional true}
+    [:map-of :symbol [:vector :keyword]]]
    [:fn {:optional true} fn?]])
 
 
@@ -25,8 +26,8 @@
    Takes the action spec and the context and returns the evaluated parameters.
    Clojure symbols used as parameter value placeholders. If the same symbol is found in the parameters map
    and as the selectors key it will be replaced with the corresponding value from the context."
-  {:malli/schema [:=> [:cat action-spec context-spec]
-                  params-spec]}
+  {:malli/schema [:=> [:cat (mu/select-keys action-spec [:params :selectors]) context-spec]
+                  (mu/get action-spec :params)]}
   [{:keys [params selectors]} context]
   (walk/postwalk
    (fn [x]
@@ -99,6 +100,8 @@
 
 (defn extract-data-fn
   "Returns a function that extracts data from the context based on the iterator spec."
+  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+                  [:=> [:cat context-spec] :any]]}
   [{:keys [data]}]
   (cond
     (nil? data) identity
@@ -106,7 +109,11 @@
     :otherwise data))
 
 
-(defn next-fn [{:keys [data next]}]
+(defn next-fn
+  "Returns a function that decides whether to continue iterating based on the context."
+  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+                  [:=> [:cat context-spec] :any]]}
+  [{:keys [data next]}]
   (cond
     ;; if next is not provided, but we want to extract some data
     ;; possibly useful for infinite iterators

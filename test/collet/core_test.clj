@@ -43,9 +43,7 @@
 
   (testing "Params compilation"
     (let [compiled-params (sut/compile-action-params
-                           {:type      :params-test
-                            :name      :params-test
-                            :params    '[param1 {:p2 param2} [1 2 state1]]
+                           {:params    '[param1 {:p2 param2} [1 2 state1]]
                             :selectors '{param1 [:config :param1]
                                          param2 [:config :param2]
                                          state1 [:state :some-action :state1]}}
