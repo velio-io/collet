@@ -15,7 +15,7 @@
    [:name :keyword]
    [:type :keyword]
    [:params {:optional true}
-    [:maybe [:vector :any]]]
+    [:vector :any]]
    [:selectors {:optional true}
     [:map-of :symbol [:vector :keyword]]]
    [:fn {:optional true} fn?]])
@@ -27,15 +27,16 @@
    Clojure symbols used as parameter value placeholders. If the same symbol is found in the parameters map
    and as the selectors key it will be replaced with the corresponding value from the context."
   {:malli/schema [:=> [:cat (mu/select-keys action-spec [:params :selectors]) context-spec]
-                  (mu/get action-spec :params)]}
+                  [:maybe (mu/get action-spec :params)]]}
   [{:keys [params selectors]} context]
-  (walk/postwalk
-   (fn [x]
-     (if (and (symbol? x) (contains? selectors x))
-       (let [selector-path (get selectors x)]
-         (get-in context selector-path))
-       x))
-   params))
+  (when (some? params)
+    (walk/postwalk
+     (fn [x]
+       (if (and (symbol? x) (contains? selectors x))
+         (let [selector-path (get selectors x)]
+           (get-in context selector-path))
+         x))
+     params)))
 
 
 (def actions-map
