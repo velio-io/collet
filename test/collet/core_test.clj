@@ -1,5 +1,6 @@
 (ns collet.core-test
   (:require
+   [clojure.string :as string]
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [collet.core :as sut]))
@@ -134,22 +135,78 @@
       (is (= (first result) 11)))))
 
 
+(deftest handle-task-errors-test
+  (testing "Tasks failed on error"
+    (let [task-spec {:name    :throwing-task
+                     :actions [{:type :custom
+                                :name :bad-action
+                                :fn   (fn []
+                                        (throw (ex-info "Bad action" {})))}]}
+          task      (sut/compile-task task-spec)]
+      (is (thrown? Exception (first (task {:config {} :state {}}))))))
+
+  (testing "Tasks retried on failure"
+    (let [runs-count (atom 0)
+          task-spec  {:name    :throwing-task
+                      :retry   {:max-retries 3}
+                      :actions [{:type :custom
+                                 :name :bad-action
+                                 :fn   (fn []
+                                         (swap! runs-count inc)
+                                         (throw (ex-info "Bad action" {})))}]}
+          task       (sut/compile-task task-spec)]
+      (is (thrown? Exception (seq (task {:config {} :state {}}))))
+      ;; function will be called 4 times: 1 initial run + 3 retries
+      (is (= @runs-count 4))))
+
+  (testing "Tasks continued to execute after failure"
+    (let [runs-count (atom 0)
+          task-spec  {:name          :throwing-task
+                      :skip-on-error true
+                      :actions       [{:type :custom
+                                       :name :bad-action
+                                       :fn   (fn []
+                                               (swap! runs-count inc)
+                                               (if (= @runs-count 3)
+                                                 (throw (ex-info "Bad action" {}))
+                                                 @runs-count))}]
+                      :iterator      {:data [:state :bad-action]}}
+          task       (sut/compile-task task-spec)]
+      (is (= (->> (task {:config {} :state {}})
+                  (take 5))
+             ;; we will see a number 2 two times
+             ;; because when exception is thrown the previous iteration values is used on next run
+             (list 1 2 2 4 5))))))
+
+
 (deftest pipeline-test
-  (let [pipeline-spec {:name  :test-pipeline
-                       :tasks [{:name    :task1
-                                :actions [{:type :custom
-                                           :name :action1
-                                           :fn   (constantly 1)}]}
-                               {:name    :task2
-                                :inputs  [:task1]
-                                :actions [{:type      :custom
-                                           :name      :action2
-                                           :selectors '{val1 [:inputs :task1]}
-                                           :params    '[val1]
-                                           :fn        (fn [v1]
-                                                        ;; task result is a sequable/reducible
-                                                        (-> (last v1)
-                                                            (+ 2)))}]}]}
-        pipeline      (sut/compile-pipeline pipeline-spec)
-        result        (pipeline {})]
-    (is (= (-> result :task2 last) 3))))
+  (testing "Basic pipeline"
+    (let [pipeline-spec {:name  :test-pipeline
+                         :tasks [{:name    :task1
+                                  :actions [{:type :custom
+                                             :name :action1
+                                             :fn   (constantly 1)}]}
+                                 {:name    :task2
+                                  :inputs  [:task1]
+                                  :actions [{:type      :custom
+                                             :name      :action2
+                                             :selectors '{val1 [:inputs :task1]}
+                                             :params    '[val1]
+                                             :fn        (fn [v1]
+                                                          ;; task result is a sequable/reducible
+                                                          (-> (last v1)
+                                                              (+ 2)))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)
+          result        (pipeline {})]
+      (is (= result '(3)))))
+
+  (testing "Pipeline with throwing task"
+    (let [pipeline-spec   {:name  :test-pipeline
+                           :tasks [{:name    :throwing-task
+                                    :actions [{:type :custom
+                                               :name :bad-action
+                                               :fn   (fn []
+                                                       (throw (ex-info "Bad action" {})))}]}]}
+          pipeline        (sut/compile-pipeline pipeline-spec)
+          printed-message (with-out-str (pipeline {}))]
+      (is (string/starts-with? printed-message "Pipeline error: Bad action")))))

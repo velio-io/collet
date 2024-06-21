@@ -2,7 +2,8 @@
   (:require
    [clojure.walk :as walk]
    [malli.util :as mu]
-   [weavejester.dependency :as dep]))
+   [weavejester.dependency :as dep]
+   [diehard.core :as dh]))
 
 
 (def context-spec
@@ -89,6 +90,11 @@
    [:name :keyword]
    [:inputs {:optional true}
     [:vector :keyword]]
+   [:retry {:optional true}
+    [:map
+     [:max-retries {:optional true} :int]
+     [:backoff-ms {:optional true} [:vector :int]]]]
+   [:skip-on-error {:optional true} :boolean]
    [:setup {:optional true}
     [:vector action-spec]]
    [:actions
@@ -163,16 +169,34 @@
    Actions should run in the order they are defined in the spec."
   {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] [:sequential :any]]]}
-  [{:keys [setup actions iterator] :as task}]
-  (let [setup-actions  (map compile-action setup)
-        task-actions   (map compile-action actions)
-        extract-data   (extract-data-fn task)
-        next-iteration (next-fn iterator)]
+  [{:keys [name setup actions iterator retry skip-on-error] :as task}]
+  (let [setup-actions   (map compile-action setup)
+        task-actions    (map compile-action actions)
+        extract-data    (extract-data-fn task)
+        next-iteration  (next-fn iterator)
+        {:keys [max-retires backoff-ms]
+         :or   {max-retires 3
+                backoff-ms  [200 3000]}} retry
+        execute-task-fn (fn execute-task [ctx]
+                          (try
+                            (if (some? retry)
+                              (dh/with-retry {:retry-on    Exception
+                                              :max-retries max-retires
+                                              :backoff-ms  backoff-ms}
+                                (execute-actions task-actions ctx))
+                              ;; execute without retry
+                              (execute-actions task-actions ctx))
+                            (catch Exception e
+                              (if (not skip-on-error)
+                                (throw (ex-info "Task failed" {:task name} e))
+                                ;; returns the context from previous iteration
+                                ;; maybe we should detect a throwing action and preserve values from other actions
+                                ctx))))]
     (fn [context]
       ;; run actions to set up the task
       (let [context' (cond->> context
                        (seq setup-actions) (execute-actions setup-actions))
-            result   (iteration (partial execute-actions task-actions)
+            result   (iteration execute-task-fn
                                 :initk context'
                                 :vf extract-data
                                 :kf next-iteration)]
@@ -198,13 +222,16 @@
            coll)))
 
 
-(defn add-task-deps
+(defn add-task-and-deps
   "Adds dependencies to the graph for the given task."
   [graph task-key inputs]
-  (reduce
-   (fn [g input]
-     (dep/depend g task-key input))
-   graph inputs))
+  (if (seq inputs)
+    (reduce
+     (fn [g input]
+       (dep/depend g task-key input))
+     graph inputs)
+    ;; add node without dependencies
+    (dep/depend graph task-key ::root)))
 
 
 (defn compile-pipeline
@@ -223,20 +250,31 @@
         tasks-order (->> tasks-map
                          (reduce-kv
                           (fn [graph task-key {:keys [inputs]}]
-                            (if (some? inputs)
-                              (add-task-deps graph task-key inputs)
-                              graph))
+                            (add-task-and-deps graph task-key inputs))
                           pipe-graph)
-                         (dep/topo-sort))]
+                         (dep/topo-sort)
+                         ;; first task should be a ::root node
+                         (rest))
+        last-task   (last tasks-order)]
     (fn [config]
-      (reduce
-       (fn [tasks-state task-key]
-         (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
-               context (reduce (fn [c i]
-                                 (assoc-in c [:inputs i] (get tasks-state i)))
-                               (->context config)
-                               inputs)]
-           (->> (task-fn context)
-                (assoc tasks-state task-key))))
-       {}
-       tasks-order))))
+      (let [result (reduce
+                    (fn [tasks-state task-key]
+                      (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
+                            context (reduce (fn [c i]
+                                              (assoc-in c [:inputs i] (get tasks-state i)))
+                                            (->context config)
+                                            inputs)]
+                        (->> (task-fn context)
+                             (assoc tasks-state task-key))))
+                    {} tasks-order)]
+        (try
+          ;; we need to force the execution of all leaf tasks in the graph
+          ;; in order to start releasing lazy sequences
+          ;; TODO find all leaf tasks in the graph
+          (-> (get result last-task)
+              (seq))
+          (catch Exception e
+            ;; TODO do we need to continue pipeline execution in case of an error?
+            (let [{:keys [task]} (ex-data e)]
+              (println "Pipeline error:" (-> e (ex-cause) (ex-message)))
+              (println "Stopped on task:" task))))))))
