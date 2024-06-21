@@ -5,7 +5,8 @@
   :dependencies
   [[org.clojure/clojure "1.11.3"]
    [weavejester/dependency "0.2.1"]
-   [metosin/malli "0.16.1"]]
+   [metosin/malli "0.16.1"]
+   [diehard "0.11.12"]]
 
   :profiles
   {:dev {:source-paths ["dev/src"]
