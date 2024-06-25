@@ -1,9 +1,15 @@
 (ns collet.core
   (:require
    [clojure.walk :as walk]
+   [malli.core :as m]
+   [malli.dev.pretty :as pretty]
+   [malli.error :as me]
    [malli.util :as mu]
    [weavejester.dependency :as dep]
-   [diehard.core :as dh]))
+   [diehard.core :as dh]
+   [collet.actions.http :as collet.http])
+  (:import
+   [weavejester.dependency MapDependencyGraph]))
 
 
 (def context-spec
@@ -27,7 +33,7 @@
    [:name :keyword]
    [:type :keyword]
    [:params {:optional true}
-    [:vector :any]]
+    [:or map? [:vector :any]]]
    [:selectors {:optional true}
     [:map-of :symbol [:vector :keyword]]]
    [:fn {:optional true} fn?]])
@@ -52,7 +58,7 @@
 
 
 (def actions-map
-  {:http  (fn [])
+  {:http  collet.http/request
    :jdbc  (fn [])
    :odata (fn [])})
 
@@ -80,9 +86,12 @@
                     (throw (ex-info (str "Unknown action type: " action-type)
                                     {:spec action-spec})))]
     (fn [context]
-      (->> (compile-action-params action-spec context)
-           (apply action-fn)
-           (assoc-in context [:state action-name])))))
+      (let [params (compile-action-params action-spec context)
+            result (cond
+                     (vector? params) (apply action-fn params)
+                     (map? params) (action-fn params)
+                     (nil? params) (action-fn))]
+        (assoc-in context [:state action-name] result)))))
 
 
 (def task-spec
@@ -222,8 +231,18 @@
            coll)))
 
 
+(def graph?
+  (m/-simple-schema
+   {:type :graph?
+    :pred #(instance? MapDependencyGraph %)
+    :type-properties
+    {:error/message "should be an instance of MapDependencyGraph"}}))
+
+
 (defn add-task-and-deps
   "Adds dependencies to the graph for the given task."
+  {:malli/schema [:=> [:cat graph? :keyword [:maybe [:vector :keyword]]]
+                  graph?]}
   [graph task-key inputs]
   (if (seq inputs)
     (reduce
@@ -241,21 +260,30 @@
    Tasks are then executed in the topological order."
   {:malli/schema [:=> [:cat pipeline-spec]
                   [:=> [:cat map?] map?]]}
-  [{:keys [tasks]}]
+  [{:keys [tasks] :as pipeline}]
+  ;; validate pipeline spec first
+  (when-not (m/validate pipeline-spec pipeline)
+    (pretty/explain pipeline-spec pipeline)
+    (->> (m/explain pipeline-spec pipeline)
+         (me/humanize)
+         (ex-info "Invalid pipeline spec.")
+         (throw)))
   (let [tasks-map   (->> tasks
                          (map (fn [task]
                                 (assoc task ::task-fn (compile-task task))))
                          (index-by :name))
-        pipe-graph  (dep/graph)
-        tasks-order (->> tasks-map
-                         (reduce-kv
-                          (fn [graph task-key {:keys [inputs]}]
-                            (add-task-and-deps graph task-key inputs))
-                          pipe-graph)
+        pipe-graph  (reduce-kv
+                     (fn [graph task-key {:keys [inputs]}]
+                       (add-task-and-deps graph task-key inputs))
+                     (dep/graph)
+                     tasks-map)
+        tasks-order (->> pipe-graph
                          (dep/topo-sort)
                          ;; first task should be a ::root node
                          (rest))
-        last-task   (last tasks-order)]
+        leafs       (filter (fn [node]
+                              (empty? (dep/immediate-dependents pipe-graph node)))
+                            tasks-order)]
     (fn [config]
       (let [result (reduce
                     (fn [tasks-state task-key]
@@ -268,11 +296,11 @@
                              (assoc tasks-state task-key))))
                     {} tasks-order)]
         (try
-          ;; we need to force the execution of all leaf tasks in the graph
-          ;; in order to start releasing lazy sequences
-          ;; TODO find all leaf tasks in the graph
-          (-> (get result last-task)
-              (seq))
+          (doseq [leaf leafs]
+            ;; trigger the execution of the leaf task
+            (seq (get result leaf)))
+          ;; return pipeline state, mostly for debugging purposes
+          result
           (catch Exception e
             ;; TODO do we need to continue pipeline execution in case of an error?
             (let [{:keys [task]} (ex-data e)]
