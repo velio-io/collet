@@ -7,7 +7,11 @@
    [malli.util :as mu]
    [weavejester.dependency :as dep]
    [diehard.core :as dh]
-   [collet.actions.http :as collet.http])
+   [collet.actions.http :as collet.http]
+   [collet.actions.counter :as collet.counter]
+   [collet.actions.slicer :as collet.slicer]
+   [collet.conditions :as collet.conds]
+   [collet.select :as collet.select])
   (:import
    [weavejester.dependency MapDependencyGraph]))
 
@@ -35,8 +39,10 @@
    [:params {:optional true}
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
-    [:map-of :symbol [:vector :keyword]]]
-   [:fn {:optional true} fn?]])
+    [:map-of :symbol collet.select/select-path]]
+   [:fn {:optional true} fn?]
+   [:return {:optional true}
+    collet.select/select-path]])
 
 
 (defn compile-action-params
@@ -52,15 +58,18 @@
      (fn [x]
        (if (and (symbol? x) (contains? selectors x))
          (let [selector-path (get selectors x)]
-           (get-in context selector-path))
+           (collet.select/select selector-path context))
          x))
      params)))
 
 
 (def actions-map
-  {:http  collet.http/request
-   :jdbc  (fn [])
-   :odata (fn [])})
+  {:http    collet.http/request-action
+   :counter collet.counter/counter-action
+   :slicer  collet.slicer/slicer-action
+   :jdbc    {:action (fn [])}
+   :odata   {:action (fn [])}
+   :format  {:action (fn [])}})
 
 
 (defn compile-action
@@ -69,29 +78,39 @@
    Action can be a producer or a consumer of data, depending on the action type."
   {:malli/schema [:=> [:cat action-spec]
                   [:=> [:cat context-spec] :any]]}
-  [{action-type :type action-name :name :as action-spec}]
-  (let [action-fn (cond
-                    ;; Clojure core functions
-                    (and (qualified-keyword? action-type)
-                         (= (namespace action-type) "clj"))
-                    (-> (name action-type) symbol resolve)
-                    ;; Custom functions
-                    (= action-type :custom)
-                    (:fn action-spec)
-                    ;; Predefined actions
-                    (contains? actions-map action-type)
-                    (get actions-map action-type)
-                    ;; Unknown action type
-                    :otherwise
-                    (throw (ex-info (str "Unknown action type: " action-type)
-                                    {:spec action-spec})))]
+  [{:keys [return] action-type :type action-name :name :as action-spec}]
+  (let [predefined-action? (contains? actions-map action-type)
+        action-fn          (cond
+                             ;; Clojure core functions
+                             (and (qualified-keyword? action-type)
+                                  (= (namespace action-type) "clj"))
+                             (-> (name action-type) symbol resolve)
+                             ;; Custom functions
+                             (= action-type :custom)
+                             (:fn action-spec)
+                             ;; Predefined actions
+                             predefined-action?
+                             (get-in actions-map [action-type :action])
+                             ;; Unknown action type
+                             :otherwise
+                             (throw (ex-info (str "Unknown action type: " action-type)
+                                             {:spec action-spec})))
+        action-spec        (if-let [prep-fn (and predefined-action?
+                                                 (get-in actions-map [action-type :prep]))]
+                             (prep-fn action-spec)
+                             action-spec)]
     (fn [context]
-      (let [params (compile-action-params action-spec context)
-            result (cond
-                     (vector? params) (apply action-fn params)
-                     (map? params) (action-fn params)
-                     (nil? params) (action-fn))]
-        (assoc-in context [:state action-name] result)))))
+      (try
+        (let [params (compile-action-params action-spec context)
+              result (cond
+                       (vector? params) (apply action-fn params)
+                       (map? params) (action-fn params)
+                       (nil? params) (action-fn))]
+          (cond->> result
+            (some? return) (collet.select/select return)
+            :always (assoc-in context [:state action-name])))
+        (catch Exception e
+          (throw (ex-info "Action failed" (merge (ex-data e) {:action action-name}) e)))))))
 
 
 (def task-spec
@@ -110,12 +129,11 @@
     [:vector {:min 1} action-spec]]
    [:iterator {:optional true}
     [:map
-     [:cat? {:optional true} :boolean]
      [:data {:description "specifies how to get the data"}
-      [:maybe [:or [:vector :keyword] fn?]]]
+      [:or collet.select/select-path fn?]]
      [:next {:optional    true
              :description "answers on the question should we iterate over task actions again"}
-      [:maybe [:vector :keyword]]]]]])
+      [:maybe [:or [:vector :any] :boolean]]]]]])
 
 
 (defn execute-actions
@@ -137,7 +155,7 @@
         last-action (-> actions last :name)]
     (cond
       (nil? data) (fn [context] (get-in context [:state last-action]))
-      (vector? data) (fn [context] (get-in context data))
+      (vector? data) (fn [context] (collet.select/select data context))
       :otherwise data)))
 
 
@@ -149,26 +167,25 @@
   (cond
     ;; if next is not provided, but we want to extract some data
     ;; possibly useful for infinite iterators
-    (and (nil? next) (some? data))
+    (or (and (nil? next) (some? data))
+        (true? next))
     identity
+    ;; if given vector is a condition DSL
+    (and (vector? next) (collet.conds/valid-condition? next))
+    (let [condition-fn (collet.conds/compile-conditions next)]
+      (fn [context]
+        (when (condition-fn context)
+          context)))
     ;; decide whether to continue based on a specific value in the context
     (vector? next)
     (fn [context]
-      (when (some? (get-in context next))
-        ;; TODO maybe include found key value in the context
-        context))
+      (let [value (get-in context next)]
+        (cond
+          (and (seqable? value) (not-empty value)) context
+          (some? value) context)))
     ;; don't iterate at all
     :otherwise
     (constantly nil)))
-
-
-(defn lazy-concat
-  "A concat version that is completely lazy and
-   does not require to use apply."
-  [colls]
-  (lazy-seq
-   (when-first [c colls]
-     (lazy-cat c (lazy-concat (rest colls))))))
 
 
 (defn compile-task
@@ -179,8 +196,8 @@
   {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] [:sequential :any]]]}
   [{:keys [name setup actions iterator retry skip-on-error] :as task}]
-  (let [setup-actions   (map compile-action setup)
-        task-actions    (map compile-action actions)
+  (let [setup-actions   (mapv compile-action setup)
+        task-actions    (mapv compile-action actions)
         extract-data    (extract-data-fn task)
         next-iteration  (next-fn iterator)
         {:keys [max-retires backoff-ms]
@@ -197,21 +214,18 @@
                               (execute-actions task-actions ctx))
                             (catch Exception e
                               (if (not skip-on-error)
-                                (throw (ex-info "Task failed" {:task name} e))
+                                (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e))
                                 ;; returns the context from previous iteration
                                 ;; maybe we should detect a throwing action and preserve values from other actions
                                 ctx))))]
     (fn [context]
       ;; run actions to set up the task
       (let [context' (cond->> context
-                       (seq setup-actions) (execute-actions setup-actions))
-            result   (iteration execute-task-fn
-                                :initk context'
-                                :vf extract-data
-                                :kf next-iteration)]
-        (if (:cat? iterator)
-          (lazy-concat result)
-          result)))))
+                       (seq setup-actions) (execute-actions setup-actions))]
+        (iteration execute-task-fn
+                   :initk context'
+                   :vf extract-data
+                   :kf next-iteration)))))
 
 
 (def pipeline-spec
@@ -241,7 +255,7 @@
 
 (defn add-task-and-deps
   "Adds dependencies to the graph for the given task."
-  {:malli/schema [:=> [:cat graph? :keyword [:maybe [:vector :keyword]]]
+  {:malli/schema [:=> [:cat graph? :keyword [:maybe (mu/get task-spec :inputs)]]
                   graph?]}
   [graph task-key inputs]
   (if (seq inputs)
@@ -268,6 +282,7 @@
          (me/humanize)
          (ex-info "Invalid pipeline spec.")
          (throw)))
+
   (let [tasks-map   (->> tasks
                          (map (fn [task]
                                 (assoc task ::task-fn (compile-task task))))
@@ -281,28 +296,35 @@
                          (dep/topo-sort)
                          ;; first task should be a ::root node
                          (rest))
-        leafs       (filter (fn [node]
-                              (empty? (dep/immediate-dependents pipe-graph node)))
-                            tasks-order)]
+        leafs       (->> tasks-order
+                         (filter (fn [node]
+                                   (empty? (dep/immediate-dependents pipe-graph node))))
+                         (vec))]
     (fn [config]
-      (let [result (reduce
-                    (fn [tasks-state task-key]
-                      (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
-                            context (reduce (fn [c i]
-                                              (assoc-in c [:inputs i] (get tasks-state i)))
-                                            (->context config)
-                                            inputs)]
-                        (->> (task-fn context)
-                             (assoc tasks-state task-key))))
-                    {} tasks-order)]
-        (try
+      (try
+        (let [result (reduce
+                      (fn [tasks-state task-key]
+                        (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
+                              inputs-map (reduce (fn [is i] (assoc is i (get tasks-state i))) {} inputs)
+                              context    (-> (->context config)
+                                             (assoc :inputs inputs-map))]
+                          (->> (task-fn context)
+                               (seq)
+                               (assoc tasks-state task-key))))
+                      {} tasks-order)]
           (doseq [leaf leafs]
             ;; trigger the execution of the leaf task
-            (seq (get result leaf)))
+            (dorun (get result leaf)))
           ;; return pipeline state, mostly for debugging purposes
-          result
-          (catch Exception e
-            ;; TODO do we need to continue pipeline execution in case of an error?
-            (let [{:keys [task]} (ex-data e)]
-              (println "Pipeline error:" (-> e (ex-cause) (ex-message)))
-              (println "Stopped on task:" task))))))))
+          result)
+        (catch Throwable e
+          ;; TODO do we need to continue pipeline execution in case of an error?
+          ;; let users to decide if pipeline should stop on error
+          (let [{:keys [task]} (ex-data e)
+                original-error (->> (iterate ex-cause e)
+                                    (take-while identity)
+                                    (last)
+                                    (ex-message))]
+            (println "Pipeline error:" original-error)
+            (println "Stopped on task:" task)
+            (throw e)))))))

@@ -9,6 +9,36 @@
 (use-fixtures :once (tf/instrument! 'collet.core))
 
 
+(deftest action-params-test
+  (testing "Params compilation"
+    (let [compiled-params (sut/compile-action-params
+                           {:params    '[param1 {:p2 param2} [1 2 state1]]
+                            :selectors '{param1 [:config :param1]
+                                         param2 [:config :param2]
+                                         state1 [:state :some-action :state1]}}
+                           {:config {:param1 "value1"
+                                     :param2 "value2"}
+                            :state  {:some-action {:state1 "state-value"}}})]
+      (is (= compiled-params
+             ["value1" {:p2 "value2"} [1 2 "state-value"]])))
+
+    (testing "Params could be a map as well"
+      (let [compiled-params (sut/compile-action-params
+                             {:params    '{:p1 param1
+                                           :p2 param2
+                                           :p3 [1 2 state1]}
+                              :selectors '{param1 [:config :param1]
+                                           param2 [:config :param2]
+                                           state1 [:state :some-action :state1]}}
+                             {:config {:param1 "value1"
+                                       :param2 "value2"}
+                              :state  {:some-action {:state1 "state-value"}}})]
+        (is (= compiled-params
+               {:p1 "value1"
+                :p2 "value2"
+                :p3 [1 2 "state-value"]}))))))
+
+
 (deftest compile-action-test
   (testing "Compiles an action spec into a function"
     (let [action-spec {:type :clj/select-keys
@@ -53,34 +83,7 @@
                        :name :random-test}]
       (is (thrown? Exception (sut/compile-action action-spec)))))
 
-  (testing "Params compilation"
-    (let [compiled-params (sut/compile-action-params
-                           {:params    '[param1 {:p2 param2} [1 2 state1]]
-                            :selectors '{param1 [:config :param1]
-                                         param2 [:config :param2]
-                                         state1 [:state :some-action :state1]}}
-                           {:config {:param1 "value1"
-                                     :param2 "value2"}
-                            :state  {:some-action {:state1 "state-value"}}})]
-      (is (= compiled-params
-             ["value1" {:p2 "value2"} [1 2 "state-value"]])))
-
-    (testing "Params could be a map as well"
-      (let [compiled-params (sut/compile-action-params
-                             {:params    '{:p1 param1
-                                           :p2 param2
-                                           :p3 [1 2 state1]}
-                              :selectors '{param1 [:config :param1]
-                                           param2 [:config :param2]
-                                           state1 [:state :some-action :state1]}}
-                             {:config {:param1 "value1"
-                                       :param2 "value2"}
-                              :state  {:some-action {:state1 "state-value"}}})]
-        (is (= compiled-params
-               {:p1 "value1"
-                :p2 "value2"
-                :p3 [1 2 "state-value"]}))))
-
+  (testing "Action with selectors"
     (let [action-spec {:type      :custom
                        :name      :params-test
                        :selectors '{param1 [:config :param1]
@@ -235,13 +238,31 @@
                                                :fn   (fn []
                                                        (throw (ex-info "Bad action" {})))}]}]}
           pipeline        (sut/compile-pipeline pipeline-spec)
-          printed-message (with-out-str (pipeline {}))]
+          printed-message (with-out-str (try (pipeline {})
+                                             (catch Exception _e)))]
       (is (string/starts-with? printed-message "Pipeline error: Bad action"))))
 
   (testing "Invalid pipeline spec error"
     (let [pipeline-spec {:name   "invalid type"
                          :taskas :missing-tasks-key}]
       (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))))
+
+
+(deftest pipeline-with-iterator-test
+  (let [pipe-spec {:name  :test-pipeline
+                   :tasks [{:name     :counting-task
+                            :actions  [{:type      :custom
+                                        :name      :count-action
+                                        :selectors '{count [:state :count-action]}
+                                        :params    '[count]
+                                        :fn        (fn [c]
+                                                     (inc (or c 0)))}]
+                            :iterator {:data [:state :count-action]
+                                       :next [:< [:state :count-action] 10]}}]}
+        pipeline  (sut/compile-pipeline pipe-spec)
+        result    (pipeline {})]
+    (is (= (take 5 (:counting-task result))
+           (list 1 2 3 4 5)))))
 
 
 (deftest complex-pipeline-test

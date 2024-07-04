@@ -13,5 +13,6 @@
   :profiles
   {:dev {:source-paths ["dev/src"]
          :repl-options {:init-ns dev}
-         :dependencies [[vvvvalvalval/scope-capture "0.3.3"]]
+         :dependencies [[eftest "0.6.0"]
+                        [vvvvalvalval/scope-capture "0.3.3"]]
          :injections   [(require 'sc.api)]}})
