@@ -6,8 +6,13 @@
   [[org.clojure/clojure "1.11.3"]
    [weavejester/dependency "0.2.1"]
    [metosin/malli "0.16.1"]
-   [diehard "0.11.12"]]
+   [diehard "0.11.12"]
+   [http-kit "2.3.0"]
+   [com.github.oliyh/martian "0.1.26"]]
 
   :profiles
   {:dev {:source-paths ["dev/src"]
-         :repl-options {:init-ns dev}}})
+         :repl-options {:init-ns dev}
+         :dependencies [[eftest "0.6.0"]
+                        [vvvvalvalval/scope-capture "0.3.3"]]
+         :injections   [(require 'sc.api)]}})
