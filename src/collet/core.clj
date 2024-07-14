@@ -10,6 +10,7 @@
    [collet.actions.http :as collet.http]
    [collet.actions.counter :as collet.counter]
    [collet.actions.slicer :as collet.slicer]
+   [collet.actions.jdbc :as collet.jdbc]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select])
   (:import
@@ -67,7 +68,7 @@
   {:http    collet.http/request-action
    :counter collet.counter/counter-action
    :slicer  collet.slicer/slicer-action
-   :jdbc    {:action (fn [])}
+   :jdbc    collet.jdbc/action
    :odata   {:action (fn [])}
    :format  {:action (fn [])}})
 
