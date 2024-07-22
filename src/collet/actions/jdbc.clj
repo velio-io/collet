@@ -11,9 +11,10 @@
    [honey.sql :as sql]
    [collet.utils :as utils])
   (:import
-   [java.io File]
-   [java.sql Array Clob Connection]
-   [java.time LocalDate LocalDateTime]
+   [java.io File Writer]
+   [java.util Locale]
+   [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
+   [java.time LocalDate LocalDateTime LocalTime]
    [javax.sql DataSource]))
 
 ;; next.jdbc.types namespace exports the following functions to convert Clojure types to SQL types:
@@ -27,8 +28,16 @@
 ;; convert SQL dates and timestamps to local time automatically
 (date-time/read-as-local)
 
-(json-gen/add-encoder LocalDate json-gen/encode-str)
+(extend-protocol rs/ReadableColumn
+  Time
+  (read-column-by-label [^Time v _]
+    (.toLocalTime v))
+  (read-column-by-index [^Time v _2 _3]
+    (.toLocalTime v)))
 
+
+(json-gen/add-encoder LocalDate json-gen/encode-str)
+(json-gen/add-encoder LocalTime json-gen/encode-str)
 (json-gen/add-encoder LocalDateTime json-gen/encode-str)
 
 
@@ -50,7 +59,7 @@
 
 (defn append-row-to-file
   "Append a row to a file as a JSON string."
-  [writer row]
+  [^Writer writer ^ResultSet row]
   (let [row-keys (rs/column-names row)
         row-data (select-keys row row-keys)
         row-json (json/generate-string row-data)]
@@ -61,12 +70,12 @@
 (defn ->rows-seq
   "Convert a sequence of JSON strings to a lazy sequence of maps.
    The cleanup function is called when the sequence is exhausted."
-  [xs cleanup]
+  [xs mapper cleanup]
   (lazy-seq
    (let [row (first xs)]
      (if row
-       (cons (json/parse-string row true)
-             (->rows-seq (rest xs) cleanup))
+       (cons (-> row (json/parse-string true) (mapper))
+             (->rows-seq (rest xs) mapper cleanup))
        (do (cleanup) nil)))))
 
 
@@ -80,11 +89,48 @@
     {:error/message "should be an instance of java.sql.Connection or javax.sql.DataSource or db-spec map"}}))
 
 
+(defn convert-values
+  "Convert the values in a row to the appropriate types."
+  [types row]
+  (reduce-kv
+   (fn [acc k v]
+     (println k (get types k))
+     (let [k-type (get types k)
+           value  (condp = k-type
+                    Types/DATE (LocalDate/parse v)
+                    Types/TIME (LocalTime/parse v)
+                    Types/TIME_WITH_TIMEZONE (LocalTime/parse v)
+                    Types/TIMESTAMP (LocalDateTime/parse v)
+                    Types/TIMESTAMP_WITH_TIMEZONE (LocalDateTime/parse v)
+                    v)]
+       (assoc acc k value)))
+   {}
+   row))
+
+
+(defn get-columns-types
+  "Returns a map of column names and their SQL types."
+  [^ResultSet row prefix-table?]
+  (let [^ResultSetMetaData md (rs/metadata row)]
+    (->> (for [i (range 1 (inc (.getColumnCount md)))
+               :let [table-name  (some-> (try (.getTableName md i)
+                                              (catch SQLFeatureNotSupportedException _ nil))
+                                         (.toLowerCase Locale/US))
+                     column-name (-> (.getColumnLabel md i) (.toLowerCase Locale/US))
+                     full-name   (if (or (not prefix-table?) (nil? table-name))
+                                   (keyword column-name)
+                                   (keyword table-name column-name))
+                     column-type (.getColumnType md i)]]
+           [full-name column-type])
+         (into {}))))
+
+
 (def query-params-spec
   [:map
    [:connection connectable?]
    [:query [:or map? [:cat :string [:* :any]]]]
-   [:prefix-table? {:optional true} boolean?]
+   [:prefix-table? {:optional true} :boolean]
+   [:preserve-types? {:optional true} :boolean]
    [:fetch-size {:optional true} :int]
    [:timeout {:optional true} :int]
    [:concurrency {:optional true} :keyword]
@@ -98,17 +144,26 @@
    The query can be a HoneySQL query or a plain SQL string (wrapped in the vector)."
   {:malli/schema [:=> [:cat query-params-spec]
                   [:sequential :any]]}
-  [{:keys [connection query prefix-table? timeout concurrency result-type cursors fetch-size]
-    :or   {prefix-table? true
-           fetch-size    4000
-           concurrency   :read-only
-           cursors       :close
-           result-type   :forward-only}}]
-  (let [result-file (File/createTempFile "jdbc-query-data" ".json")]
+  [{:keys [connection query prefix-table? preserve-types?
+           timeout concurrency result-type cursors fetch-size]
+    :or   {prefix-table?   true
+           preserve-types? false
+           fetch-size      4000
+           concurrency     :read-only
+           cursors         :close
+           result-type     :forward-only}}]
+  (let [result-file    (File/createTempFile "jdbc-query-data" ".json")
+        rs-types       (atom {})
+        row-mapping-fn (if preserve-types?
+                         (partial convert-values @rs-types)
+                         identity)]
     (.deleteOnExit result-file)
     (with-open [writer (io/writer result-file :append true)
                 conn   (jdbc/get-connection connection)]
-      (let [append-row   (partial append-row-to-file writer)
+      (let [append-row   (fn [row]
+                           (append-row-to-file writer row)
+                           (when preserve-types?
+                             (swap! rs-types merge (get-columns-types row prefix-table?))))
             query-string (if (map? query)
                            (sql/format query)
                            query)
@@ -116,17 +171,19 @@
                            {:concurrency concurrency
                             :result-type result-type
                             :cursors     cursors
-                            :fetch-size  fetch-size}
-                           :builder-fn (when (not prefix-table?)
-                                         rs/as-unqualified-lower-maps)
+                            :fetch-size  fetch-size
+                            :builder-fn  (if (not prefix-table?)
+                                           rs/as-unqualified-lower-maps
+                                           rs/as-lower-maps)}
                            :timeout (when (some? timeout)
                                       timeout))]
         (->> (jdbc/plan conn query-string options)
              (run! append-row))))
-    (let [reader (io/reader result-file)
-          lines  (line-seq reader)]
-      (->rows-seq lines #(do (.close reader)
-                             (.delete result-file))))))
+    (let [reader     (io/reader result-file)
+          lines      (line-seq reader)
+          cleanup-fn #(do (.close reader)
+                          (.delete result-file))]
+      (->rows-seq lines row-mapping-fn cleanup-fn))))
 
 
 (defn prep-connection

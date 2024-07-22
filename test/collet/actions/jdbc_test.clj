@@ -8,7 +8,8 @@
    [collet.deps :as collet.deps]
    [collet.actions.jdbc :as sut])
   (:import
-   [clojure.lang LazySeq]))
+   [clojure.lang LazySeq]
+   [java.time LocalDate LocalDateTime LocalTime]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.jdbc))
@@ -181,10 +182,10 @@
                               :interval_col  "PT26H3M4S"
                               :json_col      {:a 1}
                               :jsonb_col     {:b 2}
+                              :mood_col      "happy"
                               :text_col      "text"
-                              :time_col      "1970-01-01T20:01:03Z"
-                              :timestamp_col "2024-04-22T21:01:03"
-                              :mood_col      "happy"}
+                              :time_col      "21:01:03"
+                              :timestamp_col "2024-04-22T21:01:03"}
                  #:data_types{:bool_col      false
                               :date_col      "2024-04-23"
                               :float_col     3.15
@@ -193,10 +194,10 @@
                               :interval_col  "PT51H4M5S"
                               :json_col      {:c 3}
                               :jsonb_col     {:d 4}
+                              :mood_col      "sad"
                               :text_col      "text2"
-                              :time_col      "1970-01-01T20:01:04Z"
-                              :timestamp_col "2024-04-23T21:01:04"
-                              :mood_col      "sad"})
+                              :time_col      "21:01:04"
+                              :timestamp_col "2024-04-23T21:01:04"})
                result)))
 
       (let [pipeline (collet/compile-pipeline
@@ -218,6 +219,42 @@
             result   (-> context :query first)]
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
+
+    (testing "preserve the data types"
+      (let [pipeline (collet/compile-pipeline
+                      {:name  :data-types
+                       :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
+                               :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
+                       :tasks [{:name    :query
+                                :actions [{:name      :query-action
+                                           :type      :jdbc
+                                           :selectors {'connection [:config :connection]}
+                                           :params    {:connection      'connection
+                                                       :preserve-types? true
+                                                       :prefix-table?   false
+                                                       :query           {:select [:*]
+                                                                         :from   :data-types}}}]}]})
+            context  (pipeline {:connection connection-map})
+            result   (-> context :query first)]
+        (are [key expected] (= expected (-> result first key))
+          :bool_col true
+          :mood_col "happy"
+          :interval_col "PT26H3M4S"
+          :json_col {:a 1}
+          :jsonb_col {:b 2}
+          :date_col (LocalDate/parse "2024-04-22")
+          :time_col (LocalTime/parse "21:01:03")
+          :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03"))
+
+        (are [key expected] (= expected (-> result second key))
+          :bool_col false
+          :mood_col "sad"
+          :interval_col "PT51H4M5S"
+          :json_col {:c 3}
+          :jsonb_col {:d 4}
+          :date_col (LocalDate/parse "2024-04-23")
+          :time_col (LocalTime/parse "21:01:04")
+          :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04"))))
 
     (tc/stop! pg)))
 
