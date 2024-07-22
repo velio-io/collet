@@ -12,7 +12,8 @@
    [collet.actions.slicer :as collet.slicer]
    [collet.actions.jdbc :as collet.jdbc]
    [collet.conditions :as collet.conds]
-   [collet.select :as collet.select])
+   [collet.select :as collet.select]
+   [collet.deps :as collet.deps])
   (:import
    [weavejester.dependency MapDependencyGraph]))
 
@@ -57,10 +58,16 @@
   (when (some? params)
     (walk/postwalk
      (fn [x]
-       (if (and (symbol? x) (contains? selectors x))
+       (cond
+         ;; replace value with the corresponding value from the context
+         (and (symbol? x) (contains? selectors x))
          (let [selector-path (get selectors x)]
            (collet.select/select selector-path context))
-         x))
+         ;; x could a function call, try to evaluate the form
+         (and (list? x) (symbol? (first x)))
+         (try (eval x) (catch Exception _ x))
+         ;; return as is
+         :otherwise x))
      params)))
 
 
@@ -232,6 +239,7 @@
 (def pipeline-spec
   [:map
    [:name :keyword]
+   [:deps {:optional true} collet.deps/deps-spec]
    [:tasks [:vector task-spec]]])
 
 
@@ -275,7 +283,7 @@
    Tasks are then executed in the topological order."
   {:malli/schema [:=> [:cat pipeline-spec]
                   [:=> [:cat map?] map?]]}
-  [{:keys [tasks] :as pipeline}]
+  [{:keys [tasks deps] :as pipeline}]
   ;; validate pipeline spec first
   (when-not (m/validate pipeline-spec pipeline)
     (pretty/explain pipeline-spec pipeline)
@@ -283,6 +291,9 @@
          (me/humanize)
          (ex-info "Invalid pipeline spec.")
          (throw)))
+
+  (when (some? deps)
+    (collet.deps/add-dependencies deps))
 
   (let [tasks-map   (->> tasks
                          (map (fn [task]
