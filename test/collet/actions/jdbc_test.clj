@@ -220,7 +220,7 @@
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
 
-    (testing "preserve the data types"
+    (testing "preserve data types"
       (let [pipeline (collet/compile-pipeline
                       {:name  :data-types
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
@@ -308,5 +308,96 @@
         (is (instance? LazySeq result))
         (is (= 5 (count result)))
         (is (= '("Alice" "Bob" "Charlie" "David" "Eve") result))))
+
+    (tc/stop! mysql)))
+
+
+(defn create-tables [conn]
+  (jdbc/execute! conn ["CREATE TABLE Users (
+      user_id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(50) NOT NULL,
+      email VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );"])
+  (jdbc/execute! conn ["CREATE TABLE Products (
+      product_id INT AUTO_INCREMENT PRIMARY KEY,
+      product_name VARCHAR(100) NOT NULL,
+      price DECIMAL(10,2),
+      description TEXT
+      );"])
+  (jdbc/execute! conn ["CREATE TABLE Orders (
+      order_id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT,
+      order_date DATE,
+      total_amount DECIMAL(10,2)
+      );"])
+  (jdbc/execute! conn ["CREATE TABLE OrderItems (
+      order_item_id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT,
+      product_id INT,
+      quantity INT,
+      price DECIMAL(10,2)
+      );"]))
+
+
+(defn populate-orders-data [conn]
+  (jdbc/execute! conn ["INSERT INTO Users (username, email) VALUES ('Alice', 'alice@gmail.com')"])
+  (jdbc/execute! conn ["INSERT INTO Users (username, email) VALUES ('Bob', 'bob@gmail.com')"])
+  (jdbc/execute! conn ["INSERT INTO Users (username, email) VALUES ('Rocky', 'balboa@gmail.com')"])
+  (jdbc/execute! conn ["INSERT INTO Products (product_name, price, description) VALUES ('Laptop', 1000.00, 'A laptop')"])
+  (jdbc/execute! conn ["INSERT INTO Products (product_name, price, description) VALUES ('Mouse', 20.00, 'A mouse')"])
+  (jdbc/execute! conn ["INSERT INTO Products (product_name, price, description) VALUES ('Keyboard', 30.00, 'A keyboard')"])
+  (jdbc/execute! conn ["INSERT INTO Products (product_name, price, description) VALUES ('Monitor', 200.00, 'A monitor')"])
+  (jdbc/execute! conn ["INSERT INTO Orders (user_id, order_date, total_amount) VALUES (1, '2024-04-22', 1050.00)"])
+  (jdbc/execute! conn ["INSERT INTO Orders (user_id, order_date, total_amount) VALUES (2, '2024-04-23', 20.00)"])
+  (jdbc/execute! conn ["INSERT INTO OrderItems (order_id, product_id, quantity, price) VALUES (1, 1, 1, 1000.00)"])
+  (jdbc/execute! conn ["INSERT INTO OrderItems (order_id, product_id, quantity, price) VALUES (1, 2, 1, 20.00)"])
+  (jdbc/execute! conn ["INSERT INTO OrderItems (order_id, product_id, quantity, price) VALUES (1, 3, 1, 30.00)"])
+  (jdbc/execute! conn ["INSERT INTO OrderItems (order_id, product_id, quantity, price) VALUES (2, 2, 1, 20.00)"]))
+
+
+(deftest join-tables-query-test
+  (let [mysql          (mysql-container)
+        port           (get (:mapped-ports mysql) 3306)
+        connection-map {:dbtype   "mysql"
+                        :host     "localhost"
+                        :port     port
+                        :dbname   "test"
+                        :user     "test-user"
+                        :password "test-pass"}]
+
+    (testing "query with join tables"
+      (let [pipeline (collet/compile-pipeline
+                      {:name  :products-bought-by-users
+                       :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
+                       :tasks [{:name    :query
+                                :actions [{:name      :query-action
+                                           :type      :jdbc
+                                           :selectors {'connection [:config :connection]}
+                                           :params    {:connection 'connection
+                                                       :query      {:select   [:u/username
+                                                                               :p/product_name
+                                                                               [[:sum :oi/quantity] :total-quantity]
+                                                                               [[:sum [:* :oi/price :oi/quantity]] :total-amount]]
+                                                                    :from     [[:Users :u]]
+                                                                    :join     [[:Orders :o] [:= :u.user_id :o.user_id]
+                                                                               [:OrderItems :oi] [:= :o.order_id :oi.order_id]
+                                                                               [:Products :p] [:= :oi.product_id :p.product_id]]
+                                                                    :group-by [:u.username :p/product_name]
+                                                                    :order-by [:u.username :p.product_name]}
+                                                       :options    {:dialect :mysql
+                                                                    :quoted  false}}}]}]})
+            _        (with-open [conn (jdbc/get-connection connection-map)]
+                       (create-tables conn)
+                       (populate-orders-data conn))
+            context  (pipeline {:connection connection-map})
+            result   (-> context :query first)]
+        (is (instance? LazySeq result))
+        (is (= 4 (count result)))
+        (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1 :total_amount 30.0}
+                 {:users/username "Alice" :products/product_name "Laptop" :total_quantity 1 :total_amount 1000.0}
+                 {:users/username "Alice" :products/product_name "Mouse" :total_quantity 1 :total_amount 20.0}
+                 {:users/username "Bob" :products/product_name "Mouse" :total_quantity 1 :total_amount 20.0})
+               result))))
 
     (tc/stop! mysql)))

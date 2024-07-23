@@ -94,7 +94,6 @@
   [types row]
   (reduce-kv
    (fn [acc k v]
-     (println k (get types k))
      (let [k-type (get types k)
            value  (condp = k-type
                     Types/DATE (LocalDate/parse v)
@@ -129,6 +128,7 @@
   [:map
    [:connection connectable?]
    [:query [:or map? [:cat :string [:* :any]]]]
+   [:options {:optional true} map?]
    [:prefix-table? {:optional true} :boolean]
    [:preserve-types? {:optional true} :boolean]
    [:fetch-size {:optional true} :int]
@@ -144,19 +144,17 @@
    The query can be a HoneySQL query or a plain SQL string (wrapped in the vector)."
   {:malli/schema [:=> [:cat query-params-spec]
                   [:sequential :any]]}
-  [{:keys [connection query prefix-table? preserve-types?
+  [{:keys [connection query options prefix-table? preserve-types?
            timeout concurrency result-type cursors fetch-size]
-    :or   {prefix-table?   true
+    :or   {options         {}
+           prefix-table?   true
            preserve-types? false
            fetch-size      4000
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
-  (let [result-file    (File/createTempFile "jdbc-query-data" ".json")
-        rs-types       (atom {})
-        row-mapping-fn (if preserve-types?
-                         (partial convert-values @rs-types)
-                         identity)]
+  (let [result-file (File/createTempFile "jdbc-query-data" ".json")
+        rs-types    (atom {})]
     (.deleteOnExit result-file)
     (with-open [writer (io/writer result-file :append true)
                 conn   (jdbc/get-connection connection)]
@@ -165,7 +163,7 @@
                            (when preserve-types?
                              (swap! rs-types merge (get-columns-types row prefix-table?))))
             query-string (if (map? query)
-                           (sql/format query)
+                           (sql/format query options)
                            query)
             options      (utils/assoc-some
                            {:concurrency concurrency
@@ -179,10 +177,13 @@
                                       timeout))]
         (->> (jdbc/plan conn query-string options)
              (run! append-row))))
-    (let [reader     (io/reader result-file)
-          lines      (line-seq reader)
-          cleanup-fn #(do (.close reader)
-                          (.delete result-file))]
+    (let [reader         (io/reader result-file)
+          lines          (line-seq reader)
+          row-mapping-fn (if preserve-types?
+                           (partial convert-values @rs-types)
+                           identity)
+          cleanup-fn     #(do (.close reader)
+                              (.delete result-file))]
       (->rows-seq lines row-mapping-fn cleanup-fn))))
 
 
