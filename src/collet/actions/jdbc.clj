@@ -28,6 +28,7 @@
 ;; convert SQL dates and timestamps to local time automatically
 (date-time/read-as-local)
 
+
 (extend-protocol rs/ReadableColumn
   Time
   (read-column-by-label [^Time v _]
