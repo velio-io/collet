@@ -165,15 +165,12 @@
 
 
 
-
-
-(def events (atom []))
-(def artists (atom []))
-(def rated-events (atom []))
-
 (deftest pipeline-complex-http-flow-test
   (testing "complex pipeline to extract artists"
-    (let [pipeline-spec {:name  :city-best-events
+    (let [events        (atom [])
+          artists       (atom [])
+          rated-events  (atom [])
+          pipeline-spec {:name  :city-best-events
                          :tasks [{:name     :area-events
                                   :setup    [{:type      :clj/format
                                               :name      :area-query

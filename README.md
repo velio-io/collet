@@ -1,17 +1,25 @@
 # COLLET
 
+With collet project you can:
 - Create tasks to execute actions
 - Combine tasks into a pipelines
-- Execute pipelines
+- Execute pipelines to move data around
+
+### Development
+
+- start REPL as usual
+- spin up containers for monitoring pipelines execution with command
+  `docker-compose rm -f && docker-compose up` (includes elasticsearch, kibana, jaeger, prometheus, grafana)
+- navigate to the `dev/src/dev.clj` namespace
+- execute `(start-publishers)` to enable logging and tracing
+- you can run all tests in the project with `(test)` command
+
+Graphana is available at `http://localhost:3000` with default credentials `admin/grafana`
+Jaeger is available at `http://localhost:16686`
+Kibana is available at `http://localhost:9000`
+
 
 ### TODO
-- add jdbc action
-  - ability to add external dependencies (like jdbc driver)
-  - passing options to plan! call
-  - data types mapping (get columns metadata from result set to transform json values)
-  - more extensive testing with complex queries and pipelines
-
-- add logging, metrics, tracing
 - persist pipeline state on a tasks level
   - clean up memory
   - recover/rerun pipeline from the last saved state

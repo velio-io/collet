@@ -5,6 +5,7 @@ profiles.clj
 pom.xml
 pom.xml.asc
 *.jar
+!/resources/jmx_prometheus_javaagent-0.20.0.jar
 *.class
 /.lein-*
 /.nrepl-port
@@ -14,3 +15,4 @@ pom.xml.asc
 .idea
 *.iml
 .clj-kondo
+/data

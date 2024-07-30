@@ -1,6 +1,5 @@
 (ns collet.core-test
   (:require
-   [clojure.string :as string]
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [collet.core :as sut]))
@@ -231,16 +230,16 @@
       (is (= (-> result :task2 seq) '(3)))))
 
   (testing "Pipeline with throwing task"
-    (let [pipeline-spec   {:name  :test-pipeline
-                           :tasks [{:name    :throwing-task
-                                    :actions [{:type :custom
-                                               :name :bad-action
-                                               :fn   (fn []
-                                                       (throw (ex-info "Bad action" {})))}]}]}
-          pipeline        (sut/compile-pipeline pipeline-spec)
-          printed-message (with-out-str (try (pipeline {})
-                                             (catch Exception _e)))]
-      (is (string/starts-with? printed-message "Pipeline error: Bad action"))))
+    (let [pipeline-spec {:name  :test-pipeline
+                         :tasks [{:name    :throwing-task
+                                  :actions [{:type :custom
+                                             :name :bad-action
+                                             :fn   (fn []
+                                                     (throw (ex-info "Bad action" {})))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)
+          error-message (with-out-str (try (pipeline {})
+                                           (catch Exception _e)))]
+      (is (re-find #"Pipeline error: Bad action" error-message))))
 
   (testing "Invalid pipeline spec error"
     (let [pipeline-spec {:name   "invalid type"
