@@ -172,8 +172,8 @@
                                                                     :from   :data-types}}}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-pg-data-types conn))
-            context  (pipeline {:connection connection-map})
-            result   (-> context :query first)]
+            _        @(pipeline {:connection connection-map})
+            result   (-> pipeline :query first)]
         (is (= '(#:data_types{:bool_col      true
                               :date_col      "2024-04-22"
                               :float_col     3.14
@@ -214,9 +214,9 @@
                                                         :query      {:select [:*]
                                                                      :from   :data-types
                                                                      :where  [:= :mood_col (types/as-other mood)]}}}]}]})
-            context  (pipeline {:connection connection-map
-                                :mood       "sad"})
-            result   (-> context :query first)]
+            _        @(pipeline {:connection connection-map
+                                 :mood       "sad"})
+            result   (-> pipeline :query first)]
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
 
@@ -234,8 +234,8 @@
                                                        :prefix-table?   false
                                                        :query           {:select [:*]
                                                                          :from   :data-types}}}]}]})
-            context  (pipeline {:connection connection-map})
-            result   (-> context :query first)]
+            _        @(pipeline {:connection connection-map})
+            result   (-> pipeline :query first)]
         (are [key expected] (= expected (-> result first key))
           :bool_col true
           :mood_col "happy"
@@ -303,8 +303,8 @@
                                            :return    [[:cat :employees/user_name]]}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-mysql-table conn))
-            context  (pipeline {:connection connection-map})
-            result   (-> context :query first)]
+            _        @(pipeline {:connection connection-map})
+            result   (-> pipeline :query first)]
         (is (instance? LazySeq result))
         (is (= 5 (count result)))
         (is (= '("Alice" "Bob" "Charlie" "David" "Eve") result))))
@@ -390,8 +390,8 @@
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (create-tables conn)
                        (populate-orders-data conn))
-            context  (pipeline {:connection connection-map})
-            result   (-> context :query first)]
+            _        @(pipeline {:connection connection-map})
+            result   (-> pipeline :query first)]
         (is (instance? LazySeq result))
         (is (= 4 (count result)))
         (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1 :total_amount 30.0}

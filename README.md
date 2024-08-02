@@ -20,15 +20,17 @@ Kibana is available at `http://localhost:9000`
 
 
 ### TODO
-- persist pipeline state on a tasks level
-  - clean up memory
-  - recover/rerun pipeline from the last saved state
 - sink action to send data further (file, S3, queue)
   - smart batch size detection
+
+- clean up tasks unused data (not required for other tasks)
+- add action parameters to logs
+  - obfuscate PII data
 
 - documentation
 - add odata action
 
 - tmd for reading datasets
 - parallel tasks execution
-- evaluate the use of nippy/arrow data formats for intermitent data storage
+- evaluate the use of nippy/arrow data formats for intermittent data storage
+- evaluate the use of DuckDB for querying databases and files

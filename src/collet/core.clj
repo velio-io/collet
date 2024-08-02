@@ -16,6 +16,7 @@
    [collet.select :as collet.select]
    [collet.deps :as collet.deps])
   (:import
+   [clojure.lang IFn ILookup]
    [weavejester.dependency MapDependencyGraph]))
 
 
@@ -113,8 +114,11 @@
         (ml/trace :collet/executing-action [:action action-name :type action-type]
           (let [params (compile-action-params action-spec context)
                 result (cond
+                         ;; multiple parameters passed
                          (vector? params) (apply action-fn params)
+                         ;; single map parameter
                          (map? params) (action-fn params)
+                         ;; no parameters
                          (nil? params) (action-fn))]
             (cond->> result
               (some? return) (collet.select/select return)
@@ -204,9 +208,7 @@
    representing a single run of all actions attached to it.
    Actions should run in the order they are defined in the spec."
   {:malli/schema [:=> [:cat task-spec]
-                  [:function
-                   [:=> [:cat context-spec] [:sequential :any]]
-                   [:=> [:cat context-spec [:* map?]] [:sequential :any]]]]}
+                  [:=> [:cat context-spec] [:sequential :any]]]}
   [{:keys [name setup actions iterator retry skip-on-error] :as task}]
   (let [setup-actions   (mapv compile-action setup)
         task-actions    (mapv compile-action actions)
@@ -215,37 +217,36 @@
         {:keys [max-retires backoff-ms]
          :or   {max-retires 3
                 backoff-ms  [200 3000]}} retry
-        execute-task-fn (fn execute-task [log-ctx ctx]
-                          (ml/with-context (or log-ctx {})
-                            (try
-                              (if (some? retry)
-                                (dh/with-retry {:retry-on    Exception
-                                                :max-retries max-retires
-                                                :backoff-ms  backoff-ms
-                                                :on-retry    (fn [_ ex]
-                                                               (ml/log :collet/retrying-task
-                                                                       :task name
-                                                                       :reason (ex-data ex)
-                                                                       :message (ex-message ex)))}
-                                  (execute-actions task-actions ctx))
-                                ;; execute without retry
+        execute-task-fn (fn execute-task [ctx]
+                          (try
+                            (if (some? retry)
+                              (dh/with-retry {:retry-on    Exception
+                                              :max-retries max-retires
+                                              :backoff-ms  backoff-ms
+                                              :on-retry    (fn [_ ex]
+                                                             (ml/log :collet/retrying-task
+                                                                     :task name
+                                                                     :reason (ex-data ex)
+                                                                     :message (ex-message ex)))}
                                 (execute-actions task-actions ctx))
-                              (catch Exception e
-                                (if (not skip-on-error)
-                                  (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e))
-                                  ;; returns the context from previous iteration
-                                  ;; maybe we should detect a throwing action and preserve values from other actions
-                                  (do
-                                    (ml/log :collet/skipping-task-failure
-                                            :task name
-                                            :reason (ex-data e)
-                                            :message (ex-message e))
-                                    ctx))))))]
-    (fn [context & [log-ctx]]
+                              ;; execute without retry
+                              (execute-actions task-actions ctx))
+                            (catch Exception e
+                              (if (not skip-on-error)
+                                (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e))
+                                ;; returns the context from previous iteration
+                                ;; maybe we should detect a throwing action and preserve values from other actions
+                                (do
+                                  (ml/log :collet/skipping-task-failure
+                                          :task name
+                                          :reason (ex-data e)
+                                          :message (ex-message e))
+                                  ctx)))))]
+    (fn [context]
       ;; run actions to set up the task
       (let [context' (cond->> context
                        (seq setup-actions) (execute-actions setup-actions))]
-        (iteration (partial execute-task-fn log-ctx)
+        (iteration execute-task-fn
                    :initk context'
                    :vf extract-data
                    :kf next-iteration)))))
@@ -291,13 +292,171 @@
     (dep/depend graph task-key ::root)))
 
 
+(defn ->pipeline-graph
+  "Creates a dependency graph from the tasks map."
+  {:malli/schema [:=> [:cat [:map-of :keyword task-spec]]
+                  graph?]}
+  [tasks]
+  (reduce-kv
+   (fn [graph task-key {:keys [inputs]}]
+     (add-task-and-deps graph task-key inputs))
+   (dep/graph)
+   tasks))
+
+
+(defn ->tasks-queue
+  "Creates a queue (sequence) of tasks to be executed.
+   Tasks are sorted topologically, so the first task in the queue is the one that has no dependencies."
+  {:malli/schema [:=> [:cat [:map-of :keyword task-spec]]
+                  [:sequential :keyword]]}
+  [tasks]
+  (->> (->pipeline-graph tasks)
+       (dep/topo-sort)
+       ;; first task should be a ::root node
+       (rest)))
+
+
+(defprotocol IPipelineLifeCycle
+  "Defines the lifecycle methods for a pipeline."
+  (start [this config])
+  (stop [this])
+  (pause [this])
+  (resume [this config]))
+
+
+(defprotocol IPipeline
+  "Defines the pipeline interface.
+   Pipeline is a collection of tasks that are executed in a specific order.
+   Pipeline properties are id, name, status, and error.
+   You shouldn't call the run-worker method directly, use the start method instead."
+  (pipe-id [this])
+  (pipe-name [this])
+  (pipe-status [this])
+  (pipe-error [this])
+  (run-worker [this config]))
+
+
+(deftype Pipeline [id name tasks state]
+  IPipeline
+  (pipe-id [_] id)
+  (pipe-name [_] name)
+  (pipe-status [_] (:status @state))
+  (pipe-error [_] (:error @state))
+
+  (run-worker [this config]
+    (let [worker (future
+                  (ml/with-context {:app-name "collet" :pipeline-name name :pipeline-id id}
+                    (ml/trace :collet/pipeline-execution []
+                      ;; executes tasks one by one
+                      (loop [tq (:tasks-queue @state)]
+                        (if-some [task-key (first tq)]
+                          ;; prepare task context
+                          (let [{::keys [task-fn] :keys [inputs]} (get tasks task-key)
+                                inputs-map (reduce (fn [is i]
+                                                     (assoc is i (get-in @state [:results i])))
+                                                   {} inputs)
+                                context    (-> (->context config)
+                                               (assoc :inputs inputs-map))]
+                            (let [exec-status (ml/trace :collet/starting-task [:task task-key]
+                                                (try
+                                                  (->> (task-fn context)
+                                                       (seq)
+                                                       (doall) ;; release lazy seq
+                                                       (swap! state assoc-in [:results task-key]))
+                                                  ;; update tasks queue
+                                                  (swap! state update :tasks-queue rest)
+                                                  :continue
+                                                  (catch Exception e
+                                                    (let [root-cause (->> (iterate ex-cause e)
+                                                                          (take-while identity)
+                                                                          (last))]
+                                                      (if (instance? InterruptedException root-cause)
+                                                        ;; if the exception is an InterruptedException
+                                                        ;; it means the pipeline was stopped externally
+                                                        ;; no need to log it and propagate this error
+                                                        :interrupted
+
+                                                        ;; throw the exception for any other case
+                                                        (let [{:keys [task action]} (ex-data e)
+                                                              original-error (ex-message root-cause)
+                                                              msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
+                                                                                     original-error task action)]
+                                                          (ml/log :collet/pipeline-execution-failed
+                                                                  :message msg :task task :action action :exception e)
+                                                          (swap! state assoc
+                                                                 :status :failed
+                                                                 :error {:message msg :task task :action action :exception e})
+                                                          (throw e)))))))]
+                              (if (not= :continue exec-status)
+                                exec-status
+                                ;; continue with the next task
+                                (recur (rest tq)))))
+                          ;; all tasks are done
+                          (do
+                            (ml/log :collet/pipeline-execution-finished)
+                            (swap! state assoc :status :done)
+                            :done))))))]
+      (swap! state assoc :worker worker)
+      worker))
+
+  ILookup
+  (valAt [this k]
+    (.valAt this k nil))
+
+  (valAt [this k not-found]
+    (get-in @state [:results k] not-found))
+
+  IFn
+  (invoke [this]
+    (this {}))
+
+  (invoke [this config]
+    (start this config))
+
+  IPipelineLifeCycle
+  (start [this config]
+    (when (= :pending (:status @state))
+      (ml/log :collet/starting-pipeline-execution :tasks (:tasks-queue @state))
+      (swap! state assoc :status :running)
+      (run-worker this config)))
+
+  (stop [this]
+    (ml/log :collet/stopping-pipeline-execution)
+    (when-let [worker (:worker @state)]
+      (future-cancel worker)
+      (swap! state assoc :worker nil))
+    (swap! state assoc :status :stopped))
+
+  (pause [this]
+    (when (= :running (:status @state))
+      (ml/log :collet/pausing-pipeline-execution)
+      (when-let [worker (:worker @state)]
+        (future-cancel worker)
+        (swap! state assoc :worker nil))
+      (swap! state assoc :status :paused)))
+
+  (resume [this config]
+    (when (contains? #{:paused :failed} (:status @state))
+      (ml/log :collet/resuming-pipeline-execution)
+      (swap! state assoc :status :running)
+      (run-worker this config))))
+
+
+(def pipeline?
+  (m/-simple-schema
+   {:type :pipeline?
+    :pred #(instance? Pipeline %)
+    :type-properties
+    {:error/message "should be an instance of Pipeline"}}))
+
+
 (defn compile-pipeline
   "Compiles a pipeline spec into a function.
    Resulting function can be executed with a configuration map
    Flat list of tasks is compiled into a graph according to the dependencies.
    Tasks are then executed in the topological order."
   {:malli/schema [:=> [:cat pipeline-spec]
-                  [:=> [:cat map?] map?]]}
+                  pipeline?]}
   [{:keys [name tasks deps] :as pipeline}]
   ;; validate pipeline spec first
   (when-not (m/validate pipeline-spec pipeline)
@@ -315,59 +474,6 @@
                          (map (fn [task]
                                 (assoc task ::task-fn (compile-task task))))
                          (index-by :name))
-        pipe-graph  (reduce-kv
-                     (fn [graph task-key {:keys [inputs]}]
-                       (add-task-and-deps graph task-key inputs))
-                     (dep/graph)
-                     tasks-map)
-        tasks-order (->> pipe-graph
-                         (dep/topo-sort)
-                         ;; first task should be a ::root node
-                         (rest))
-        leafs       (->> tasks-order
-                         (filter (fn [node]
-                                   (empty? (dep/immediate-dependents pipe-graph node))))
-                         (vec))]
-    (fn [config]
-      (ml/with-context {:app-name      "collet"
-                        :pipeline-name name
-                        :pipeline-id   pipeline-id}
-        (ml/log :collet/starting-pipeline-execution
-                :tasks (vec tasks-order))
-        (try
-          (ml/trace :collet/pipeline-execution []
-            (let [result (reduce
-                          (fn [tasks-state task-key]
-                            (let [{::keys [task-fn] :keys [inputs]} (get tasks-map task-key)
-                                  inputs-map (reduce (fn [is i] (assoc is i (get tasks-state i))) {} inputs)
-                                  context    (-> (->context config)
-                                                 (assoc :inputs inputs-map))]
-                              (ml/trace :collet/starting-task [:task task-key]
-                                (let [log-ctx (ml/local-context)]
-                                  (->> (task-fn context log-ctx)
-                                       (seq)
-                                       (assoc tasks-state task-key))))))
-                          {} tasks-order)]
-              (doseq [leaf leafs]
-                ;; trigger the execution of the leaf task
-                (dorun (get result leaf)))
-              (ml/log :collet/pipeline-execution-finished)
-              ;; return pipeline state, mostly for debugging purposes
-              result))
-          (catch Throwable e
-            ;; TODO do we need to continue pipeline execution in case of an error?
-            ;; let users to decide if pipeline should stop on error
-            (let [{:keys [task action]} (ex-data e)
-                  original-error (->> (iterate ex-cause e)
-                                      (take-while identity)
-                                      (last)
-                                      (ex-message))
-                  msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
-                                         original-error task action)]
-              (ml/log :collet/pipeline-execution-failed
-                      :message msg
-                      :task task
-                      :action action
-                      :exception e)
-              (println msg)
-              (throw e))))))))
+        state       (atom {:status      :pending
+                           :tasks-queue (->tasks-queue tasks-map)})]
+    (->Pipeline pipeline-id name tasks-map state)))
