@@ -25,14 +25,15 @@
 
 
 (defn valid-condition-value?
+  "Checks if the value of a condition is a valid keyword or a list of keywords"
   [condition-value]
   (if (sequential? condition-value)
     (every? identity (map #(keyword? %) condition-value))
     (keyword? condition-value)))
 
 
-;; TODO rewrite in malli
 (defn valid-condition?
+  "Checks if a condition is valid"
   [condition]
   (and
    (sequential? condition)
@@ -51,6 +52,8 @@
 
 
 (defn compile-condition
+  "Takes a condition and returns a function which can be applied to the
+   data to check if the condition is valid for it"
   [[condition field & args]]
   (let [condition-fn (get condition->fn condition)
         regex?       (= :regex condition)

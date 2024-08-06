@@ -4,7 +4,27 @@
    [collet.actions.common :as common]))
 
 
-(defn flatten-sequence [{:keys [flatten-by keep-keys]} data-seq]
+(defn flatten-sequence
+  "Flatten a nested collection by a given key and path.
+   The flatten-by argument is a map, the map key will end up being the key of the flattened collection,
+   the map value is the select path to the value which needs to be flattened.
+   The keep-keys argument is a map, the map key will be the key of the original collection, the map value
+   is the select path to the value which needs to be kept.
+
+   For example, given the following data:
+   [{:id 1 :name \"John\" :addresses [{:street \"Main St.\" :city \"Springfield\"} {:street \"NorthG St.\" :city \"Springfield\"}]}
+    {:id 2 :name \"Jane\" :addresses [{:street \"Elm St.\" :city \"Springfield\"}]}]
+
+   The following call:
+   (flatten-sequence {:flatten-by {:address [:addresses [:cat :street]]}
+                      :keep-keys  {:person-id [:id]}}
+                     data)
+
+   Will return:
+   ({:person-id 1, :address \"Main St.\"}
+    {:person-id 1, :address \"NorthG St.\"}
+    {:person-id 2, :address \"Elm St.\"})"
+  [{:keys [flatten-by keep-keys]} data-seq]
   (let [[f-key f-path] (first flatten-by)
         flatten-fn (fn [item]
                      (let [selected-keys (->> keep-keys
@@ -15,14 +35,63 @@
     (mapcat flatten-fn data-seq)))
 
 
-(defn group-sequence [group-by data-seq]
+(defn group-sequence
+  "Group a sequence of maps by a given select path.
+   Works in a different way than standard Clojure's group-by.
+   First it takes the value under the select path for the first element in the sequence.
+   Then it takes all contiguous elements with the same value under the select path.
+   And groups them together in the list. This process is repeated until the end of the sequence.
+   The result is a lazy sequence where each element is a list of grouped elements.
+
+   For example, given the following data:
+   [{:id 1 :name \"John\" :city \"Springfield\"}
+    {:id 3 :name \"Jack\" :city \"Springfield\"}
+    {:id 2 :name \"Jane\" :city \"Lakeside\"}
+    {:id 4 :name \"Jill\" :city \"Lakeside\"}
+    {:id 5 :name \"Joe\" :city \"Lakeside\"}
+    {:id 3 :name \"Jack\" :city \"Springfield\"}
+    {:id 5 :name \"Joe\" :city \"Lakeside\"}]
+
+   The following call:
+   (group-sequence [:city] data)
+
+   Will return:
+   (({:id 1, :name \"John\", :city \"Springfield\"} {:id 3, :name \"Jack\", :city \"Springfield\"})
+    ({:id 2, :name \"Jane\", :city \"Lakeside\"} {:id 4, :name \"Jill\", :city \"Lakeside\"} {:id 5, :name \"Joe\", :city \"Lakeside\"})
+    ({:id 3, :name \"Jack\", :city \"Springfield\"})
+    ({:id 5, :name \"Joe\", :city \"Lakeside\"}))"
+  [group-by data-seq]
   (when-let [group-key (collet.select/select group-by (first data-seq))]
     (let [batch      (take-while #(= group-key (collet.select/select group-by %)) data-seq)
           batch-size (count batch)]
       (lazy-seq (cons batch (group-sequence group-by (drop batch-size data-seq)))))))
 
 
-(defn join-sequence [{:keys [sequence cat? on] :as join} data-seq]
+(defn join-sequence
+  "Join two sequences of maps by a given select path.
+   Works almost like a SQL join.
+   :sequence argument is the second sequence to join with.
+   :cat? argument is a boolean, if true the sequence will be flattened before joining.
+   :on argument is a map of :source and :target keys which define the join condition.
+
+   For example, given the following data:
+   [{:id 1 :name \"John\" :city \"Springfield\"}
+    {:id 2 :name \"Jane\" :city \"Lakeside\"}
+    {:id 3 :name \"Jack\" :city \"Springfield\"}]
+
+   And the following call:
+   (join-sequence {:sequence [{:id 1 :city \"Springfield\"}
+                              {:id 2 :city \"Lakeside\"}
+                              {:id 3 :city \"Springfield\"}]
+                   :cat? true
+                   :on {:source [:id] :target [:id]}}
+                  data)
+
+   Will return:
+   ([{:id 1, :name \"John\", :city \"Springfield\"}   {:id 1, :city \"Springfield\"}]
+    [{:id 2, :name \"Jane\", :city \"Lakeside\"}      {:id 2, :city \"Lakeside\"}]
+    [{:id 3, :name \"Jack\", :city \"Springfield\"}   {:id 3, :city \"Springfield\"}])"
+  [{:keys [sequence cat? on] :as join} data-seq]
   (when-let [element (first data-seq)]
     (let [sequence   (if cat? (flatten sequence) sequence)
           join       (if cat?
@@ -43,6 +112,10 @@
 
 
 (defn slice-sequence
+  "This is a stateful action which operates on sequences of data.
+   In the simplest use case you can use this action to iterate over a sequence of any type.
+   Also, it can flatten the given sequence by a nested key or group elements of the sequence by values or join elements between two sequences.
+   All operations return a lazy sequence."
   [{:keys [flatten-by keep-keys group-by join cat?] data-seq :sequence}
    prev-state]
   (let [state      (if (nil? prev-state)
@@ -64,4 +137,4 @@
 
 (def slicer-action
   {:action slice-sequence
-   :prep   common/prep-state-ful-action})
+   :prep   common/prep-stateful-action})

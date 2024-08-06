@@ -5,6 +5,7 @@
   :dependencies
   [[org.clojure/clojure "1.11.3"]
    [org.clojure/java.jmx "1.1.0"]
+   [org.clojure/data.csv "1.1.0"]
    [weavejester/dependency "0.2.1"]
    [metosin/malli "0.16.1"]
    [diehard "0.11.12"]

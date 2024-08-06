@@ -4,6 +4,8 @@
 
 
 (defn do-count
+  "Increment a counter by a step, up to a maximum value.
+   Uses the previous state to determine the current state."
   [{:keys [start step end]
     :or   {start 0 step 1 end Integer/MAX_VALUE}}
    prev-state]
@@ -14,4 +16,4 @@
 
 (def counter-action
   {:action do-count
-   :prep   common/prep-state-ful-action})
+   :prep   common/prep-stateful-action})
