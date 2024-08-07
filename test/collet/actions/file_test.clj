@@ -3,12 +3,16 @@
    [clojure.test :refer :all]
    [clojure.data.csv :as csv]
    [clojure.java.io :as io]
+   [collet.test-fixtures :as tf]
    [next.jdbc :as jdbc]
    [cheshire.core :as json]
    [clj-test-containers.core :as tc]
    [collet.actions.jdbc-test :as jdbc-test]
    [collet.core :as collet]
    [collet.actions.file :as sut]))
+
+
+(use-fixtures :once (tf/instrument! 'collet.actions.file))
 
 
 (deftest write-into-file-test
