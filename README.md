@@ -20,11 +20,6 @@ Kibana is available at `http://localhost:9000`
 
 
 ### TODO
-- sink action to send data further 
-  ~~- file~~
-  - S3
-  - chronicle queue
-
 - clean up tasks unused data (not required for other tasks)
 - direct dependencies between tasks
 - add action parameters to logs
