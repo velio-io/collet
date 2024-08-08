@@ -90,7 +90,8 @@
                                     :iterator {:data [:state :events-request]
                                                :next [:< [:state :req-count] 3]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            {:keys [area-events]} (pipeline {:city "London"})]
+            _             @(pipeline {:city "London"})
+            {:keys [area-events]} pipeline]
         (is (= (count (flatten area-events)) 40))
         (reset! events area-events)))
 
@@ -117,7 +118,8 @@
                                                        :event-id    [:state :event-artists :current :event-id]}]
                                                :next [:not-nil? [:state :event-artists :next]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            {:keys [event-artists-rating]} (pipeline {:events @events})
+            _             @(pipeline {:events @events})
+            {:keys [event-artists-rating]} pipeline
             events        (flatten @events)]
         (let [number-of-artists (->> (mapcat :relations events)
                                      (filter (comp identity :artist))
@@ -153,8 +155,9 @@
                                     :iterator {:data [:state :rated-events]
                                                :next [:not-nil? [:state :ratings-with-event :next]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            {:keys [best-events]} (pipeline {:events  @events
-                                             :artists @artists})
+            _             @(pipeline {:events  @events
+                                      :artists @artists})
+            {:keys [best-events]} pipeline
             events        (flatten @events)]
         (let [events-no-artists (->> events
                                      (filter (fn [{:keys [relations]}]
@@ -234,7 +237,7 @@
                                               :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist]
                                                           :accept       :json
                                                           :as           :json
-                                                          :rate         1
+                                                          :rate         0.5
                                                           :query-params {:inc "ratings"}}
                                               :return    [:body]}
                                              {:type      :custom
@@ -280,7 +283,7 @@
                                   :iterator {:data [:state :rated-events]
                                              :next [:not-nil? [:state :ratings-with-event :next]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
-      (pipeline {:city "London"})
+      @(pipeline {:city "London"})
 
       (is (= (count @events) 40))
       (is (every? #(contains? % :rating) @rated-events))

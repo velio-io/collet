@@ -2,6 +2,7 @@
   (:require
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
+   [malli.core :as m]
    [collet.core :as sut]))
 
 
@@ -225,9 +226,64 @@
                                                           ;; task result is a sequable/reducible
                                                           (-> (last v1)
                                                               (+ 2)))}]}]}
-          pipeline      (sut/compile-pipeline pipeline-spec)
-          result        (pipeline {})]
-      (is (= (-> result :task2 seq) '(3)))))
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      (is (m/validate sut/pipeline? pipeline))
+      (is (= :pending (sut/pipe-status pipeline)))
+
+      @(pipeline {})
+
+      (is (= :done (sut/pipe-status pipeline)))
+      (is (= '(3) (-> pipeline :task2)))))
+
+  (testing "Pipeline lifecycle"
+    (let [pipeline-spec {:name  :test-pipeline
+                         :tasks [{:name    :task1
+                                  :actions [{:type :custom
+                                             :name :action1
+                                             :fn   (fn []
+                                                     (Thread/sleep 2000)
+                                                     (println "Task 1")
+                                                     1)}]}
+                                 {:name    :task2
+                                  :inputs  [:task1]
+                                  :actions [{:type      :custom
+                                             :name      :action2
+                                             :selectors '{val1 [:inputs :task1 [:op :first]]}
+                                             :params    '[val1]
+                                             :fn        (fn [v1]
+                                                          (Thread/sleep 2000)
+                                                          (println "Task 2")
+                                                          (+ v1 2))}]}]}]
+      (let [pipeline-1 (sut/compile-pipeline pipeline-spec)]
+        @(sut/start pipeline-1 {})
+        (is (= :done (sut/pipe-status pipeline-1)))
+        (is (= '(3) (-> pipeline-1 :task2))))
+
+      (let [pipeline-2 (sut/compile-pipeline pipeline-spec)]
+        (sut/start pipeline-2 {})
+        (Thread/sleep 2100)
+        (sut/stop pipeline-2)
+        (is (= :stopped (sut/pipe-status pipeline-2)))
+        (is (= '(1) (-> pipeline-2 :task1)))
+        (is (= nil (-> pipeline-2 :task2)))
+
+        (testing "Stopped pipeline can't be started again"
+          (sut/start pipeline-2 {})
+          (is (= :stopped (sut/pipe-status pipeline-2)))
+          (sut/resume pipeline-2 {})
+          (is (= :stopped (sut/pipe-status pipeline-2)))
+          (is (= nil (-> pipeline-2 :task2)))))
+
+      (let [pipeline-3 (sut/compile-pipeline pipeline-spec)]
+        (sut/start pipeline-3 {})
+        (Thread/sleep 2100)
+        (sut/pause pipeline-3)
+        (is (= :paused (sut/pipe-status pipeline-3)))
+        (is (= '(1) (-> pipeline-3 :task1)))
+        (is (= nil (-> pipeline-3 :task2)))
+        (sut/resume pipeline-3 {})
+        (Thread/sleep 2100)
+        (is (= '(3) (-> pipeline-3 :task2))))))
 
   (testing "Pipeline with throwing task"
     (let [pipeline-spec {:name  :test-pipeline
@@ -236,10 +292,10 @@
                                              :name :bad-action
                                              :fn   (fn []
                                                      (throw (ex-info "Bad action" {})))}]}]}
-          pipeline      (sut/compile-pipeline pipeline-spec)
-          error-message (with-out-str (try (pipeline {})
-                                           (catch Exception _e)))]
-      (is (re-find #"Pipeline error: Bad action" error-message))))
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      (try @(pipeline {})
+           (catch Exception e))
+      (is (re-find #"Pipeline error: Bad action" (:message (sut/pipe-error pipeline))))))
 
   (testing "Invalid pipeline spec error"
     (let [pipeline-spec {:name   "invalid type"
@@ -258,10 +314,10 @@
                                                      (inc (or c 0)))}]
                             :iterator {:data [:state :count-action]
                                        :next [:< [:state :count-action] 10]}}]}
-        pipeline  (sut/compile-pipeline pipe-spec)
-        result    (pipeline {})]
-    (is (= (take 5 (:counting-task result))
-           (list 1 2 3 4 5)))))
+        pipeline  (sut/compile-pipeline pipe-spec)]
+    @(pipeline {})
+    (is (= (list 1 2 3 4 5)
+           (take 5 (:counting-task pipeline))))))
 
 
 (deftest complex-pipeline-test
@@ -340,7 +396,7 @@
                                                             (swap! results assoc :task4 value)
                                                             value))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
-      (pipeline {})
+      @(pipeline {})
       ;; results atom should contain the values produced of each task
       (is (= (-> @results :task11) 2))
       (is (= (-> @results :task21) 4))
