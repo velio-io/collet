@@ -3,7 +3,6 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [cheshire.generate :as json-gen]
-   [malli.core :as m]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [next.jdbc.connection :as connection]
@@ -13,9 +12,9 @@
   (:import
    [java.io File Writer]
    [java.util Locale]
-   [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
-   [java.time LocalDate LocalDateTime LocalTime]
-   [javax.sql DataSource]))
+   [java.sql Array Clob ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
+   [java.time LocalDate LocalDateTime LocalTime]))
+
 
 ;; next.jdbc.types namespace exports the following functions to convert Clojure types to SQL types:
 ;; as-bit as-tinyint as-smallint as-integer as-bigint as-float as-real as-double
@@ -80,16 +79,6 @@
        (do (cleanup) nil)))))
 
 
-(def connectable?
-  (m/-simple-schema
-   {:type :connectable?
-    :pred #(or (instance? Connection %)
-               (instance? DataSource %)
-               (map? %))
-    :type-properties
-    {:error/message "should be an instance of java.sql.Connection or javax.sql.DataSource or db-spec map"}}))
-
-
 (defn convert-values
   "Convert the values in a row to the appropriate types."
   [types row]
@@ -125,9 +114,37 @@
          (into {}))))
 
 
+(defn prep-connection
+  "Prepare a connection for use in a query."
+  [connection]
+  (let [conn (cond (string? connection)
+                   (jdbc/get-datasource {:jdbcUrl connection})
+
+                   (map? connection)
+                   (let [{:keys [user password auto-commit]
+                          :or   {auto-commit false}} connection]
+                     (-> {:jdbcUrl     (connection/jdbc-url connection)
+                          :auto-commit auto-commit}
+                         (utils/assoc-some :user user :password password)
+                         (jdbc/get-datasource)))
+
+                   :else connection)]
+    (jdbc/get-connection conn)))
+
+
 (def query-params-spec
   [:map
-   [:connection connectable?]
+   [:connection
+    [:or :string
+     [:map
+      [:dbtype {:optional true} :string]
+      [:host {:optional true} :string]
+      [:port {:optional true} :int]
+      [:dbname {:optional true} :string]
+      [:jdbc-url {:optional true} :string]
+      [:user {:optional true} :string]
+      [:password {:optional true} :string]
+      [:auto-commit {:optional true :default false} :boolean]]]]
    [:query [:or map? [:cat :string [:* :any]]]]
    [:options {:optional true} map?]
    [:prefix-table? {:optional true} :boolean]
@@ -158,7 +175,7 @@
         rs-types    (atom {})]
     (.deleteOnExit result-file)
     (with-open [writer (io/writer result-file :append true)
-                conn   (jdbc/get-connection connection)]
+                conn   (prep-connection connection)]
       (let [append-row   (fn [row]
                            (append-row-to-file writer row)
                            (when preserve-types?
@@ -188,29 +205,5 @@
       (->rows-seq lines row-mapping-fn cleanup-fn))))
 
 
-(defn prep-connection
-  "Prepare the connection for the make-query action.
-   If the connection is a string, create a new connection using the string as the JDBC URL.
-   If the connection is a map, create a new connection using the map as the connection spec.
-   Otherwise, return the connection as is."
-  [action-spec]
-  (update-in action-spec [:params :connection]
-             (fn [{:keys [user password auto-commit]
-                   :or   {auto-commit false}
-                   :as   conn}]
-               (cond (string? conn)
-                     (jdbc/get-datasource {:jdbcUrl     conn
-                                           :auto-commit auto-commit})
-
-                     (map? conn)
-                     (-> {:jdbcUrl     (connection/jdbc-url conn)
-                          :auto-commit auto-commit}
-                         (utils/assoc-some :user user :password password)
-                         (jdbc/get-datasource))
-
-                     :else conn))))
-
-
 (def action
-  {:action make-query
-   :prep   prep-connection})
+  {:action make-query})

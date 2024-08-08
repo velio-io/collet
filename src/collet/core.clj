@@ -81,6 +81,7 @@
    :slicer  collet.slicer/slicer-action
    :jdbc    collet.jdbc/action
    :file    collet.file/write-file-action
+   :s3      collet.file/upload-file-action
    :queue   collet.queue/cues-action})
 
 

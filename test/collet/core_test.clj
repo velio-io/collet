@@ -99,12 +99,10 @@
       (is (= actual "param1: value1, param2: value2, state1: state-value"))))
 
   (testing "Predefined actions"
-    (let [http-action  (sut/compile-action {:type :http :name :http-test})
-          jdbc-action  (sut/compile-action {:type :jdbc :name :jdbc-test})
-          odata-action (sut/compile-action {:type :odata :name :odata-test})]
+    (let [http-action (sut/compile-action {:type :http :name :http-test})
+          jdbc-action (sut/compile-action {:type :jdbc :name :jdbc-test})]
       (is (fn? http-action))
-      (is (fn? jdbc-action))
-      (is (fn? odata-action)))))
+      (is (fn? jdbc-action)))))
 
 
 (deftest compile-and-run-task
