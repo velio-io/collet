@@ -12,6 +12,8 @@
    [collet.actions.counter :as collet.counter]
    [collet.actions.slicer :as collet.slicer]
    [collet.actions.jdbc :as collet.jdbc]
+   [collet.actions.file :as collet.file]
+   [collet.actions.queue :as collet.queue]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
    [collet.deps :as collet.deps])
@@ -78,8 +80,9 @@
    :counter collet.counter/counter-action
    :slicer  collet.slicer/slicer-action
    :jdbc    collet.jdbc/action
-   :odata   {:action (fn [])}
-   :format  {:action (fn [])}})
+   :file    collet.file/write-file-action
+   :s3      collet.file/upload-file-action
+   :queue   collet.queue/cues-action})
 
 
 (defn compile-action

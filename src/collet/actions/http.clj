@@ -9,13 +9,17 @@
    [java.io InputStream]))
 
 
-(defn read-json [^InputStream input keywordize]
+(defn read-json
+  "Reads a JSON object from an input stream and optionally keywordizes keys."
+  [^InputStream input keywordize]
   (when (some? input)
     (with-open [rdr (io/reader input)]
       (json/parse-stream rdr keywordize))))
 
 
-(defn wrap-rate-limiter [func]
+(defn wrap-rate-limiter
+  "Wraps a function with a rate limiter if one is provided in the options."
+  [func]
   (fn [{::keys [rate-limiter] :as options}]
     (if (some? rate-limiter)
       (dh/with-rate-limiter {:ratelimiter rate-limiter}
@@ -28,6 +32,10 @@
 
 
 (defn unexceptional-request-status?
+  "Returns true if the request status is not an exception.
+   By default, the following statuses are considered unexceptional:
+   200, 201, 202, 203, 204, 205, 206, 207, 300, 301, 302, 303, 304, 307, 308.
+   List of unexceptional statuses can be overridden by setting the :unexceptional-status key in the request map."
   [req status]
   ((or (:unexceptional-status req) unexceptional-status?)
    status))
@@ -38,7 +46,40 @@
       (wrap-rate-limiter)))
 
 
+(def request-params-spec
+  [:map
+   [:url
+    [:or :string
+     [:catn [:template-string :string] [:substitution [:* :any]]]]]
+   [:method {:optional true :default :get}
+    [:enum :get :post :put :delete :head :options :trace]]
+   [:keywordize {:optional true :default true}
+    :boolean]
+   [:as {:optional true}
+    [:enum :json :auto :text :stream :byte-array]]
+   [:content-type {:optional true}
+    [:enum :json]]
+   [:accept {:optional true}
+    [:enum :json]]
+   [:unexceptional-status {:optional true}
+    [:set :int]]
+   [:rate {:optional true}
+    :int]])
+
+
 (defn make-request
+  "Make an HTTP request and return the response.
+   The request map can contain the following keys:
+   :url - the URL to request
+   :method - the HTTP method to use (default - :get)
+   :keywordize - keywordize the keys in the response (default - true)
+   :as - the response format
+   :content-type - the content type of the request
+   :accept - the accept header of the request
+   :unexceptional-status - a set of unexceptional statuses
+   :rate - the rate limit for the request. How many requests per second are allowed."
+  {:malli/schema [:=> [:cat request-params-spec]
+                  :any]}
   [{:keys [url method keywordize as content-type accept]
     :or   {method :get keywordize true}
     :as   req-map}]
@@ -59,7 +100,9 @@
         (= as :json) (update :body read-json keywordize)))))
 
 
-(defn attach-rate-limiter [action-spec]
+(defn attach-rate-limiter
+  "Attaches a rate limiter to the action spec if a rate is provided."
+  [action-spec]
   (let [rate (get-in action-spec [:params :rate])]
     (cond-> action-spec
       (some? rate) (assoc-in [:params ::rate-limiter] (rl/rate-limiter {:rate rate})))))
