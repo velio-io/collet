@@ -7,6 +7,7 @@
   [:schema {:registry
             {::select-element [:or
                                :keyword
+                               :string
                                [:cat [:= :cond] [:vector :any]]
                                [:cat [:= :op] :keyword]
                                [:cat [:= :cat] [:* [:schema [:ref ::select-element]]]]
@@ -33,7 +34,7 @@
         (or (nil? result) (nil? step))
         nil
         ;; if the step is a keyword, try to get the value from the map
-        (keyword? step)
+        (or (keyword? step) (string? step))
         (let [found (when (map? result) (get result step))]
           (if (not (seq remaining))
             ;; we got to the end of the path, return the value if found

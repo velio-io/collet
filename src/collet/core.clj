@@ -9,6 +9,7 @@
    [diehard.core :as dh]
    [com.brunobonacci.mulog :as ml]
    [collet.actions.http :as collet.http]
+   [collet.actions.odata :as collet.odata]
    [collet.actions.counter :as collet.counter]
    [collet.actions.slicer :as collet.slicer]
    [collet.actions.jdbc :as collet.jdbc]
@@ -77,6 +78,7 @@
 
 (def actions-map
   {:http    collet.http/request-action
+   :odata   collet.odata/odata-action
    :counter collet.counter/counter-action
    :slicer  collet.slicer/slicer-action
    :jdbc    collet.jdbc/action

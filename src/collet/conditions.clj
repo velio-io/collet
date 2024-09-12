@@ -21,14 +21,16 @@
    :regex       #(re-matches %2 %1)
    :nil?        nil?
    :not-nil?    (comp not nil?)
-   :not=        not=})
+   :not=        not=
+   :empty?      empty?
+   :not-empty?  (comp not empty?)})
 
 
 (defn valid-condition-value?
   "Checks if the value of a condition is a valid keyword or a list of keywords"
   [condition-value]
   (if (sequential? condition-value)
-    (every? identity (map #(keyword? %) condition-value))
+    (every? identity (map #(or (keyword? %) (string? %)) condition-value))
     (keyword? condition-value)))
 
 
@@ -46,9 +48,20 @@
      true
 
      :else
-     (and ((-> condition->fn keys set)
-           (first condition))
+     (and (contains? condition->fn (first condition))
           (valid-condition-value? (second condition))))))
+
+
+(defn prep-args
+  "If argument is a vector, it will be replaced by the value in the data
+   at the path specified by the vector"
+  [args data]
+  (map
+   (fn [arg]
+     (if (vector? arg)
+       (get-in data arg)
+       arg))
+   args))
 
 
 (defn compile-condition
@@ -70,7 +83,7 @@
       (try
         (apply condition-fn
                (get-in data fields)
-               args)
+               (prep-args args data))
         (catch Exception e
           ;; condition didn't match
           false)))))
