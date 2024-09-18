@@ -272,15 +272,14 @@
    [:skip {:optional true} :int]
    [:count {:optional true} :boolean]
    [:follow-next-link {:optional true} :boolean]
-   [:get-total-count {:optional true} :boolean]
-   [:headers {:optional true} map?]
-   [:unexceptional-status {:optional true} [:set :int]]
-   [:rate {:optional true} :int]])
+   [:get-total-count {:optional true} :boolean]])
 
 
 (defn odata-request
   "Makes an OData request
-   Reuses the HTTP action to make the request but formats the request according to OData specs"
+   Reuses the HTTP action to make the request but formats the request according to OData specs
+   OData specific options: :service-url, :segment, :filter, :select, :expand, :order, :top, :skip, :count, :follow-next-link, :get-total-count
+   Also other HTTP options can be passed like :rate-limiter, :headers, :unexceptional-status, :rate, etc"
   ;; @TODO: function spec erroring with custom registry
   ;; {:malli/schema [:function {:registry registry}
   ;;                 [:=> [:cat odata-params-spec :any] :any]]}
@@ -289,14 +288,11 @@
         request   (-> params
                       (assoc :next-link next-link)
                       (make-odata-request-map))]
-    (-> request
-        (merge {:content-type :json
+    (-> (merge (dissoc params [:service-url :segment :filter :select :expand :order :top :skip :count :follow-next-link :get-total-count])
+               {:content-type :json
                 :as           :json
                 :keywordize   false}
-               (select-keys params [::collet.http/rate-limiter
-                                    :headers
-                                    :unexceptional-status
-                                    :rate]))
+               request)
         (collet.http/make-request))))
 
 
