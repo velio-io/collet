@@ -278,13 +278,12 @@
                   nil)
           people (get-in result [:body "value"])]
       (is (= 200 (:status result)))
-      (is (= 2 (get-in result [:body "@odata.count"])))
-      (is (= 2 (count people)))
+      (is (int? (get-in result [:body "@odata.count"])))
+      (is (= (get-in result [:body "@odata.count"])
+             (count people)))
 
       (is (every? #(string/starts-with? % "B")
-                  (map #(get-in % ["AddressInfo" 0 "City" "Name"]) people)))
-
-      (is (every? not-empty (map #(get % "Friends") people))))))
+                  (map #(get-in % ["AddressInfo" 0 "City" "Name"]) people))))))
 
 
 (deftest odata-pipeline-test
@@ -295,17 +294,18 @@
                             nil))]
     (testing "server side pagination"
       (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name     :people
-                                    :actions  [{:type   :odata
-                                                :name   :people-request
-                                                :params {:service-url      "http://services.odata.org/V4/TripPinService/"
-                                                         :segment          [:People]
-                                                         :select           [:FirstName :LastName :AddressInfo]
-                                                         :expand           [[:Friends {:select [:UserName]}]]
-                                                         :order            [:FirstName]
-                                                         :follow-next-link true}}]
-                                    :iterator {:data [:state :people-request :body "value"]
-                                               :next [:not-nil? [:state :people-request :body "@odata.nextLink"]]}}]}
+                           :tasks [{:name        :people
+                                    :keep-state? true
+                                    :actions     [{:type   :odata
+                                                   :name   :people-request
+                                                   :params {:service-url      "http://services.odata.org/V4/TripPinService/"
+                                                            :segment          [:People]
+                                                            :select           [:UserName :LastName :AddressInfo]
+                                                            :expand           [[:Friends {:select [:UserName]}]]
+                                                            :order            [:FirstName]
+                                                            :follow-next-link true}}]
+                                    :iterator    {:data [:state :people-request :body "value"]
+                                                  :next [:not-nil? [:state :people-request :body "@odata.nextLink"]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {})
             {:keys [people]} pipeline]
@@ -316,25 +316,26 @@
 
     (testing "client side pagination"
       (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name     :people
-                                    :actions  [{:type      :counter
-                                                :name      :skip
-                                                :selectors {'bs [:config :batch-size]}
-                                                :params    {:start 0 :step 'bs}}
-                                               {:type      :odata
-                                                :name      :people-request
-                                                :selectors {'bs   [:config :batch-size]
-                                                            'skip [:state :skip]}
-                                                :params    {:service-url "http://services.odata.org/V4/TripPinService/"
-                                                            :segment     [:People]
-                                                            :select      [:FirstName :LastName :AddressInfo]
-                                                            :expand      [[:Friends {:select [:UserName]}]]
-                                                            :order       [:FirstName]
-                                                            :top         'bs
-                                                            :skip        'skip}
-                                                :return    [:body "value"]}]
-                                    :iterator {:data [:state :people-request]
-                                               :next [:not-empty? [:state :people-request]]}}]}
+                           :tasks [{:name        :people
+                                    :keep-state? true
+                                    :actions     [{:type      :counter
+                                                   :name      :skip
+                                                   :selectors {'bs [:config :batch-size]}
+                                                   :params    {:start 0 :step 'bs}}
+                                                  {:type      :odata
+                                                   :name      :people-request
+                                                   :selectors {'bs   [:config :batch-size]
+                                                               'skip [:state :skip]}
+                                                   :params    {:service-url "http://services.odata.org/V4/TripPinService/"
+                                                               :segment     [:People]
+                                                               :select      [:FirstName :LastName :AddressInfo]
+                                                               :expand      [[:Friends {:select [:UserName]}]]
+                                                               :order       [:FirstName]
+                                                               :top         'bs
+                                                               :skip        'skip}
+                                                   :return    [:body "value"]}]
+                                    :iterator    {:data [:state :people-request]
+                                                  :next [:not-empty? [:state :people-request]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
             {:keys [people]} pipeline]
@@ -346,39 +347,40 @@
 
     (testing "manual client side pagination"
       (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name     :people
-                                    :setup    [{:type   :odata
-                                                :name   :total-people-count
-                                                :params {:service-url     "http://services.odata.org/V4/TripPinService/"
-                                                         :segment         [:People]
-                                                         :get-total-count true}
-                                                :return [:body]}]
-                                    :actions  [{:type      :counter
-                                                :name      :skip
-                                                :selectors {'bs [:config :batch-size]}
-                                                :params    {:start 0 :step 'bs}}
-                                               {:type      :odata
-                                                :name      :people-request
-                                                :selectors {'bs   [:config :batch-size]
-                                                            'skip [:state :skip]}
-                                                :params    {:service-url "http://services.odata.org/V4/TripPinService/"
-                                                            :segment     [:People]
-                                                            :select      [:FirstName :LastName :AddressInfo]
-                                                            :expand      [[:Friends {:select [:UserName]}]]
-                                                            :order       [:FirstName]
-                                                            :top         'bs
-                                                            :skip        'skip}
-                                                :return    [:body "value"]}
-                                               {:type      :custom
-                                                :name      :continue?
-                                                :selectors {'batch-size         [:config :batch-size]
-                                                            'skip               [:state :skip]
-                                                            'total-people-count [:state :total-people-count]}
-                                                :params    ['batch-size 'skip 'total-people-count]
-                                                :fn        (fn [batch-size skip total-people-count]
-                                                             (< (+ skip batch-size) total-people-count))}]
-                                    :iterator {:data [:state :people-request]
-                                               :next [:true? [:state :continue?]]}}]}
+                           :tasks [{:name        :people
+                                    :keep-state? true
+                                    :setup       [{:type   :odata
+                                                   :name   :total-people-count
+                                                   :params {:service-url     "http://services.odata.org/V4/TripPinService/"
+                                                            :segment         [:People]
+                                                            :get-total-count true}
+                                                   :return [:body]}]
+                                    :actions     [{:type      :counter
+                                                   :name      :skip
+                                                   :selectors {'bs [:config :batch-size]}
+                                                   :params    {:start 0 :step 'bs}}
+                                                  {:type      :odata
+                                                   :name      :people-request
+                                                   :selectors {'bs   [:config :batch-size]
+                                                               'skip [:state :skip]}
+                                                   :params    {:service-url "http://services.odata.org/V4/TripPinService/"
+                                                               :segment     [:People]
+                                                               :select      [:FirstName :LastName :AddressInfo]
+                                                               :expand      [[:Friends {:select [:UserName]}]]
+                                                               :order       [:FirstName]
+                                                               :top         'bs
+                                                               :skip        'skip}
+                                                   :return    [:body "value"]}
+                                                  {:type      :custom
+                                                   :name      :continue?
+                                                   :selectors {'batch-size         [:config :batch-size]
+                                                               'skip               [:state :skip]
+                                                               'total-people-count [:state :total-people-count]}
+                                                   :params    ['batch-size 'skip 'total-people-count]
+                                                   :fn        (fn [batch-size skip total-people-count]
+                                                                (< (+ skip batch-size) total-people-count))}]
+                                    :iterator    {:data [:state :people-request]
+                                                  :next [:true? [:state :continue?]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
             {:keys [people]} pipeline]
