@@ -41,9 +41,27 @@
    status))
 
 
+(defn wrap-unexceptional-status
+  "Wraps a function with a check for unexceptional statuses.
+   If the status is not unexceptional, throws an exception."
+  [func]
+  (fn [req]
+    (let [response @(func req)]
+      (if (or (some? (:error response))
+              (not (unexceptional-request-status? req (:status response))))
+        (let [error (or (:error response)
+                        (some-> (:body response) (read-json true) :error :message))]
+          (throw (ex-info (str "Request failed. " error)
+                          {:status  (:status response)
+                           :error   error
+                           :request req})))
+        response))))
+
+
 (def http-request
   (-> http/request
-      (wrap-rate-limiter)))
+      (wrap-rate-limiter)
+      (wrap-unexceptional-status)))
 
 
 (def request-params-spec
@@ -89,15 +107,9 @@
                    (= content-type :json) (assoc-in [:headers "Content-Type"] "application/json")
                    (= accept :json) (assoc-in [:headers "Accept"] "application/json")
                    :always (assoc :method method))
-        response @(http-request request)]
-    (if (or (some? (:error response))
-            (not (unexceptional-request-status? request (:status response))))
-      (throw (ex-info "Request failed" {:status  (:status response)
-                                        :error   (:error response)
-                                        :request request}))
-      ;; return response
-      (cond-> response
-        (= as :json) (update :body read-json keywordize)))))
+        response (http-request request)]
+    (cond-> response
+      (= as :json) (update :body read-json keywordize))))
 
 
 (defn attach-rate-limiter
