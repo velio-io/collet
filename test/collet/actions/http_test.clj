@@ -47,48 +47,49 @@
         artists (atom [])]
     (testing "extracting a list of events with pagination"
       (let [pipeline-spec {:name  :city-events
-                           :tasks [{:name     :area-events
-                                    :setup    [{:type      :clj/format
-                                                :name      :area-query
-                                                :selectors {'city [:config :city]}
-                                                :params    ["area:%s AND type:City" 'city]}
-                                               {:type      :http
-                                                :name      :area-request
-                                                :selectors {'area-query [:state :area-query]}
-                                                :params    {:url          "https://musicbrainz.org/ws/2/area"
-                                                            :accept       :json
-                                                            :as           :json
-                                                            :query-params {:limit 1
-                                                                           :query 'area-query}}
-                                                :return    [:body :areas [:cat :id]]}
-                                               {:type      :clj/ffirst
-                                                :name      :area-id
-                                                :selectors '{area-ids [:state :area-request]}
-                                                :params    '[area-ids]}
-                                               {:type      :clj/format
-                                                :name      :events-query
-                                                :selectors '{area-id [:state :area-id]}
-                                                :params    ["aid:%s AND type:Concert" 'area-id]}]
-                                    :actions  [{:type :counter
-                                                :name :req-count}
-                                               {:type      :clj/*
-                                                :name      :offset
-                                                :selectors {'req-count [:state :req-count]}
-                                                :params    ['req-count 10]}
-                                               {:type      :http
-                                                :name      :events-request
-                                                :selectors {'events-query [:state :events-query]
-                                                            'offset       [:state :offset]}
-                                                :params    {:url          "https://musicbrainz.org/ws/2/event"
-                                                            :accept       :json
-                                                            :as           :json
-                                                            :rate         1
-                                                            :query-params {:limit  10
-                                                                           :offset 'offset
-                                                                           :query  'events-query}}
-                                                :return    [:body :events]}]
-                                    :iterator {:data [:state :events-request]
-                                               :next [:< [:state :req-count] 3]}}]}
+                           :tasks [{:name        :area-events
+                                    :keep-state? true
+                                    :setup       [{:type      :clj/format
+                                                   :name      :area-query
+                                                   :selectors {'city [:config :city]}
+                                                   :params    ["area:%s AND type:City" 'city]}
+                                                  {:type      :http
+                                                   :name      :area-request
+                                                   :selectors {'area-query [:state :area-query]}
+                                                   :params    {:url          "https://musicbrainz.org/ws/2/area"
+                                                               :accept       :json
+                                                               :as           :json
+                                                               :query-params {:limit 1
+                                                                              :query 'area-query}}
+                                                   :return    [:body :areas [:cat :id]]}
+                                                  {:type      :clj/ffirst
+                                                   :name      :area-id
+                                                   :selectors '{area-ids [:state :area-request]}
+                                                   :params    '[area-ids]}
+                                                  {:type      :clj/format
+                                                   :name      :events-query
+                                                   :selectors '{area-id [:state :area-id]}
+                                                   :params    ["aid:%s AND type:Concert" 'area-id]}]
+                                    :actions     [{:type :counter
+                                                   :name :req-count}
+                                                  {:type      :clj/*
+                                                   :name      :offset
+                                                   :selectors {'req-count [:state :req-count]}
+                                                   :params    ['req-count 10]}
+                                                  {:type      :http
+                                                   :name      :events-request
+                                                   :selectors {'events-query [:state :events-query]
+                                                               'offset       [:state :offset]}
+                                                   :params    {:url          "https://musicbrainz.org/ws/2/event"
+                                                               :accept       :json
+                                                               :as           :json
+                                                               :rate         1
+                                                               :query-params {:limit  10
+                                                                              :offset 'offset
+                                                                              :query  'events-query}}
+                                                   :return    [:body :events]}]
+                                    :iterator    {:data [:state :events-request]
+                                                  :next [:< [:state :req-count] 3]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:city "London"})
             {:keys [area-events]} pipeline]
@@ -97,26 +98,27 @@
 
     (testing "extracting all artists from events"
       (let [pipeline-spec {:name  :city-events-artists
-                           :tasks [{:name     :event-artists-rating
-                                    :actions  [{:type      :slicer
-                                                :name      :event-artists
-                                                :selectors {'events [:config :events]}
-                                                :params    {:sequence   'events
-                                                            :cat?       true
-                                                            :flatten-by {:artist-id [:relations [:cat [:cond [:not-nil? :artist]] :artist :id]]}
-                                                            :keep-keys  {:event-id [:id]}}}
-                                               {:type      :http
-                                                :name      :artist-details
-                                                :selectors {'artist [:state :event-artists :current :artist-id]}
-                                                :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist]
-                                                            :accept       :json
-                                                            :as           :json
-                                                            :rate         1
-                                                            :query-params {:inc "ratings"}}
-                                                :return    [:body]}]
-                                    :iterator {:data [{:artist-rate [:state :artist-details :rating :value]
-                                                       :event-id    [:state :event-artists :current :event-id]}]
-                                               :next [:not-nil? [:state :event-artists :next]]}}]}
+                           :tasks [{:name        :event-artists-rating
+                                    :keep-state? true
+                                    :actions     [{:type      :slicer
+                                                   :name      :event-artists
+                                                   :selectors {'events [:config :events]}
+                                                   :params    {:sequence   'events
+                                                               :cat?       true
+                                                               :flatten-by {:artist-id [:relations [:cat [:cond [:not-nil? :artist]] :artist :id]]}
+                                                               :keep-keys  {:event-id [:id]}}}
+                                                  {:type      :http
+                                                   :name      :artist-details
+                                                   :selectors {'artist [:state :event-artists :current :artist-id]}
+                                                   :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist]
+                                                               :accept       :json
+                                                               :as           :json
+                                                               :rate         1
+                                                               :query-params {:inc "ratings"}}
+                                                   :return    [:body]}]
+                                    :iterator    {:data [{:artist-rate [:state :artist-details :rating :value]
+                                                          :event-id    [:state :event-artists :current :event-id]}]
+                                                  :next [:not-nil? [:state :event-artists :next]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:events @events})
             {:keys [event-artists-rating]} pipeline
@@ -129,31 +131,32 @@
 
     (testing "combining artists ratings with events"
       (let [pipeline-spec {:name  :city-events-artists
-                           :tasks [{:name     :best-events
-                                    :actions  [{:type      :slicer
-                                                :name      :ratings-with-event
-                                                :selectors {'ratings [:config :artists]
-                                                            'events  [:config :events]}
-                                                :params    {:sequence 'ratings
-                                                            :group-by [:event-id]
-                                                            :join     {:sequence 'events
-                                                                       :cat?     true
-                                                                       :on       {:source [[:op :first] :event-id]
-                                                                                  :target [:id]}}}}
-                                               {:type      :custom
-                                                :name      :rated-events
-                                                :selectors {'ratings-event [:state :ratings-with-event :current]}
-                                                :params    ['ratings-event]
-                                                :fn        (fn [[ratings event]]
-                                                             (let [ratings' (->> ratings
-                                                                                 (map :artist-rate)
-                                                                                 (filter (comp not nil?)))
-                                                                   mean     (double (/ (apply + ratings') (count ratings)))]
-                                                               {:id     (:id event)
-                                                                :name   (:name event)
-                                                                :rating mean}))}]
-                                    :iterator {:data [:state :rated-events]
-                                               :next [:not-nil? [:state :ratings-with-event :next]]}}]}
+                           :tasks [{:name        :best-events
+                                    :keep-state? true
+                                    :actions     [{:type      :slicer
+                                                   :name      :ratings-with-event
+                                                   :selectors {'ratings [:config :artists]
+                                                               'events  [:config :events]}
+                                                   :params    {:sequence 'ratings
+                                                               :group-by [:event-id]
+                                                               :join     {:sequence 'events
+                                                                          :cat?     true
+                                                                          :on       {:source [[:op :first] :event-id]
+                                                                                     :target [:id]}}}}
+                                                  {:type      :custom
+                                                   :name      :rated-events
+                                                   :selectors {'ratings-event [:state :ratings-with-event :current]}
+                                                   :params    ['ratings-event]
+                                                   :fn        (fn [[ratings event]]
+                                                                (let [ratings' (->> ratings
+                                                                                    (map :artist-rate)
+                                                                                    (filter (comp not nil?)))
+                                                                      mean     (double (/ (apply + ratings') (count ratings)))]
+                                                                  {:id     (:id event)
+                                                                   :name   (:name event)
+                                                                   :rating mean}))}]
+                                    :iterator    {:data [:state :rated-events]
+                                                  :next [:not-nil? [:state :ratings-with-event :next]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:events  @events
                                       :artists @artists})

@@ -20,13 +20,9 @@ Kibana is available at `http://localhost:9000`
 
 
 ### TODO
-- clean up tasks unused data (not required for other tasks)
-- direct dependencies between tasks
+- documentation
 - add action parameters to logs
   - obfuscate PII data
-
-- documentation
-- add odata action
 
 - tmd for reading datasets
 - parallel tasks execution
