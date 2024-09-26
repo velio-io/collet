@@ -78,6 +78,7 @@
 
 (def actions-map
   {:http    collet.http/request-action
+   :oauth2  collet.http/oauth2-action
    :odata   collet.odata/odata-action
    :counter collet.counter/counter-action
    :slicer  collet.slicer/slicer-action

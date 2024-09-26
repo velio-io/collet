@@ -1,6 +1,8 @@
 (ns collet.actions.http
   (:require
    [clojure.java.io :as io]
+   [clojure.string :as string]
+   [collet.utils :as utils]
    [org.httpkit.client :as http]
    [cheshire.core :as json]
    [diehard.core :as dh]
@@ -82,7 +84,9 @@
    [:unexceptional-status {:optional true}
     [:set :int]]
    [:rate {:optional true}
-    :int]])
+    :int]
+   [:basic-auth {:optional true}
+    [:tuple :string :string]]])
 
 
 (defn make-request
@@ -95,7 +99,8 @@
    :content-type - the content type of the request
    :accept - the accept header of the request
    :unexceptional-status - a set of unexceptional statuses
-   :rate - the rate limit for the request. How many requests per second are allowed."
+   :rate - the rate limit for the request. How many requests per second are allowed.
+   :basic-auth - a vector of username and password for basic authentication."
   {:malli/schema [:=> [:cat request-params-spec]
                   :any]}
   [{:keys [url method keywordize as content-type accept]
@@ -123,3 +128,45 @@
 (def request-action
   {:action make-request
    :prep   attach-rate-limiter})
+
+
+(defn ->scope [scope]
+  (cond->> scope (sequential? scope) (string/join " ")))
+
+
+(def oauth2-params
+  [:map
+   [:url [:or :string
+          [:catn [:template-string :string] [:substitution [:* :any]]]]]
+   [:method {:optional true :default :post} [:enum :get :post]]
+   [:client-id {:optional true} :string]
+   [:client-secret {:optional true} :string]
+   [:scope {:optional true} [:or :string [:+ :string]]]
+   [:grant-type {:optional true} :string]
+   [:auth-data {:optional true} map?]
+   [:as {:optional true}
+    [:enum :json :auto :text :stream :byte-array]]
+   [:keywordize {:optional true} :boolean]])
+
+
+(defn get-oauth2-token
+  "Get an OAuth2 token using the provided credentials."
+  {:malli/schema [:=> [:cat oauth2-params]
+                  :any]}
+  [{:keys [url method client-id client-secret scope grant-type auth-data as keywordize]
+    :or   {as :json keywordize true method :post}}]
+  (make-request
+   {:url         url
+    :method      method
+    :form-params (->> (utils/assoc-some {}
+                        :client_id client-id
+                        :client_secret client-secret
+                        :grant_type grant-type
+                        :scope (->scope scope))
+                      (merge auth-data))
+    :as          as
+    :keywordize  keywordize}))
+
+
+(def oauth2-action
+  {:action get-oauth2-token})
