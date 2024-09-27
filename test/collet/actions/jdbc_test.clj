@@ -163,13 +163,14 @@
                       {:name  :data-types
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
-                       :tasks [{:name    :query
-                                :actions [{:name      :query-action
-                                           :type      :jdbc
-                                           :selectors {'connection [:config :connection]}
-                                           :params    {:connection 'connection
-                                                       :query      {:select [:*]
-                                                                    :from   :data-types}}}]}]})
+                       :tasks [{:name        :query
+                                :keep-state? true
+                                :actions     [{:name      :query-action
+                                               :type      :jdbc
+                                               :selectors {'connection [:config :connection]}
+                                               :params    {:connection 'connection
+                                                           :query      {:select [:*]
+                                                                        :from   :data-types}}}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-pg-data-types conn))
             _        @(pipeline {:connection connection-map})
@@ -205,15 +206,16 @@
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]
                                               [next.jdbc.types :as types]]}
-                       :tasks [{:name    :query
-                                :actions [{:name      :query-action
-                                           :type      :jdbc
-                                           :selectors '{connection [:config :connection]
-                                                        mood       [:config :mood]}
-                                           :params    '{:connection connection
-                                                        :query      {:select [:*]
-                                                                     :from   :data-types
-                                                                     :where  [:= :mood_col (types/as-other mood)]}}}]}]})
+                       :tasks [{:name        :query
+                                :keep-state? true
+                                :actions     [{:name      :query-action
+                                               :type      :jdbc
+                                               :selectors '{connection [:config :connection]
+                                                            mood       [:config :mood]}
+                                               :params    '{:connection connection
+                                                            :query      {:select [:*]
+                                                                         :from   :data-types
+                                                                         :where  [:= :mood_col (types/as-other mood)]}}}]}]})
             _        @(pipeline {:connection connection-map
                                  :mood       "sad"})
             result   (-> pipeline :query first)]
@@ -225,15 +227,16 @@
                       {:name  :data-types
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
-                       :tasks [{:name    :query
-                                :actions [{:name      :query-action
-                                           :type      :jdbc
-                                           :selectors {'connection [:config :connection]}
-                                           :params    {:connection      'connection
-                                                       :preserve-types? true
-                                                       :prefix-table?   false
-                                                       :query           {:select [:*]
-                                                                         :from   :data-types}}}]}]})
+                       :tasks [{:name        :query
+                                :keep-state? true
+                                :actions     [{:name      :query-action
+                                               :type      :jdbc
+                                               :selectors {'connection [:config :connection]}
+                                               :params    {:connection      'connection
+                                                           :preserve-types? true
+                                                           :prefix-table?   false
+                                                           :query           {:select [:*]
+                                                                             :from   :data-types}}}]}]})
             _        @(pipeline {:connection connection-map})
             result   (-> pipeline :query first)]
         (are [key expected] (= expected (-> result first key))
@@ -292,15 +295,16 @@
       (let [pipeline (collet/compile-pipeline
                       {:name  :employees
                        :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
-                       :tasks [{:name    :query
-                                :actions [{:name      :query-action
-                                           :type      :jdbc
-                                           :selectors {'connection [:config :connection]}
-                                           :params    {:connection 'connection
-                                                       :query      {:select   [:*]
-                                                                    :from     :employees
-                                                                    :order-by [:id]}}
-                                           :return    [[:cat :employees/user_name]]}]}]})
+                       :tasks [{:name        :query
+                                :keep-state? true
+                                :actions     [{:name      :query-action
+                                               :type      :jdbc
+                                               :selectors {'connection [:config :connection]}
+                                               :params    {:connection 'connection
+                                                           :query      {:select   [:*]
+                                                                        :from     :employees
+                                                                        :order-by [:id]}}
+                                               :return    [[:cat :employees/user_name]]}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-mysql-table conn))
             _        @(pipeline {:connection connection-map})
@@ -370,23 +374,24 @@
       (let [pipeline (collet/compile-pipeline
                       {:name  :products-bought-by-users
                        :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
-                       :tasks [{:name    :query
-                                :actions [{:name      :query-action
-                                           :type      :jdbc
-                                           :selectors {'connection [:config :connection]}
-                                           :params    {:connection 'connection
-                                                       :query      {:select   [:u/username
-                                                                               :p/product_name
-                                                                               [[:sum :oi/quantity] :total-quantity]
-                                                                               [[:sum [:* :oi/price :oi/quantity]] :total-amount]]
-                                                                    :from     [[:Users :u]]
-                                                                    :join     [[:Orders :o] [:= :u.user_id :o.user_id]
-                                                                               [:OrderItems :oi] [:= :o.order_id :oi.order_id]
-                                                                               [:Products :p] [:= :oi.product_id :p.product_id]]
-                                                                    :group-by [:u.username :p/product_name]
-                                                                    :order-by [:u.username :p.product_name]}
-                                                       :options    {:dialect :mysql
-                                                                    :quoted  false}}}]}]})
+                       :tasks [{:name        :query
+                                :keep-state? true
+                                :actions     [{:name      :query-action
+                                               :type      :jdbc
+                                               :selectors {'connection [:config :connection]}
+                                               :params    {:connection 'connection
+                                                           :query      {:select   [:u/username
+                                                                                   :p/product_name
+                                                                                   [[:sum :oi/quantity] :total-quantity]
+                                                                                   [[:sum [:* :oi/price :oi/quantity]] :total-amount]]
+                                                                        :from     [[:Users :u]]
+                                                                        :join     [[:Orders :o] [:= :u.user_id :o.user_id]
+                                                                                   [:OrderItems :oi] [:= :o.order_id :oi.order_id]
+                                                                                   [:Products :p] [:= :oi.product_id :p.product_id]]
+                                                                        :group-by [:u.username :p/product_name]
+                                                                        :order-by [:u.username :p.product_name]}
+                                                           :options    {:dialect :mysql
+                                                                        :quoted  false}}}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (create-tables conn)
                        (populate-orders-data conn))

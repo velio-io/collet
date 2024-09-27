@@ -214,16 +214,17 @@
                                   :actions [{:type :custom
                                              :name :action1
                                              :fn   (constantly 1)}]}
-                                 {:name    :task2
-                                  :inputs  [:task1]
-                                  :actions [{:type      :custom
-                                             :name      :action2
-                                             :selectors '{val1 [:inputs :task1]}
-                                             :params    '[val1]
-                                             :fn        (fn [v1]
-                                                          ;; task result is a sequable/reducible
-                                                          (-> (last v1)
-                                                              (+ 2)))}]}]}
+                                 {:name        :task2
+                                  :inputs      [:task1]
+                                  :keep-state? true
+                                  :actions     [{:type      :custom
+                                                 :name      :action2
+                                                 :selectors '{val1 [:inputs :task1]}
+                                                 :params    '[val1]
+                                                 :fn        (fn [v1]
+                                                              ;; task result is a sequable/reducible
+                                                              (-> (last v1)
+                                                                  (+ 2)))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
       (is (m/validate sut/pipeline? pipeline))
       (is (= :pending (sut/pipe-status pipeline)))
@@ -242,16 +243,17 @@
                                                      (Thread/sleep 2000)
                                                      (println "Task 1")
                                                      1)}]}
-                                 {:name    :task2
-                                  :inputs  [:task1]
-                                  :actions [{:type      :custom
-                                             :name      :action2
-                                             :selectors '{val1 [:inputs :task1 [:op :first]]}
-                                             :params    '[val1]
-                                             :fn        (fn [v1]
-                                                          (Thread/sleep 2000)
-                                                          (println "Task 2")
-                                                          (+ v1 2))}]}]}]
+                                 {:name        :task2
+                                  :inputs      [:task1]
+                                  :keep-state? true
+                                  :actions     [{:type      :custom
+                                                 :name      :action2
+                                                 :selectors '{val1 [:inputs :task1 [:op :first]]}
+                                                 :params    '[val1]
+                                                 :fn        (fn [v1]
+                                                              (Thread/sleep 2000)
+                                                              (println "Task 2")
+                                                              (+ v1 2))}]}]}]
       (let [pipeline-1 (sut/compile-pipeline pipeline-spec)]
         @(sut/start pipeline-1 {})
         (is (= :done (sut/pipe-status pipeline-1)))
@@ -303,15 +305,16 @@
 
 (deftest pipeline-with-iterator-test
   (let [pipe-spec {:name  :test-pipeline
-                   :tasks [{:name     :counting-task
-                            :actions  [{:type      :custom
-                                        :name      :count-action
-                                        :selectors '{count [:state :count-action]}
-                                        :params    '[count]
-                                        :fn        (fn [c]
-                                                     (inc (or c 0)))}]
-                            :iterator {:data [:state :count-action]
-                                       :next [:< [:state :count-action] 10]}}]}
+                   :tasks [{:name        :counting-task
+                            :keep-state? true
+                            :actions     [{:type      :custom
+                                           :name      :count-action
+                                           :selectors '{count [:state :count-action]}
+                                           :params    '[count]
+                                           :fn        (fn [c]
+                                                        (inc (or c 0)))}]
+                            :iterator    {:data [:state :count-action]
+                                          :next [:< [:state :count-action] 10]}}]}
         pipeline  (sut/compile-pipeline pipe-spec)]
     @(pipeline {})
     (is (= (list 1 2 3 4 5)

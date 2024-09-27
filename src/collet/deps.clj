@@ -49,7 +49,7 @@
         (pom/add-dependencies
          :coordinates coordinates
          :repositories maven-and-clojars
-         :classloader (.getParent @Compiler/LOADER)))
+         :classloader (.getParent ^DynamicClassLoader @Compiler/LOADER)))
 
       ;; add deps to the current classloader
       (pom/add-dependencies

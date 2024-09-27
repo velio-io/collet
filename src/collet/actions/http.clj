@@ -153,19 +153,21 @@
   "Get an OAuth2 token using the provided credentials."
   {:malli/schema [:=> [:cat oauth2-params]
                   :any]}
-  [{:keys [url method client-id client-secret scope grant-type auth-data as keywordize]
+  [{:keys [url method client-id client-secret scope grant-type auth-data as keywordize headers basic-auth]
     :or   {as :json keywordize true method :post}}]
   (make-request
-   {:url         url
-    :method      method
-    :form-params (->> (utils/assoc-some {}
-                        :client_id client-id
-                        :client_secret client-secret
-                        :grant_type grant-type
-                        :scope (->scope scope))
-                      (merge auth-data))
-    :as          as
-    :keywordize  keywordize}))
+   (utils/assoc-some {:url         url
+                      :method      method
+                      :form-params (->> (utils/assoc-some {}
+                                          :client_id client-id
+                                          :client_secret client-secret
+                                          :grant_type grant-type
+                                          :scope (->scope scope))
+                                        (merge auth-data))
+                      :as          as
+                      :keywordize  keywordize}
+     :basic-auth basic-auth
+     :headers headers)))
 
 
 (def oauth2-action

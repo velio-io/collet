@@ -47,7 +47,7 @@
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
     [:map-of :symbol collet.select/select-path]]
-   [:fn {:optional true} fn?]
+   [:fn {:optional true} [:or fn? list?]]
    [:return {:optional true}
     collet.select/select-path]])
 
@@ -103,7 +103,12 @@
                              (-> (name action-type) symbol resolve)
                              ;; Custom functions
                              (= action-type :custom)
-                             (:fn action-spec)
+                             (let [func (:fn action-spec)]
+                               (if (list? func)
+                                 ;; if the function is a list, evaluate it
+                                 ;; TODO might be dangerous to eval arbitrary code
+                                 (eval func)
+                                 func))
                              ;; Predefined actions
                              predefined-action?
                              (get-in actions-map [action-type :action])
@@ -353,55 +358,59 @@
     (let [worker (future
                   (ml/with-context {:app-name "collet" :pipeline-name name :pipeline-id id}
                     (ml/trace :collet/pipeline-execution []
-                      ;; executes tasks one by one
-                      (loop [tq (:tasks-queue @state)]
-                        (if-some [task-key (first tq)]
-                          ;; prepare task context
-                          (let [{::keys [task-fn] :keys [inputs]} (get tasks task-key)
-                                inputs-map (reduce (fn [is i]
-                                                     (assoc is i (get-in @state [:results i])))
-                                                   {} inputs)
-                                context    (-> (->context config)
-                                               (assoc :inputs inputs-map))]
-                            (let [exec-status (ml/trace :collet/starting-task [:task task-key]
-                                                (try
-                                                  (->> (task-fn context)
-                                                       (seq)
-                                                       (doall) ;; release lazy seq
-                                                       (swap! state assoc-in [:results task-key]))
-                                                  ;; update tasks queue
-                                                  (swap! state update :tasks-queue rest)
-                                                  :continue
-                                                  (catch Exception e
-                                                    (let [root-cause (->> (iterate ex-cause e)
-                                                                          (take-while identity)
-                                                                          (last))]
-                                                      (if (instance? InterruptedException root-cause)
-                                                        ;; if the exception is an InterruptedException
-                                                        ;; it means the pipeline was stopped externally
-                                                        ;; no need to log it and propagate this error
-                                                        :interrupted
+                      (let [pipe-graph (->pipeline-graph tasks)]
+                        ;; executes tasks one by one
+                        (loop [tq (:tasks-queue @state)]
+                          (if-some [task-key (first tq)]
+                            ;; prepare task context
+                            (let [{::keys [task-fn] :keys [inputs keep-state?]} (get tasks task-key)
+                                  inputs-map (reduce (fn [is i]
+                                                       (assoc is i (get-in @state [:results i])))
+                                                     {} inputs)
+                                  context    (-> (->context config)
+                                                 (assoc :inputs inputs-map))]
+                              (let [exec-status (ml/trace :collet/starting-task [:task task-key]
+                                                  (try
+                                                    (let [task-result     (->> (task-fn context)
+                                                                               (seq)
+                                                                               ;; release lazy seq
+                                                                               (doall))
+                                                          has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
+                                                      (when (or keep-state? has-dependents?)
+                                                        (swap! state assoc-in [:results task-key] task-result)))
+                                                    ;; update tasks queue
+                                                    (swap! state update :tasks-queue rest)
+                                                    :continue
+                                                    (catch Exception e
+                                                      (let [root-cause (->> (iterate ex-cause e)
+                                                                            (take-while identity)
+                                                                            (last))]
+                                                        (if (instance? InterruptedException root-cause)
+                                                          ;; if the exception is an InterruptedException
+                                                          ;; it means the pipeline was stopped externally
+                                                          ;; no need to log it and propagate this error
+                                                          :interrupted
 
-                                                        ;; throw the exception for any other case
-                                                        (let [{:keys [task action]} (ex-data e)
-                                                              original-error (ex-message root-cause)
-                                                              msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
-                                                                                     original-error task action)]
-                                                          (ml/log :collet/pipeline-execution-failed
-                                                                  :message msg :task task :action action :exception e)
-                                                          (swap! state assoc
-                                                                 :status :failed
-                                                                 :error {:message msg :task task :action action :exception e})
-                                                          (throw e)))))))]
-                              (if (not= :continue exec-status)
-                                exec-status
-                                ;; continue with the next task
-                                (recur (rest tq)))))
-                          ;; all tasks are done
-                          (do
-                            (ml/log :collet/pipeline-execution-finished)
-                            (swap! state assoc :status :done)
-                            :done))))))]
+                                                          ;; throw the exception for any other case
+                                                          (let [{:keys [task action]} (ex-data e)
+                                                                original-error (ex-message root-cause)
+                                                                msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
+                                                                                       original-error task action)]
+                                                            (ml/log :collet/pipeline-execution-failed
+                                                                    :message msg :task task :action action :exception e)
+                                                            (swap! state assoc
+                                                                   :status :failed
+                                                                   :error {:message msg :task task :action action :exception e})
+                                                            (throw e)))))))]
+                                (if (not= :continue exec-status)
+                                  exec-status
+                                  ;; continue with the next task
+                                  (recur (rest tq)))))
+                            ;; all tasks are done
+                            (do
+                              (ml/log :collet/pipeline-execution-finished)
+                              (swap! state assoc :status :done)
+                              :done)))))))]
       (swap! state assoc :worker worker)
       worker))
 
