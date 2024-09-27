@@ -102,14 +102,15 @@
   [^ResultSet row prefix-table?]
   (let [^ResultSetMetaData md (rs/metadata row)]
     (->> (for [i (range 1 (inc (.getColumnCount md)))
-               :let [table-name  (some-> (try (.getTableName md i)
-                                              (catch SQLFeatureNotSupportedException _ nil))
-                                         (.toLowerCase Locale/US))
-                     column-name (-> (.getColumnLabel md i) (.toLowerCase Locale/US))
-                     full-name   (if (or (not prefix-table?) (nil? table-name))
-                                   (keyword column-name)
-                                   (keyword table-name column-name))
-                     column-type (.getColumnType md i)]]
+               :let [maybe-table-name (try (.getTableName md i)
+                                           (catch SQLFeatureNotSupportedException _ nil))
+                     table-name       (when (some? maybe-table-name)
+                                        (.toLowerCase ^String maybe-table-name Locale/US))
+                     column-name      (-> (.getColumnLabel md i) (.toLowerCase Locale/US))
+                     full-name        (if (or (not prefix-table?) (nil? table-name))
+                                        (keyword column-name)
+                                        (keyword table-name column-name))
+                     column-type      (.getColumnType md i)]]
            [full-name column-type])
          (into {}))))
 
@@ -171,10 +172,10 @@
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
-  (let [result-file (File/createTempFile "jdbc-query-data" ".json")
+  (let [result-file ^File (File/createTempFile "jdbc-query-data" ".json")
         rs-types    (atom {})]
     (.deleteOnExit result-file)
-    (with-open [writer (io/writer result-file :append true)
+    (with-open [writer ^Writer (io/writer result-file :append true)
                 conn   (prep-connection connection)]
       (let [append-row   (fn [row]
                            (append-row-to-file writer row)

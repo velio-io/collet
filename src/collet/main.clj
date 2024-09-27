@@ -95,8 +95,8 @@
 (defn file-or-map
   "Parses the provided string argument as a content of the file path or a raw Clojure map"
   [s]
-  (if-some [uri (try (new URI s)
-                     (catch URISyntaxException _ nil))]
+  (if-some [uri ^URI (try (new URI s)
+                          (catch URISyntaxException _ nil))]
     ;; read as a file
     (let [file-path (.getPath uri)]
       (case (.getScheme uri)

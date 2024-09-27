@@ -6,13 +6,13 @@
    [collet.utils :as utils]
    [diehard.core :as dh])
   (:import
-   [java.io ByteArrayInputStream File InputStream]
+   [java.io ByteArrayInputStream File InputStream Writer]
    [java.nio.file Files]))
 
 
 (defn write-json
   "Writes the input data to a JSON file."
-  [w input]
+  [^Writer w input]
   (doseq [record input]
     (->> (json/generate-string record)
          (.write w))
@@ -24,7 +24,7 @@
    Options:
    :input       - the data to write
    :csv-header? - if true, the CSV file will have a header row"
-  [w input & {:keys [csv-header?]}]
+  [^Writer w input & {:keys [csv-header?]}]
   (let [item (first input)
         data (cond
                (map? item)
