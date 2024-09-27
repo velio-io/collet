@@ -4,6 +4,7 @@
    [clojure.data.csv :as csv]
    [clojure.java.io :as io]
    [collet.test-fixtures :as tf]
+   [collet.utils :as utils]
    [next.jdbc :as jdbc]
    [cheshire.core :as json]
    [clj-test-containers.core :as tc]
@@ -157,10 +158,10 @@
                         :endpoint-override {:protocol :http
                                             :hostname "localhost"
                                             :port     container-port}}
-        s3-client      (sut/make-client aws-creds)]
-    (sut/invoke! s3-client :CreateBucket
-                 {:Bucket                    "test-bucket"
-                  :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+        s3-client      (utils/make-client :s3 aws-creds)]
+    (utils/invoke! s3-client :CreateBucket
+                   {:Bucket                    "test-bucket"
+                    :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     (sut/upload-file
      {:aws-creds   aws-creds
@@ -170,9 +171,9 @@
       :input       [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
       :csv-header? true})
 
-    (let [file (sut/invoke! s3-client :GetObject
-                            {:Bucket "test-bucket"
-                             :Key    "test/test-file.csv"})]
+    (let [file (utils/invoke! s3-client :GetObject
+                              {:Bucket "test-bucket"
+                               :Key    "test/test-file.csv"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
              (csv/read-csv (io/reader (:Body file))))))
 
@@ -197,10 +198,10 @@
                         :endpoint-override {:protocol :http
                                             :hostname "localhost"
                                             :port     container-port}}
-        s3-client      (sut/make-client aws-creds)]
-    (sut/invoke! s3-client :CreateBucket
-                 {:Bucket                    "test-multipart-bucket"
-                  :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+        s3-client      (utils/make-client :s3 aws-creds)]
+    (utils/invoke! s3-client :CreateBucket
+                   {:Bucket                    "test-multipart-bucket"
+                    :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     (generate-large-file "./tmp/large-test-file.bin" 1024)
 
@@ -211,9 +212,9 @@
        "large-test-file.bin"
        is))
 
-    (let [file            (sut/invoke! s3-client :GetObject
-                                       {:Bucket "test-multipart-bucket"
-                                        :Key    "large-test-file.bin"})
+    (let [file            (utils/invoke! s3-client :GetObject
+                                         {:Bucket "test-multipart-bucket"
+                                          :Key    "large-test-file.bin"})
           one-gb-in-bytes 1073741824]
       (is (= one-gb-in-bytes (:ContentLength file))))
 
@@ -224,13 +225,13 @@
 (deftest pipeline-s3-action
   (let [container      (localstack-container)
         container-port (get-in container [:mapped-ports 4566])
-        s3-client      (sut/make-client
-                        {:aws-region        "eu-west-1"
-                         :aws-key           "test"
-                         :aws-secret        "test"
-                         :endpoint-override {:protocol :http
-                                             :hostname "localhost"
-                                             :port     container-port}})
+        s3-client      (utils/make-client :s3
+                                          {:aws-region        "eu-west-1"
+                                           :aws-key           "test"
+                                           :aws-secret        "test"
+                                           :endpoint-override {:protocol :http
+                                                               :hostname "localhost"
+                                                               :port     container-port}})
         pipeline       (collet/compile-pipeline
                         {:name  :s3-sink-test
                          :tasks [{:name    :s3-test-task
@@ -243,9 +244,9 @@
                                                          :bucket      "pipe-test-bucket"
                                                          :file-name   "pipe-test-file.csv"
                                                          :csv-header? true}}]}]})]
-    (sut/invoke! s3-client :CreateBucket
-                 {:Bucket                    "pipe-test-bucket"
-                  :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+    (utils/invoke! s3-client :CreateBucket
+                   {:Bucket                    "pipe-test-bucket"
+                    :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     @(pipeline {:aws-creds {:aws-region        "eu-west-1"
                             :aws-key           "test"
@@ -254,9 +255,9 @@
                                                 :hostname "localhost"
                                                 :port     container-port}}})
 
-    (let [file (sut/invoke! s3-client :GetObject
-                            {:Bucket "pipe-test-bucket"
-                             :Key    "pipe-test-file.csv"})]
+    (let [file (utils/invoke! s3-client :GetObject
+                              {:Bucket "pipe-test-bucket"
+                               :Key    "pipe-test-file.csv"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
              (csv/read-csv (io/reader (:Body file))))))
 

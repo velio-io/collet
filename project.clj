@@ -6,6 +6,7 @@
   [[org.clojure/clojure "1.11.3"]
    [org.clojure/java.jmx "1.1.0"]
    [org.clojure/data.csv "1.1.0"]
+   [org.clojure/tools.cli "1.1.230"]
    [weavejester/dependency "0.2.1"]
    [metosin/malli "0.16.1"]
    [diehard "0.11.12"]
@@ -38,14 +39,18 @@
    "--add-opens=java.base/java.util=ALL-UNNAMED"]
 
   :profiles
-  {:dev      {:source-paths ["dev/src"]
-              :repl-options {:init-ns dev}
-              :jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
-              :dependencies [[eftest "0.6.0"]
-                             [vvvvalvalval/scope-capture "0.3.3"]
-                             [clj-test-containers "0.7.4"]
-                             [com.brunobonacci/mulog-zipkin "0.9.0"]
-                             [com.brunobonacci/mulog-elasticsearch "0.9.0"]]
-              :injections   [(require 'sc.api)]}
+  {:dev        {:source-paths ["dev/src"]
+                :repl-options {:init-ns dev}
+                :jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
+                :dependencies [[eftest "0.6.0"]
+                               [vvvvalvalval/scope-capture "0.3.3"]
+                               [clj-test-containers "0.7.4"]
+                               [com.brunobonacci/mulog-zipkin "0.9.0"]
+                               [com.brunobonacci/mulog-elasticsearch "0.9.0"]]
+                :injections   [(require 'sc.api)]}
 
-   :provided {:dependencies [[org.postgresql/postgresql "42.7.3"]]}})
+   :standalone {:main         ^:skip-aot collet.main
+                :uberjar-name "collet.jar"
+                :aot          :all}
+
+   :provided   {:dependencies [[org.postgresql/postgresql "42.7.3"]]}})

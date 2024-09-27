@@ -1,0 +1,11 @@
+{:name  :test-pipeline
+ :tasks [{:name     :counting-task
+          :actions  [{:type      :custom
+                      :name      :count-action
+                      :selectors {count [:state :count-action]}
+                      :params    [count]
+                      :fn        (fn [c]
+                                   (println "COUNTER:" (or c 0))
+                                   (inc (or c 0)))}]
+          :iterator {:data [:state :count-action]
+                     :next [:< [:state :count-action] 10]}}]}

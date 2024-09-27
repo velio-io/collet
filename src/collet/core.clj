@@ -47,7 +47,7 @@
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
     [:map-of :symbol collet.select/select-path]]
-   [:fn {:optional true} fn?]
+   [:fn {:optional true} [:or fn? list?]]
    [:return {:optional true}
     collet.select/select-path]])
 
@@ -103,7 +103,12 @@
                              (-> (name action-type) symbol resolve)
                              ;; Custom functions
                              (= action-type :custom)
-                             (:fn action-spec)
+                             (let [func (:fn action-spec)]
+                               (if (list? func)
+                                 ;; if the function is a list, evaluate it
+                                 ;; TODO might be dangerous to eval arbitrary code
+                                 (eval func)
+                                 func))
                              ;; Predefined actions
                              predefined-action?
                              (get-in actions-map [action-type :action])
