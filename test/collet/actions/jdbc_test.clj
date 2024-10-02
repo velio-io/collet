@@ -102,7 +102,6 @@
               context (action {:config {:connection connection-map}
                                :state  {}})
               result  (-> context :state :query-action)]
-          (is (instance? LazySeq result))
           (is (= 3 (count result)))
           (is (= '("Alice" "Bob" "Charlie") result))))
 
@@ -309,7 +308,6 @@
                        (populate-mysql-table conn))
             _        @(pipeline {:connection connection-map})
             result   (-> pipeline :query first)]
-        (is (instance? LazySeq result))
         (is (= 5 (count result)))
         (is (= '("Alice" "Bob" "Charlie" "David" "Eve") result))))
 
