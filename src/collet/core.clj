@@ -383,13 +383,11 @@
                               (let [exec-status (ml/trace :collet/starting-task [:task task-key]
                                                   (try
                                                     (let [task-result-seq (->> (task-fn context)
-                                                                               (seq)
-                                                                               ;; release lazy seq
-                                                                               (doall))
+                                                                               (seq))
                                                           ;; TODO infer keep-latest? from the task spec
                                                           task-result     (if keep-latest?
                                                                             (take-last 1 task-result-seq)
-                                                                            task-result-seq)
+                                                                            (doall task-result-seq))
                                                           has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
                                                       (when (or keep-state? has-dependents?)
                                                         (swap! state assoc-in [:results task-key] task-result)))
