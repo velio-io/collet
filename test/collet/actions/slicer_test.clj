@@ -21,10 +21,10 @@
                            {:c 24}
                            {:c 25}]}])]
     (is (instance? LazySeq actual))
-    (is (= (map :c actual)
-           (range 20 26)))
-    (is (= (map :a actual)
-           '(1 1 1 3 3 3)))))
+    (is (= (range 20 26)
+           (map (comp :c :value) actual)))
+    (is (= '(1 1 1 3 3 3)
+           (map (comp :a :value) actual)))))
 
 
 (deftest group-sequence-test
@@ -59,3 +59,25 @@
            '([{:a 1 :b 2} {:c 1 :d 2}]
              [{:a 2 :b 3} {:c 2 :d 3}]
              [{:a 3 :b 4} {:c 3 :d 4}])))))
+
+
+(deftest seq-iteration-test
+  (let [state'  (sut/slice-sequence {:sequence [:a :b :c]} nil)
+        state'' (sut/slice-sequence {:sequence [:a :b :c]} state')]
+    (is (= :a (:current state')))
+    (is (= 0 (:idx state')))
+    (is (= :b (:next state')))
+
+    (is (= :b (:current state'')))
+    (is (= 1 (:idx state'')))
+    (is (= :c (:next state''))))
+
+  (let [state'  (sut/slice-sequence {:sequence [{:id 1} {:id 2} {:id 3}]} nil)
+        state'' (sut/slice-sequence {:sequence [{:id 1} {:id 2} {:id 3}]} state')]
+    (is (= {:id 1} (:current state')))
+    (is (= 0 (:idx state')))
+    (is (= {:id 2} (:next state')))
+
+    (is (= {:id 2} (:current state'')))
+    (is (= 1 (:idx state'')))
+    (is (= {:id 3} (:next state'')))))

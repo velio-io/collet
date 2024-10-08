@@ -26,13 +26,23 @@
     {:person-id 2, :address \"Elm St.\"})"
   [{:keys [flatten-by keep-keys]} data-seq]
   (let [[f-key f-path] (first flatten-by)
-        flatten-fn (fn [item]
-                     (let [selected-keys (->> keep-keys
-                                              (map (fn [[k p]] [k (collet.select/select p item)]))
-                                              (into {}))]
-                       (->> (collet.select/select f-path item)
-                            (map #(merge selected-keys {f-key %})))))]
-    (mapcat flatten-fn data-seq)))
+        flatten-fn (fn [root-idx item]
+                     (let [selected-keys (some->> keep-keys
+                                                  (map (fn [[k p]] [k (-> (collet.select/select p item) :value)]))
+                                                  (into {}))
+                           {:keys [value backtrace]} (collet.select/select f-path item)]
+                       (map-indexed
+                        (fn [idx item]
+                          {:value     (merge selected-keys {f-key item})
+                           :backtrace (vec (cons root-idx (nth backtrace idx)))})
+                        value)))]
+    (flatten (map-indexed flatten-fn data-seq))))
+
+
+(defn unwrap-value [x]
+  (if (and (map? x) (contains? x :value))
+    (:value x)
+    x))
 
 
 (defn group-sequence
@@ -61,10 +71,15 @@
     ({:id 3, :name \"Jack\", :city \"Springfield\"})
     ({:id 5, :name \"Joe\", :city \"Lakeside\"}))"
   [group-by data-seq]
-  (when-let [group-key (collet.select/select group-by (first data-seq))]
-    (let [batch      (take-while #(= group-key (collet.select/select group-by %)) data-seq)
-          batch-size (count batch)]
-      (lazy-seq (cons batch (group-sequence group-by (drop batch-size data-seq)))))))
+  (let [first-item (first data-seq)
+        sample     (unwrap-value first-item)]
+    (when-let [group-key (-> (collet.select/select group-by sample) :value)]
+      (let [batch      (take-while #(= group-key (->> (unwrap-value %)
+                                                      (collet.select/select group-by)
+                                                      :value))
+                                   data-seq)
+            batch-size (count batch)]
+        (lazy-seq (cons batch (group-sequence group-by (drop batch-size data-seq))))))))
 
 
 (defn join-sequence
@@ -92,17 +107,17 @@
     [{:id 2, :name \"Jane\", :city \"Lakeside\"}      {:id 2, :city \"Lakeside\"}]
     [{:id 3, :name \"Jack\", :city \"Springfield\"}   {:id 3, :city \"Springfield\"}])"
   [{:keys [sequence cat? on] :as join} data-seq]
-  (when-let [element (first data-seq)]
+  (when-let [element (unwrap-value (first data-seq))]
     (let [sequence   (if cat? (flatten sequence) sequence)
           join       (if cat?
                        ;; make sure to apply cat? only once
                        {:sequence sequence :cat? false :on on}
                        join)
-          source-key (collet.select/select (:source on) element)
+          source-key (-> (collet.select/select (:source on) element) :value)
           ;; TODO not very efficient search algorithm
           join-value (reduce
                       (fn [_found item]
-                        (when (= (collet.select/select (:target on) item)
+                        (when (= (-> (collet.select/select (:target on) item) :value)
                                  source-key)
                           (reduced item)))
                       nil sequence)]
@@ -125,12 +140,19 @@
                        (some? flatten-by) (flatten-sequence {:flatten-by flatten-by :keep-keys keep-keys})
                        (some? group-by) (group-sequence group-by)
                        (some? join) (join-sequence join)
-                       :always (hash-map :rest))
+                       :always (hash-map :rest)
+                       :always (merge {:idx 0}))
                      ;; use previously created state
-                     prev-state)
-        rest-items (state :rest)]
+                     (update prev-state :idx inc))
+        rest-items (state :rest)
+        first-item (first rest-items)]
     ;; return the next state
-    {:current (first rest-items)
+    {:current (unwrap-value first-item)
+     :path    (if (and (map? first-item) (contains? first-item :backtrace))
+                (:backtrace first-item)
+                ;; mimic backtrace for non-selected items
+                [(:idx state)])
+     :idx     (:idx state)
      :next    (second rest-items)
      :rest    (rest rest-items)}))
 

@@ -15,6 +15,27 @@
            (partition 2 kvs))))
 
 
+(defn find-first
+  "Finds the first item in a collection that matches a predicate. Returns a
+  transducer when no collection is provided."
+  ([pred]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result x]
+        (if (pred x)
+          (ensure-reduced (rf result x))
+          result)))))
+  ([pred coll]
+   (reduce
+    (fn [_ x]
+      (when (pred x)
+        (reduced x)))
+    nil
+    coll)))
+
+
 (defn make-client
   "Creates an AWS client for the S3 service."
   [api {:keys [aws-region aws-key aws-secret endpoint-override]}]
