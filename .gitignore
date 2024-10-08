@@ -17,4 +17,3 @@ pom.xml.asc
 .clj-kondo
 /data
 /tmp
-/dev/src/local.clj

@@ -5,7 +5,6 @@
    [clojure.string :as string]
    [clojure.edn :as edn]
    [clojure.tools.cli :as tools.cli]
-   [com.brunobonacci.mulog :as ml]
    [collet.core :as collet]
    [collet.utils :as utils])
   (:import
@@ -93,30 +92,6 @@
         slurp)))
 
 
-(defn start-publishers
-  "Starts the publishers based on the provided configuration (environment variables)"
-  []
-  (let [console-publisher-pretty    (get-env "CONSOLE_PUBLISHER_PRETTY" 'Bool :or true)
-        file-publisher-filename     (get-env "FILE_PUBLISHER_FILENAME" 'Str :or "tmp/collet-*.log")
-        elasticsearch-publisher-url (get-env "ELASTICSEARCH_PUBLISHER_URL" 'Str :or "http://localhost:9200/")
-        zipkin-publisher-url        (get-env "ZIPKIN_PUBLISHER_URL" 'Str :or "http://localhost:9411")
-        publishers                  (cond-> []
-                                      (get-env "CONSOLE_PUBLISHER" 'Bool)
-                                      (conj {:type :console :pretty? console-publisher-pretty})
-                                      (get-env "ELASTICSEARCH_PUBLISHER" 'Bool)
-                                      (conj {:type :elasticsearch :url elasticsearch-publisher-url})
-                                      (get-env "ZIPKIN_PUBLISHER" 'Bool)
-                                      (conj {:type :zipkin :url zipkin-publisher-url})
-                                      (get-env "FILE_PUBLISHER" 'Bool)
-                                      (conj {:type         :custom
-                                             :fqn-function "collet.file-publisher/file-publisher"
-                                             :filename     file-publisher-filename}))]
-    (when (not-empty publishers)
-      (ml/start-publisher!
-       {:type       :multi
-        :publishers publishers}))))
-
-
 (defn file-or-map
   "Parses the provided string argument as a content of the file path or a raw Clojure map"
   [s]
@@ -151,13 +126,6 @@
     :validate [map? "Must provide a map for the pipeline config"]]])
 
 
-(Thread/setDefaultUncaughtExceptionHandler
- (fn [thread ex]
-   (ml/log :collet/uncaught-exception
-           :exception ex :thread (.getName thread))
-   (throw ex)))
-
-
 (defn -main
   "Main entry point for the collet application.
    Receives the pipeline spec and config as arguments.
@@ -171,28 +139,13 @@
           (System/exit 1))
       ;; run the pipeline
       (let [{:keys [pipeline-spec pipeline-config]} options
-            pipeline        (collet/compile-pipeline pipeline-spec)
-            stop-publishers (start-publishers)
-            stop-fn         (fn []
-                              (ml/log :collet/stopping)
-                              (when (not= (collet/pipe-status pipeline) :stopped)
-                                (collet/stop pipeline))
-                              (when (fn? stop-publishers)
-                                ;; wait for publishers to finish
-                                (Thread/sleep 3000)
-                                (stop-publishers)))]
-
-        (->> (Thread. ^Runnable stop-fn)
-             (.addShutdownHook (Runtime/getRuntime)))
-
+            pipeline (collet/compile-pipeline pipeline-spec)]
         (try
           (println "Starting pipeline...")
-          (ml/log :collet/starting)
           @(pipeline pipeline-config)
           (println "Pipeline completed.")
           (catch Exception ex
             (println "Pipeline failed with an exception:")
             (println (.getMessage ex)))
           (finally
-            (stop-fn)
             (System/exit 0)))))))
