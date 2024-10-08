@@ -117,7 +117,7 @@
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:city "London"})
 
-      (let [events  (last (get pipeline :events-with-artists))
+      (let [events  (-> pipeline :events-with-artists first)
             artists (mapcat (comp (fn [r] (filter #(contains? % :artist) r)) :relations)
                             events)]
         (is (= 20 (count events)))
