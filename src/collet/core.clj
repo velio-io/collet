@@ -159,6 +159,8 @@
      [:max-retries {:optional true} :int]
      [:backoff-ms {:optional true} [:vector :int]]]]
    [:skip-on-error {:optional true} :boolean]
+   [:keep-state {:optional true} :boolean]
+   [:keep-latest {:optional true} :boolean]
    [:setup {:optional true}
     [:vector action-spec]]
    [:actions
@@ -374,7 +376,7 @@
                         (loop [tq (:tasks-queue @state)]
                           (if-some [task-key (first tq)]
                             ;; prepare task context
-                            (let [{::keys [task-fn] :keys [inputs keep-state? keep-latest?]} (get tasks task-key)
+                            (let [{::keys [task-fn] :keys [inputs keep-state keep-latest]} (get tasks task-key)
                                   inputs-map (reduce (fn [is i]
                                                        (assoc is i (get-in @state [:results i])))
                                                      {} inputs)
@@ -383,15 +385,13 @@
                               (let [exec-status (ml/trace :collet/starting-task [:task task-key]
                                                   (try
                                                     (let [task-result-seq (->> (task-fn context)
-                                                                               (seq)
-                                                                               ;; release lazy seq
-                                                                               (doall))
-                                                          ;; TODO infer keep-latest? from the task spec
-                                                          task-result     (if keep-latest?
+                                                                               (seq))
+                                                          ;; TODO infer keep-latest from the task spec
+                                                          task-result     (if keep-latest
                                                                             (take-last 1 task-result-seq)
-                                                                            task-result-seq)
+                                                                            (doall task-result-seq))
                                                           has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
-                                                      (when (or keep-state? has-dependents?)
+                                                      (when (or keep-state has-dependents?)
                                                         (swap! state assoc-in [:results task-key] task-result)))
                                                     ;; update tasks queue
                                                     (swap! state update :tasks-queue rest)

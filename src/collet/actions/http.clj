@@ -73,6 +73,7 @@
      [:catn [:template-string :string] [:substitution [:* :any]]]]]
    [:method {:optional true :default :get}
     [:enum :get :post :put :delete :head :options :trace]]
+   [:body {:optional true} :any]
    [:keywordize {:optional true :default true}
     :boolean]
    [:as {:optional true}
@@ -94,6 +95,7 @@
    The request map can contain the following keys:
    :url - the URL to request
    :method - the HTTP method to use (default - :get)
+   :body - the request body
    :keywordize - keywordize the keys in the response (default - true)
    :as - the response format
    :content-type - the content type of the request
@@ -103,14 +105,20 @@
    :basic-auth - a vector of username and password for basic authentication."
   {:malli/schema [:=> [:cat request-params-spec]
                   :any]}
-  [{:keys [url method keywordize as content-type accept]
+  [{:keys [url method body keywordize as content-type accept]
     :or   {method :get keywordize true}
     :as   req-map}]
   (let [request  (cond-> req-map
                    (vector? url) (assoc :url (apply format url))
                    (= as :json) (assoc :as :stream)
-                   (= content-type :json) (assoc-in [:headers "Content-Type"] "application/json")
                    (= accept :json) (assoc-in [:headers "Accept"] "application/json")
+                   (= content-type :json) (assoc-in [:headers "Content-Type"] "application/json")
+                   ;; coerce body to a JSON string if it's not yet
+                   (and (= content-type :json)
+                        (some? body)
+                        (not (string? body)))
+                   (assoc :body (json/encode body))
+
                    :always (assoc :method method))
         response (http-request request)]
     (cond-> response
