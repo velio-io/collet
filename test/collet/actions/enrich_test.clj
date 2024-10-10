@@ -92,28 +92,28 @@
                                   :iterator {:data [:state :events-request]
                                              :next [:< [:state :req-count] 1]}}
 
-                                 {:name         :events-with-artists
-                                  :inputs       [:area-events]
-                                  :keep-state?  true
-                                  :keep-latest? true
-                                  :setup        [{:type      :clj/flatten
-                                                  :name      :city-events-list
-                                                  :selectors {'events [:inputs :area-events]}
-                                                  :params    ['events]}]
-                                  :actions      [{:type       :enrich
-                                                  :name       :enrich-artist-details
-                                                  :target     [:state :city-events-list]
-                                                  :iterate-on [:relations [:cat [:cond [:not-nil? :artist]] :artist :id]]
-                                                  :method     :merge
-                                                  :action     :http
-                                                  :params     {:url          ["https://musicbrainz.org/ws/2/artist/%s" '$target-item]
-                                                               :accept       :json
-                                                               :as           :json
-                                                               :rate         0.5
-                                                               :query-params {:inc "ratings"}}
-                                                  :return     [:body]}]
-                                  :iterator     {:data [:state :enrich-artist-details]
-                                                 :next [:not-nil? [:state :enrich-artist-details-slicer :next]]}}]}
+                                 {:name        :events-with-artists
+                                  :inputs      [:area-events]
+                                  :keep-state  true
+                                  :keep-latest true
+                                  :setup       [{:type      :clj/flatten
+                                                 :name      :city-events-list
+                                                 :selectors {'events [:inputs :area-events]}
+                                                 :params    ['events]}]
+                                  :actions     [{:type       :enrich
+                                                 :name       :enrich-artist-details
+                                                 :target     [:state :city-events-list]
+                                                 :iterate-on [:relations [:cat [:cond [:not-nil? :artist]] :artist :id]]
+                                                 :method     :merge
+                                                 :action     :http
+                                                 :params     {:url          ["https://musicbrainz.org/ws/2/artist/%s" '$target-item]
+                                                              :accept       :json
+                                                              :as           :json
+                                                              :rate         0.5
+                                                              :query-params {:inc "ratings"}}
+                                                 :return     [:body]}]
+                                  :iterator    {:data [:state :enrich-artist-details]
+                                                :next [:not-nil? [:state :enrich-artist-details-slicer :next]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:city "London"})
 
