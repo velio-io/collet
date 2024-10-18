@@ -172,7 +172,7 @@
      [:backoff-ms {:optional true} [:vector :int]]]]
    [:skip-on-error {:optional true} :boolean]
    [:keep-state {:optional true} :boolean]
-   [:keep-latest {:optional true} :boolean]
+   [:state-format {:optional true} [:enum :latest :flatten]]
    [:setup {:optional true}
     [:vector action-spec]]
    [:actions
