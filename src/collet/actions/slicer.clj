@@ -1,162 +1,151 @@
 (ns collet.actions.slicer
   (:require
+   [collet.utils :as utils]
    [collet.select :as collet.select]
-   [collet.actions.common :as common]))
+   [tech.v3.dataset :as ds]
+   [tech.v3.dataset.column :as ds.col]
+   [tech.v3.dataset.join :as ds.join]
+   [tech.v3.datatype :as dtype]
+   [tech.v3.datatype.bitmap :as dtype.bitmap]
+   [tech.v3.datatype.protocols :as dtype.proto]))
 
 
-(defn flatten-sequence
-  "Flatten a nested collection by a given key and path.
-   The flatten-by argument is a map, the map key will end up being the key of the flattened collection,
-   the map value is the select path to the value which needs to be flattened.
-   The keep-keys argument is a map, the map key will be the key of the original collection, the map value
-   is the select path to the value which needs to be kept.
-
-   For example, given the following data:
-   [{:id 1 :name \"John\" :addresses [{:street \"Main St.\" :city \"Springfield\"} {:street \"NorthG St.\" :city \"Springfield\"}]}
-    {:id 2 :name \"Jane\" :addresses [{:street \"Elm St.\" :city \"Springfield\"}]}]
-
-   The following call:
-   (flatten-sequence {:flatten-by {:address [:addresses [:cat :street]]}
-                      :keep-keys  {:person-id [:id]}}
-                     data)
-
-   Will return:
-   ({:person-id 1, :address \"Main St.\"}
-    {:person-id 1, :address \"NorthG St.\"}
-    {:person-id 2, :address \"Elm St.\"})"
-  [{:keys [flatten-by keep-keys]} data-seq]
-  (let [[f-key f-path] (first flatten-by)
-        flatten-fn (fn [root-idx item]
-                     (let [selected-keys (some->> keep-keys
-                                                  (map (fn [[k p]] [k (-> (collet.select/select p item) :value)]))
-                                                  (into {}))
-                           {:keys [value backtrace]} (collet.select/select f-path item)]
-                       (map-indexed
-                        (fn [idx item]
-                          {:value     (merge selected-keys {f-key item})
-                           :backtrace (vec (cons root-idx (nth backtrace idx)))})
-                        value)))]
-    (flatten (map-indexed flatten-fn data-seq))))
+(defn do-join
+  [dataset {:keys [sequence cat? source target]}]
+  (let [source-key     (if (or (keyword? source) (string? source))
+                         source
+                         :_collet_join_source)
+        left-ds        (if (= source-key :_collet_join_source)
+                         (ds/row-map dataset
+                                     #(hash-map source-key (-> (collet.select/select source %) :value)))
+                         dataset)
+        target-key     (if (or (keyword? target) (string? target))
+                         target
+                         :_collet_join_target)
+        join-ds        (utils/make-dataset sequence {:cat? cat?})
+        right-ds       (if (= target-key :_collet_join_target)
+                         (ds/row-map join-ds
+                                     #(hash-map target-key (-> (collet.select/select target %) :value)))
+                         join-ds)
+        helper-columns (cond-> []
+                         (= source-key :_collet_join_source)
+                         (conj source-key)
+                         (= target-key :_collet_join_target)
+                         (conj target-key))
+        joined-ds      (ds.join/left-join
+                        [source-key target-key] left-ds right-ds)]
+    (apply dissoc joined-ds helper-columns)))
 
 
-(defn unwrap-value [x]
-  (if (and (map? x) (contains? x :value))
-    (:value x)
-    x))
+(defn prep-column
+  [{:keys [rollup rollup-except target-columns]} column]
+  (let [column-name (ds.col/column-name column)
+        length      (dtype/ecount column)
+        missing     (ds.col/missing column)
+        column'     (if (and (pos? length) (seq missing))
+                      (let [not-missing (-> (range length)
+                                            (dtype.bitmap/->bitmap)
+                                            (dtype.proto/set-and-not missing))]
+                        (ds.col/select column not-missing))
+                      ;; return the original column if there are no missing values
+                      column)
+        unique      (ds.col/unique column')]
+    (if (or (contains? target-columns column-name)
+            (and (= (count unique) 1)
+                 (or (= rollup :all)
+                     (and (set? rollup)
+                          (if rollup-except
+                            (not (contains? rollup column-name))
+                            (contains? rollup column-name))))))
+      (first unique)
+      (vec column'))))
 
 
-(defn group-sequence
-  "Group a sequence of maps by a given select path.
-   Works in a different way than standard Clojure's group-by.
-   First it takes the value under the select path for the first element in the sequence.
-   Then it takes all contiguous elements with the same value under the select path.
-   And groups them together in the list. This process is repeated until the end of the sequence.
-   The result is a lazy sequence where each element is a list of grouped elements.
-
-   For example, given the following data:
-   [{:id 1 :name \"John\" :city \"Springfield\"}
-    {:id 3 :name \"Jack\" :city \"Springfield\"}
-    {:id 2 :name \"Jane\" :city \"Lakeside\"}
-    {:id 4 :name \"Jill\" :city \"Lakeside\"}
-    {:id 5 :name \"Joe\" :city \"Lakeside\"}
-    {:id 3 :name \"Jack\" :city \"Springfield\"}
-    {:id 5 :name \"Joe\" :city \"Lakeside\"}]
-
-   The following call:
-   (group-sequence [:city] data)
-
-   Will return:
-   (({:id 1, :name \"John\", :city \"Springfield\"} {:id 3, :name \"Jack\", :city \"Springfield\"})
-    ({:id 2, :name \"Jane\", :city \"Lakeside\"} {:id 4, :name \"Jill\", :city \"Lakeside\"} {:id 5, :name \"Joe\", :city \"Lakeside\"})
-    ({:id 3, :name \"Jack\", :city \"Springfield\"})
-    ({:id 5, :name \"Joe\", :city \"Lakeside\"}))"
-  [group-by data-seq]
-  (let [first-item (first data-seq)
-        sample     (unwrap-value first-item)]
-    (when-let [group-key (-> (collet.select/select group-by sample) :value)]
-      (let [batch      (take-while #(= group-key (->> (unwrap-value %)
-                                                      (collet.select/select group-by)
-                                                      :value))
-                                   data-seq)
-            batch-size (count batch)]
-        (lazy-seq (cons batch (group-sequence group-by (drop batch-size data-seq))))))))
+(defn zip-columns
+  "Zip grouped dataset into a single row"
+  [options dataset]
+  (->> (ds/columns dataset)
+       (map (partial prep-column options))
+       (zipmap (ds/column-names dataset))))
 
 
-(defn join-sequence
-  "Join two sequences of maps by a given select path.
-   Works almost like a SQL join.
-   :sequence argument is the second sequence to join with.
-   :cat? argument is a boolean, if true the sequence will be flattened before joining.
-   :on argument is a map of :source and :target keys which define the join condition.
-
-   For example, given the following data:
-   [{:id 1 :name \"John\" :city \"Springfield\"}
-    {:id 2 :name \"Jane\" :city \"Lakeside\"}
-    {:id 3 :name \"Jack\" :city \"Springfield\"}]
-
-   And the following call:
-   (join-sequence {:sequence [{:id 1 :city \"Springfield\"}
-                              {:id 2 :city \"Lakeside\"}
-                              {:id 3 :city \"Springfield\"}]
-                   :cat? true
-                   :on {:source [:id] :target [:id]}}
-                  data)
-
-   Will return:
-   ([{:id 1, :name \"John\", :city \"Springfield\"}   {:id 1, :city \"Springfield\"}]
-    [{:id 2, :name \"Jane\", :city \"Lakeside\"}      {:id 2, :city \"Lakeside\"}]
-    [{:id 3, :name \"Jack\", :city \"Springfield\"}   {:id 3, :city \"Springfield\"}])"
-  [{:keys [sequence cat? on] :as join} data-seq]
-  (when-let [element (unwrap-value (first data-seq))]
-    (let [sequence   (if cat? (flatten sequence) sequence)
-          join       (if cat?
-                       ;; make sure to apply cat? only once
-                       {:sequence sequence :cat? false :on on}
-                       join)
-          source-key (-> (collet.select/select (:source on) element) :value)
-          ;; TODO not very efficient search algorithm
-          join-value (reduce
-                      (fn [_found item]
-                        (when (= (-> (collet.select/select (:target on) item) :value)
-                                 source-key)
-                          (reduced item)))
-                      nil sequence)]
-      (lazy-seq
-       (cons [element join-value]
-             (join-sequence join (rest data-seq)))))))
+(defn do-fold-by
+  "Fold dataset by the provided columns"
+  [dataset {:keys [columns rollup rollup-except] :or {rollup false rollup-except false}}]
+  (let [multiple-columns? (sequential? columns)
+        fold-by-selector  (if multiple-columns?
+                            (fn [row]
+                              (select-keys row columns))
+                            columns)
+        rollup'           (cond
+                            (true? rollup) :all
+                            (vector? rollup) (set rollup)
+                            :otherwise :none)
+        options           {:rollup         rollup'
+                           :rollup-except  rollup-except
+                           :target-columns (if multiple-columns?
+                                             (set columns)
+                                             #{columns})}]
+    (-> dataset
+        (ds/group-by fold-by-selector
+                     {:group-by-finalizer (partial zip-columns options)})
+        vals
+        ds/->dataset)))
 
 
-(defn slice-sequence
-  "This is a stateful action which operates on sequences of data.
-   In the simplest use case you can use this action to iterate over a sequence of any type.
-   Also, it can flatten the given sequence by a nested key or group elements of the sequence by values or join elements between two sequences.
-   All operations return a lazy sequence."
-  [{:keys [flatten-by keep-keys group-by join cat?] data-seq :sequence}
-   prev-state]
-  (let [state      (if (nil? prev-state)
-                     ;; initialize action state
-                     (cond->> data-seq
-                       cat? (sequence cat)
-                       (some? flatten-by) (flatten-sequence {:flatten-by flatten-by :keep-keys keep-keys})
-                       (some? group-by) (group-sequence group-by)
-                       (some? join) (join-sequence join)
-                       :always (hash-map :rest)
-                       :always (merge {:idx 0}))
-                     ;; use previously created state
-                     (update prev-state :idx inc))
-        rest-items (state :rest)
-        first-item (first rest-items)]
-    ;; return the next state
-    {:current (unwrap-value first-item)
-     :path    (if (and (map? first-item) (contains? first-item :backtrace))
-                (:backtrace first-item)
-                ;; mimic backtrace for non-selected items
-                [(:idx state)])
-     :idx     (:idx state)
-     :next    (second rest-items)
-     :rest    (rest rest-items)}))
+(def slicer-params-spec
+  [:map
+   [:sequence [:or utils/dataset? [:sequential map?]]]
+   [:cat? {:optional true} :boolean]
+   [:flatten-by {:optional true} [:map-of :keyword collet.select/select-path]]
+   [:group-by {:optional true} collet.select/select-path]
+   [:join-with {:optional true}
+    [:map
+     [:sequence [:or utils/dataset? [:sequential map?]]]
+     [:source [:or :string :keyword collet.select/select-path]]
+     [:target [:or :string :keyword collet.select/select-path]]
+     [:cat? {:optional true} :boolean]]]
+   [:fold-by {:optional true}
+    [:map
+     [:columns [:or :keyword [:sequential :keyword]]]
+     [:rollup {:optional true} [:or :boolean [:sequential :keyword]]]
+     [:rollup-except {:optional true} :boolean]]]])
+
+
+(defn prep-dataset
+  "Creates a dataset from the provided sequence.
+   Can modify the dataset shape by applying flatten-by, group-by and join-with options."
+  {:malli/schema [:=> [:cat slicer-params-spec]
+                  [:or utils/linked-hash-map? utils/dataset?]]}
+  [{:keys [flatten-by group-by fold-by join-with cat?] data :sequence}]
+  (let [dataset (utils/make-dataset data {:cat? cat?})
+        [f-key f-path] (first flatten-by)]
+    (cond-> dataset
+      (some? flatten-by)
+      (ds/row-mapcat
+       (fn [row]
+         (let [value (-> (collet.select/select f-path row) :value)]
+           (cond
+             (and (sequential? value) (not-empty value))
+             (map #(hash-map f-key %) value)
+
+             (not-empty value)
+             [{f-key value}]
+
+             :otherwise
+             [{f-key nil}]))))
+
+      (some? join-with)
+      (do-join join-with)
+
+      (some? fold-by)
+      (do-fold-by fold-by)
+
+      (some? group-by)
+      (ds/group-by
+       (fn [row]
+         (-> (collet.select/select group-by row) :value))))))
 
 
 (def slicer-action
-  {:action slice-sequence
-   :prep   common/prep-stateful-action})
+  {:action prep-dataset})

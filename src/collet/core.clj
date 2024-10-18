@@ -17,6 +17,7 @@
    [collet.actions.queue :as collet.queue]
    [collet.actions.fold :as collet.fold]
    [collet.actions.enrich :as collet.enrich]
+   [collet.actions.mapper :as collet.mapper]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
    [collet.deps :as collet.deps])
@@ -79,17 +80,21 @@
 
 
 (def actions-map
+  ;; external sources
   {:http    collet.http/request-action
    :oauth2  collet.http/oauth2-action
    :odata   collet.odata/odata-action
-   :counter collet.counter/counter-action
-   :slicer  collet.slicer/slicer-action
    :jdbc    collet.jdbc/action
    :file    collet.file/write-file-action
    :s3      collet.file/upload-file-action
    :queue   collet.queue/cues-action
+
+   ;; data processing
+   :counter collet.counter/counter-action
+   :slicer  collet.slicer/slicer-action
    :fold    collet.fold/fold-action
-   :enrich  collet.enrich/enrich-action})
+   :enrich  collet.enrich/enrich-action
+   :mapper  collet.mapper/mapper-action})
 
 
 (defn compile-action
@@ -100,8 +105,9 @@
                   [:=> [:cat context-spec] :any]]}
   [{action-type :type :as action-spec}]
   (let [predefined-action? (contains? actions-map action-type)
-
-        {:keys [return] action-type :type action-name :name :as action-spec}
+        {:keys       [return]
+         action-type :type action-name :name execute-when :when
+         :as         action-spec}
         (if-let [prep-fn (and predefined-action?
                               (get-in actions-map [action-type :prep]))]
           (prep-fn action-spec)
@@ -110,41 +116,47 @@
       ;; expand to multiple actions
       (mapv compile-action action-spec)
       ;; compile a single action
-      (let [action-fn (cond
-                        ;; Clojure core functions
-                        (and (qualified-keyword? action-type)
-                             (= (namespace action-type) "clj"))
-                        (-> (name action-type) symbol resolve)
-                        ;; Custom functions
-                        (= action-type :custom)
-                        (let [func (:fn action-spec)]
-                          (if (list? func)
-                            ;; if the function is a list, evaluate it
-                            ;; TODO might be dangerous to eval arbitrary code
-                            (eval func)
-                            func))
-                        ;; Predefined actions
-                        predefined-action?
-                        (get-in actions-map [action-type :action])
-                        ;; Unknown action type
-                        :otherwise
-                        (throw (ex-info (str "Unknown action type: " action-type)
-                                        {:spec action-spec})))]
+      (let [action-fn       (cond
+                              ;; Clojure core functions
+                              (and (qualified-keyword? action-type)
+                                   (= (namespace action-type) "clj"))
+                              (-> (name action-type) symbol resolve)
+                              ;; Custom functions
+                              (= action-type :custom)
+                              (let [func (:fn action-spec)]
+                                (if (list? func)
+                                  ;; if the function is a list, evaluate it
+                                  ;; TODO might be dangerous to eval arbitrary code
+                                  (eval func)
+                                  func))
+                              ;; Predefined actions
+                              predefined-action?
+                              (get-in actions-map [action-type :action])
+                              ;; Unknown action type
+                              :otherwise
+                              (throw (ex-info (str "Unknown action type: " action-type)
+                                              {:spec action-spec})))
+            execute-when-fn (when (collet.conds/valid-condition? execute-when)
+                              (collet.conds/compile-conditions execute-when))]
         (fn [context]
           (try
-            (ml/trace :collet/executing-action [:action action-name :type action-type]
-              (let [params  (compile-action-params action-spec context)
-                    result  (cond
-                              ;; multiple parameters passed
-                              (vector? params) (apply action-fn params)
-                              ;; single map parameter
-                              (map? params) (action-fn params)
-                              ;; no parameters
-                              (nil? params) (action-fn))
-                    result' (if (some? return)
-                              (-> (collet.select/select return result) :value)
-                              result)]
-                (assoc-in context [:state action-name] result')))
+            (if (or (nil? execute-when-fn) (execute-when-fn context))
+              (ml/trace :collet/executing-action [:action action-name :type action-type]
+                (let [params  (compile-action-params action-spec context)
+                      result  (cond
+                                ;; multiple parameters passed
+                                (vector? params) (apply action-fn params)
+                                ;; single map parameter
+                                (map? params) (action-fn params)
+                                ;; no parameters
+                                (nil? params) (action-fn))
+                      result' (if (some? return)
+                                (-> (collet.select/select return result) :value)
+                                result)]
+                  (assoc-in context [:state action-name] result')))
+              (do (ml/log :collet/action-skipped :action action-name :type action-type)
+                  ;; need to reset action state to prevent discrepancies between iterations
+                  (assoc-in context [:state action-name] nil)))
             (catch Exception e
               (throw (ex-info "Action failed" (merge (ex-data e) {:action action-name}) e)))))))))
 
@@ -226,6 +238,23 @@
     (constantly nil)))
 
 
+(defn expand-on-actions
+  "Actions can expand (modify) task definition if provides expand hook"
+  {:malli/schema [:=> [:cat task-spec]
+                  task-spec]}
+  [{:keys [actions] :as task}]
+  (reduce
+   (fn [acc action]
+     (let [action-type (:type action)]
+       (if (contains? actions-map action-type)
+         (let [expand (get-in actions-map [action-type :expand])]
+           (if (fn? expand)
+             (expand acc action)
+             acc))
+         acc)))
+   task actions))
+
+
 (defn compile-task
   "Compiles a task spec into a function.
    Resulting function can be executed with a configuration map,
@@ -233,8 +262,10 @@
    Actions should run in the order they are defined in the spec."
   {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] [:sequential :any]]]}
-  [{:keys [name setup actions iterator retry skip-on-error] :as task}]
-  (let [setup-actions   (flatten (map compile-action setup))
+  [task]
+  (let [{:keys [name setup actions iterator retry skip-on-error]
+         :as   task} (expand-on-actions task)
+        setup-actions   (flatten (map compile-action setup))
         task-actions    (flatten (map compile-action actions))
         extract-data    (extract-data-fn task)
         next-iteration  (next-fn iterator)
@@ -266,14 +297,16 @@
                                           :reason (ex-data e)
                                           :message (ex-message e))
                                   ctx)))))]
-    (fn [context]
-      ;; run actions to set up the task
-      (let [context' (cond->> context
-                       (seq setup-actions) (execute-actions setup-actions))]
-        (iteration execute-task-fn
-                   :initk context'
-                   :vf extract-data
-                   :kf next-iteration)))))
+    (with-meta
+     (fn [context]
+       ;; run actions to set up the task
+       (let [context' (cond->> context
+                        (seq setup-actions) (execute-actions setup-actions))]
+         (iteration execute-task-fn
+                    :initk context'
+                    :vf extract-data
+                    :kf next-iteration)))
+     {::task task})))
 
 
 (def pipeline-spec
@@ -376,7 +409,7 @@
                         (loop [tq (:tasks-queue @state)]
                           (if-some [task-key (first tq)]
                             ;; prepare task context
-                            (let [{::keys [task-fn] :keys [inputs keep-state keep-latest]} (get tasks task-key)
+                            (let [{::keys [task-fn] :keys [inputs keep-state state-format]} (get tasks task-key)
                                   inputs-map (reduce (fn [is i]
                                                        (assoc is i (get-in @state [:results i])))
                                                      {} inputs)
@@ -386,9 +419,9 @@
                                                   (try
                                                     (let [task-result-seq (->> (task-fn context)
                                                                                (seq))
-                                                          ;; TODO infer keep-latest from the task spec
-                                                          task-result     (if keep-latest
-                                                                            (take-last 1 task-result-seq)
+                                                          task-result     (case state-format
+                                                                            :latest (last task-result-seq)
+                                                                            :flatten (doall (flatten task-result-seq))
                                                                             (doall task-result-seq))
                                                           has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
                                                       (when (or keep-state has-dependents?)
@@ -502,7 +535,10 @@
   (let [pipeline-id (random-uuid)
         tasks-map   (->> tasks
                          (map (fn [task]
-                                (assoc task ::task-fn (compile-task task))))
+                                (let [task-fn (compile-task task)]
+                                  (-> task
+                                      (merge (::task (meta task-fn)))
+                                      (assoc ::task-fn task-fn)))))
                          (index-by :name))
         state       (atom {:status      :pending
                            :tasks-queue (->tasks-queue tasks-map)})]

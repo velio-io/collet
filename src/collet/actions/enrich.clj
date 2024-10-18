@@ -1,54 +1,112 @@
 (ns collet.actions.enrich
   (:require
-   [collet.utils :as utils]))
+   [clojure.walk :as walk]
+   [collet.utils :as utils])
+  (:import
+   [clojure.lang PersistentVector]))
+
+
+(defn replace-vec-element
+  "Replaces elements in a vector according to a replacement map"
+  [replacement-map x]
+  (if (vector? x)
+    (reduce-kv
+     (fn [^PersistentVector acc element replacement]
+       (let [idx (.indexOf acc element)]
+         (if (not= -1 idx)
+           (-> (concat (subvec acc 0 idx)
+                       replacement
+                       (subvec acc (inc idx)))
+               (vec))
+           acc)))
+     x replacement-map)
+    x))
+
+
+(defn replace-all
+  "Traverse the data structure and replace elements according to a replacement map"
+  [data replacement-map]
+  (walk/postwalk
+   (partial replace-vec-element replacement-map)
+   data))
+
+
+(def enrich-params-spec
+  [:map
+   [:name :keyword]
+   [:action :keyword]
+   [:target collet.select/select-path]
+   [:when {:optional true} [:vector :any]]
+   [:selectors {:optional true} [:map-of :symbol collet.select/select-path]]
+   [:params {:optional true} [:or map? [:vector :any]]]
+   [:return {:optional true} collet.select/select-path]
+   [:fold-in {:optional true} [:vector [:or :string :keyword :int]]]
+   [:fn {:optional true} [:or fn? list?]]])
 
 
 (defn enrich
-  "Returns another action spec that enriches the input data according to provided parameters"
-  [{:keys       [target flatten-target iterate-on action selectors params return method]
-    :or         {flatten-target false selectors {}}
-    action-name :name
-    custom-fn   :fn}]
-  (let [base-name        (name action-name)
-        slicer-key       (keyword (str base-name "-slicer"))
-        iteration-key    (keyword (str base-name "-iteration"))
-        action-key       (keyword (str base-name "-action"))
-        target-sym       (gensym "target")
-        path-sym         (gensym "path")
-        args-sym         (gensym "args")
-        target-item-path (if (some? iterate-on)
-                           [:state slicer-key :current iteration-key]
-                           [:state slicer-key :current])
-        selectors'       (merge selectors {'$target-item target-item-path})]
+  "Enriches data mapping over items in the target collection.
+   Specified action will be invoked for each item.
+   All updated items are collected in the result.
+   This action works like a macro call,
+   so it will replace itself with a vector of three actions: mapper, action and fold."
+  {:malli/schema [:=> [:cat enrich-params-spec]
+                  [:vector map?]]}
+  [{:keys        [target fold-in action selectors params return]
+    execute-when :when
+    :or          {selectors {}}
+    action-name  :name
+    custom-fn    :fn}]
+  (let [base-name     (name action-name)
+        mapper-key    (keyword (str base-name "-mapper"))
+        action-key    (keyword (str base-name "-action"))
+        target-sym    (gensym "target")
+        item-sym      (gensym "item")
+        with-sym      (gensym "with")
+        selectors'    (reduce-kv
+                       (fn [acc sym path]
+                         (->> (replace-all path {:enrich/item [:state mapper-key :current]})
+                              (assoc acc sym)))
+                       {} selectors)
+        execute-when' (replace-all execute-when {:enrich/item [:state mapper-key :current]})]
     ;; return a vector of three actions
     ;; slicer action
-    [{:type      :slicer
-      :name      slicer-key
+    [{:type      :mapper
+      :name      mapper-key
       :selectors {target-sym target}
-      :params    (utils/assoc-some
-                   {:sequence target-sym
-                    :cat?     flatten-target}
-                   :flatten-by (when (some? iterate-on)
-                                 {iteration-key iterate-on}))}
+      :params    {:sequence target-sym}}
      ;; enrich (get additional data) action
      (utils/assoc-some
        {:type      action
         :name      action-key
         :selectors selectors'
         :params    params}
+       :when execute-when'
        :fn custom-fn
        :return return)
      ;; fold (collect results) action
      {:type      :fold
       :name      action-name
-      :selectors {target-sym target
-                  path-sym   [:state slicer-key :path]
-                  args-sym   [:state action-key]}
-      :params    {:value target-sym
-                  :op    method
-                  :in    path-sym
-                  :with  args-sym}}]))
+      :selectors {item-sym [:state mapper-key :current]
+                  with-sym [:state action-key]}
+      :params    {:item item-sym
+                  :in   fold-in
+                  :with with-sym}}]))
+
+
+(defn expand-task-params
+  "Unwraps the enrich bindings and replaces the iterator with the mapper keys"
+  [task action]
+  (let [action-name (:name action)
+        base-name   (name action-name)
+        mapper-key  (keyword (str base-name "-mapper"))]
+    (-> task
+        (assoc :state-format (or (:state-format task) :latest))
+        (update :iterator replace-all
+                {:enrich/item          [:state mapper-key :current]
+                 :enrich/has-next-item [:state mapper-key :next]}))))
 
 
 (def enrich-action
-  {:prep enrich})
+  {:prep   enrich
+   :expand expand-task-params})

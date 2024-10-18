@@ -1,73 +1,70 @@
 (ns collet.actions.fold-test
   (:require
    [clojure.test :refer :all]
+   [collet.test-fixtures :as tf]
    [collet.actions.fold :as sut]))
 
 
+(use-fixtures :once (tf/instrument! 'collet.actions.fold))
+
+
+(deftest conjoin-test
+  (is (= (sut/conjoin [1 2 3] nil 4)
+         [1 2 3 4]))
+
+  (is (= (sut/conjoin [1 2 3] [1] 4)
+         [1 4 3]))
+
+  (is (= (sut/conjoin {:a [1 2 3]} [:a 1] 4)
+         {:a [1 4 3]}))
+
+  (is (= (sut/conjoin {:a [{:b [1 2]}
+                           {:b [3 4]}]}
+                  [:a 1 :b]
+                  5)
+         {:a [{:b [1 2]} {:b [3 4 5]}]}))
+
+  (is (= (sut/conjoin [] nil 123)
+         [123]))
+
+  (is (= (sut/conjoin [123] nil 321)
+         [123 321]))
+
+  (is (= (sut/conjoin {:a 123} nil {:b 321})
+         {:a 123 :b 321}))
+
+  (is (= (sut/conjoin {:a 123} [:b] {:c 321})
+         {:a 123, :b {:c 321}}))
+
+  (is (= (sut/conjoin {:a 123} [:b 10] 321)
+         {:a 123, :b '(321)})))
+
+
 (deftest basic-fold-test
-  (testing "replace operation"
-    (is (= {:a 3, :b 2}
-           (sut/fold {:value {:a 1 :b 2}
-                      :op    :replace
-                      :in    [:a]
-                      :with  3}
-                     nil)))
+  (testing "adding item into resulting collection"
+    (is (= (sut/fold {:item 123} nil)
+           [123]))
+    (is (= (sut/fold {:item 321} [123])
+           [123 321]))
+    (is (= (sut/fold {:item 321} [123])
+           [123 321])))
 
-    (is (= {:a 1, :b [2 3 5]}
-           (sut/fold {:value {:a 1 :b [2 3 4]}
-                      :op    :replace
-                      :in    [:b 2]
-                      :with  5}
-                     nil)))
+  (testing "merging data before adding"
+    (is (= (sut/fold {:item {:a 123} :with {:b 321}} nil)
+           [{:a 123 :b 321}]))
 
-    (is (= {:a 1, :b [{:c 2} {:c 5} {:c 4}]}
-           (sut/fold {:value {:a 1 :b [{:c 2} {:c 3} {:c 4}]}
-                      :op    :replace
-                      :in    [:b 1 :c]
-                      :with  5}
-                     nil))))
+    (is (= (sut/fold {:item {:a 123} :in [:b] :with {:c 321}} nil)
+           [{:a 123, :b {:c 321}}]))
 
-  (testing "merge operation"
-    (is (= {:a 1, :b {:c 5, :d 3}}
-           (sut/fold {:value {:a 1 :b {:c 2 :d 3}}
-                      :op    :merge
-                      :in    [:b]
-                      :with  {:c 5}}
-                     nil)))
-
-    (is (= {:a 1, :b [{:c 2, :d 3} {:c 5, :d 4}]}
-           (sut/fold {:value {:a 1 :b [{:c 2 :d 3} {:c 3 :d 4}]}
-                      :op    :merge
-                      :in    [:b 1]
-                      :with  {:c 5}}
-                     nil))))
-
-  (testing "conj operation"
-    (is (= {:a 1, :b [2 3 5]}
-           (sut/fold {:value {:a 1 :b [2 3]}
-                      :op    :conj
-                      :in    [:b]
-                      :with  5}
-                     nil)))
-
-    (is (= {:a 1, :b [{:c 2} {:c 3} {:c 4} {:c 5}]}
-           (sut/fold {:value {:a 1 :b [{:c 2} {:c 3} {:c 4}]}
-                      :op    :conj
-                      :in    [:b]
-                      :with  {:c 5}}
-                     nil))))
+    (is (= (sut/fold {:item {:a 123} :in [:b 10] :with 321} nil)
+           [{:a 123, :b '(321)}])))
 
   (testing "accumulating value"
-    (let [first-iteration  (sut/fold {:value {:a 1 :b 2}
-                                      :op    :replace
-                                      :in    [:a]
-                                      :with  2}
-                                     nil)
-          second-iteration (sut/fold {:value {:a 1 :b 2}
-                                      :op    :replace
-                                      :in    [:a]
-                                      :with  3}
+    (let [first-iteration  (sut/fold {:item {:a 123} :with {:b 321}} nil)
+          second-iteration (sut/fold {:item {:a 456} :with {:b 654 :c 987}}
                                      first-iteration)]
-      (is (= {:a 2, :b 2} first-iteration))
-      (is (= {:a 3, :b 2} second-iteration)))))
-
+      (is (= [{:a 123 :b 321}]
+             first-iteration))
+      (is (= [{:a 123 :b 321}
+              {:a 456 :b 654 :c 987}]
+             second-iteration)))))

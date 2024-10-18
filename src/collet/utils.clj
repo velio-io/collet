@@ -1,7 +1,11 @@
 (ns collet.utils
   (:require
    [cognitect.aws.client.api :as aws]
-   [cognitect.aws.credentials :as credentials]))
+   [cognitect.aws.credentials :as credentials]
+   [malli.core :as m]
+   [tech.v3.dataset :as ds])
+  (:import
+   [ham_fisted LinkedHashMap]))
 
 
 (defn assoc-some
@@ -64,3 +68,27 @@
       (throw (ex-info (str "AWS error response: " error)
                       (merge params* {:response response})))
       response)))
+
+
+(def linked-hash-map?
+  (m/-simple-schema
+   {:type :linked-hash-map?
+    :pred #(instance? LinkedHashMap %)
+    :type-properties
+    {:error/message "should be an instance of LinkedHashMap"}}))
+
+
+(def dataset?
+  (m/-simple-schema
+   {:type :dataset?
+    :pred #(ds/dataset? %)
+    :type-properties
+    {:error/message "should be an instance of oftech.v3.dataset (Dataset)"}}))
+
+
+(defn make-dataset
+  [data {:keys [cat?]}]
+  (cond
+    (ds/dataset? data) data
+    cat? (ds/->dataset (sequence cat data))
+    :otherwise (ds/->dataset data)))
