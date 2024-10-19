@@ -37,7 +37,7 @@
 
         ;; if the step is a keyword or string, try to get the value from the map
         (or (keyword? step) (string? step))
-        (let [found  (when (map? result) (get result step))
+        (let [found  (get result step)
               trace' (conj trace step)]
           (if (not (seq remaining))
             ;; we got to the end of the path, return the value if found

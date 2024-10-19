@@ -20,7 +20,7 @@
                   (not (some #(= value %) field)))
    :regex       #(re-matches %2 %1)
    :nil?        nil?
-   :not-nil?    (comp not nil?)
+   :not-nil?    some?
    :not=        not=
    :empty?      empty?
    :not-empty?  (comp not empty?)})

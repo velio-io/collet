@@ -105,6 +105,32 @@
       (is (fn? jdbc-action)))))
 
 
+(deftest conditional-action-execution
+  (testing "when condition specified, action executed only in case of match"
+    (let [action-spec {:type      :custom
+                       :name      :condition-test
+                       :when      [:> [:config :b] 0]
+                       :selectors '{a [:config :a]
+                                    b [:config :b]}
+                       :params    '[a b]
+                       :fn        (fn [a b]
+                                    (/ a b))}
+          action      (sut/compile-action action-spec)
+          match       (-> (action {:config {:a 20 :b 5}
+                                   :state  {}})
+                          (get-in [:state :condition-test]))
+          no-match    (action {:config {:a 20 :b 0}
+                               :state  {:other :data}})]
+      (is (= 4 match)
+          "action executed")
+
+      (is (= :data (get-in no-match [:state :other]))
+          "other data is not affected")
+
+      (is (nil? (get-in no-match [:state :condition-test]))
+          "action not executed"))))
+
+
 (deftest compile-and-run-task
   (testing "Compiles and runs a task"
     (let [task-spec {:name    :test-task
