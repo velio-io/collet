@@ -13,15 +13,15 @@
   ([data path item in-loop]
    (let [[p & rest-path] path]
      (cond
+       ;; empty path case
+       (and (nil? p) in-loop)
+       item
        ;; seq case
        (and (nil? p) (sequential? data))
        (conj data item)
        ;; map case
        (and (nil? p) (map? data))
        (merge data item)
-       ;; empty path case
-       (and (nil? p) in-loop)
-       item
        ;; root base case
        (nil? p) data
        ;; try to add new item
