@@ -1,10 +1,12 @@
 (ns collet.utils
   (:require
+   [clojure.walk :as walk]
    [cognitect.aws.client.api :as aws]
    [cognitect.aws.credentials :as credentials]
    [malli.core :as m]
    [tech.v3.dataset :as ds])
   (:import
+   [clojure.lang PersistentVector]
    [ham_fisted LinkedHashMap]))
 
 
@@ -38,6 +40,31 @@
         (reduced x)))
     nil
     coll)))
+
+
+(defn replace-vec-element
+  "Replaces elements in a vector according to a replacement map"
+  [replacement-map x]
+  (if (vector? x)
+    (reduce-kv
+     (fn [^PersistentVector acc element replacement]
+       (let [idx (.indexOf acc element)]
+         (if (not= -1 idx)
+           (-> (concat (subvec acc 0 idx)
+                       replacement
+                       (subvec acc (inc idx)))
+               (vec))
+           acc)))
+     x replacement-map)
+    x))
+
+
+(defn replace-all
+  "Traverse the data structure and replace elements according to a replacement map"
+  [data replacement-map]
+  (walk/postwalk
+   (partial replace-vec-element replacement-map)
+   data))
 
 
 (defn make-client

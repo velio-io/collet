@@ -44,13 +44,13 @@
                                  :name      :enrich-collection
                                  :target    [:config :collection]
                                  :action    :custom
-                                 :selectors {'id   [:enrich/item :id]
+                                 :selectors {'id   [:$enrich/item :id]
                                              'data [:config :data]}
                                  :params    ['data 'id]
                                  :fn        (fn [data id]
                                               (get data id))}]
                      :iterator {:data [:state :enrich-collection]
-                                :next [:true? [:enrich/has-next-item]]}}
+                                :next [:true? [:$enrich/has-next-item]]}}
           task-fn   (collet/compile-task task-spec)
           result    (-> (task-fn {:config {:collection [{:id 1} {:id 2} {:id 3}]
                                            :data       {1 {:name "one"}
@@ -73,13 +73,13 @@
                                                 :selectors {'events [:config :area-events]}
                                                 :params    {:sequence   'events
                                                             :cat?       true
-                                                            :flatten-by {:artist [:relations [:cat [:cond [:not-nil? :artist]] :artist]]}}}]
+                                                            :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]
                                   :actions    [{:type      :enrich
                                                 :name      :enrich-artist-details
                                                 :target    [:state :city-events-list]
-                                                :when      [:not-nil? [:enrich/item :artist :id]]
+                                                :when      [:not-nil? [:$enrich/item :artist :id]]
                                                 :action    :http
-                                                :selectors {'artist-id [:enrich/item :artist :id]}
+                                                :selectors {'artist-id [:$enrich/item :artist :id]}
                                                 :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                                             :accept       :json
                                                             :as           :json
@@ -88,7 +88,7 @@
                                                 :return    [:body]
                                                 :fold-in   [:artist]}]
                                   :iterator   {:data [:state :enrich-artist-details]
-                                               :next [:true? [:enrich/has-next-item]]}}]}
+                                               :next [:true? [:$enrich/has-next-item]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 

@@ -17,7 +17,7 @@
                          :_collet_join_source)
         left-ds        (if (= source-key :_collet_join_source)
                          (ds/row-map dataset
-                                     #(hash-map source-key (-> (collet.select/select source %) :value)))
+                                     #(hash-map source-key (collet.select/select source %)))
                          dataset)
         target-key     (if (or (keyword? target) (string? target))
                          target
@@ -25,7 +25,7 @@
         join-ds        (utils/make-dataset sequence {:cat? cat?})
         right-ds       (if (= target-key :_collet_join_target)
                          (ds/row-map join-ds
-                                     #(hash-map target-key (-> (collet.select/select target %) :value)))
+                                     #(hash-map target-key (collet.select/select target %)))
                          join-ds)
         helper-columns (cond-> []
                          (= source-key :_collet_join_source)
@@ -124,7 +124,7 @@
       (some? flatten-by)
       (ds/row-mapcat
        (fn [row]
-         (let [value (-> (collet.select/select f-path row) :value)]
+         (let [value (collet.select/select f-path row)]
            (cond
              (and (sequential? value) (not-empty value))
              (map #(hash-map f-key %) value)
@@ -144,7 +144,7 @@
       (some? group-by)
       (ds/group-by
        (fn [row]
-         (-> (collet.select/select group-by row) :value))))))
+         (collet.select/select group-by row))))))
 
 
 (def slicer-action

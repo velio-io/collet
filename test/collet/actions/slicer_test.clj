@@ -17,7 +17,7 @@
                                                                 {:street "NorthG St." :city "Springfield"}]}
                                 {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
                                 {:id 3 :name "James" :addresses []}]
-                   :flatten-by {:address [:addresses [:cat :street]]}})]
+                   :flatten-by {:address [:addresses [:$/cat :street]]}})]
       (is (= 4 (ds/row-count result)))
       (is (= 4 (ds/column-count result)))
       (is (= [:id :name :addresses :address]
@@ -88,7 +88,7 @@
                                                                    {:street "NorthG St." :city "Springfield"}]}
                                    {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
                                    {:id 3 :name "Joshua" :addresses [{:street "NorthG St." :city "Springfield"}]}]
-                      :flatten-by {:address [:addresses [:cat :street]]}
+                      :flatten-by {:address [:addresses [:$/cat :street]]}
                       :join-with  {:sequence [{:user {:id 1} :phone 1234567}
                                               {:user {:id 2} :phone 7654321}
                                               {:user {:id 3} :phone 4561237}]
@@ -128,7 +128,7 @@
                                                 :name      :city-events-list
                                                 :selectors {'events [:config :area-events]}
                                                 :params    {:sequence   'events
-                                                            :flatten-by {:artist [:relations [:cat [:cond [:not-nil? :artist]] :artist]]}}}]}]}
+                                                            :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 

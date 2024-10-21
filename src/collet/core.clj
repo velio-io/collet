@@ -70,7 +70,7 @@
          ;; replace value with the corresponding value from the context
          (and (symbol? x) (contains? selectors x))
          (let [selector-path (get selectors x)]
-           (-> (collet.select/select selector-path context) :value))
+           (collet.select/select selector-path context))
          ;; x could a function call, try to evaluate the form
          (and (list? x) (symbol? (first x)))
          (try (eval x) (catch Exception _ x))
@@ -151,7 +151,7 @@
                                 ;; no parameters
                                 (nil? params) (action-fn))
                       result' (if (some? return)
-                                (-> (collet.select/select return result) :value)
+                                (collet.select/select return result)
                                 result)]
                   (assoc-in context [:state action-name] result')))
               (do (ml/log :collet/action-skipped :action action-name :type action-type)
@@ -205,7 +205,7 @@
         last-action (-> actions last :name)]
     (cond
       (nil? data) (fn [context] (get-in context [:state last-action]))
-      (vector? data) (fn [context] (-> (collet.select/select data context) :value))
+      (vector? data) (fn [context] (collet.select/select data context))
       :otherwise data)))
 
 

@@ -98,7 +98,7 @@
                                     :query      {:select   [:*]
                                                  :from     :users
                                                  :order-by [:age]}}
-                        :return    [[:cat :users/user_name]]})
+                        :return    [[:$/cat :users/user_name]]})
               context (action {:config {:connection connection-map}
                                :state  {}})
               result  (-> context :state :query-action)]
@@ -116,7 +116,7 @@
                                                     :from   :users
                                                     :where  [:= :user-name 'name]}
                                     :prefix-table? false}
-                        :return    [[:op :first]]})
+                        :return    [[:$/op :first]]})
               context (action {:config {:connection connection-map
                                         :name       "Bob"}
                                :state  {}})
@@ -303,7 +303,7 @@
                                                           :query      {:select   [:*]
                                                                        :from     :employees
                                                                        :order-by [:id]}}
-                                              :return    [[:cat :employees/user_name]]}]}]})
+                                              :return    [[:$/cat :employees/user_name]]}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-mysql-table conn))
             _        @(pipeline {:connection connection-map})
