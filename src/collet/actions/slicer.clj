@@ -97,7 +97,7 @@
   [:map
    [:sequence [:or utils/dataset? [:sequential map?]]]
    [:cat? {:optional true} :boolean]
-   [:flatten-by {:optional true} [:map-of :keyword collet.select/select-path]]
+   [:flatten-by {:optional true} [:map-of [:or :keyword :string] collet.select/select-path]]
    [:group-by {:optional true} collet.select/select-path]
    [:join-with {:optional true}
     [:map
