@@ -107,8 +107,8 @@
      [:cat? {:optional true} :boolean]]]
    [:fold-by {:optional true}
     [:map
-     [:columns [:or :keyword [:sequential :keyword]]]
-     [:rollup {:optional true} [:or :boolean [:sequential :keyword]]]
+     [:columns [:or :keyword [:sequential [:or :keyword :string]]]]
+     [:rollup {:optional true} [:or :boolean [:sequential [:or :keyword :string]]]]
      [:rollup-except {:optional true} :boolean]]]])
 
 
