@@ -74,10 +74,6 @@
   "Fold dataset by the provided columns"
   [dataset {:keys [by rollup rollup-except] :or {rollup false rollup-except false}}]
   (let [multiple-columns? (sequential? by)
-        fold-by-selector  (if multiple-columns?
-                            (fn [row]
-                              (select-keys row by))
-                            by)
         rollup'           (cond
                             (true? rollup) :all
                             (vector? rollup) (set rollup)
@@ -89,7 +85,7 @@
                                              #{by})}
         options           {:group-by-finalizer (partial zip-columns zip-options)}
         groups            (if multiple-columns?
-                            (ds/group-by dataset fold-by-selector options)
+                            (ds/group-by dataset #(select-keys % by) options)
                             (ds/group-by-column dataset by options))]
     (-> groups vals ds/->dataset)))
 
@@ -143,10 +139,12 @@
 
 
 (defn do-select
-  [dataset {:keys [columns rows]}]
+  [dataset {:keys [columns rows drop-cols drop-rows]}]
   (cond-> dataset
     (some? columns) (ds/select-columns columns)
-    (some? rows) (ds/select-rows columns rows)))
+    (some? drop-cols) (ds/drop-columns drop-cols)
+    (some? rows) (ds/select-rows columns rows)
+    (some? drop-rows) (ds/drop-rows drop-rows)))
 
 
 (def slicer-params-spec
@@ -183,10 +181,10 @@
                         [:comp fn?]]]
      ::select         [:tuple [:= :select]
                        [:map
-                        [:columns {:optional true}
-                         [:sequential ::simple-value]]
-                        [:rows {:optional true}
-                         [:sequential :int]]]]}}
+                        [:columns {:optional true} [:sequential ::simple-value]]
+                        [:drop-cols {:optional true} [:sequential ::simple-value]]
+                        [:rows {:optional true} [:sequential :int]]
+                        [:drop-rows {:optional true} [:sequential :int]]]]}}
    [:map
     [:sequence [:or utils/dataset? [:sequential map?]]]
     [:cat? {:optional true} :boolean]
