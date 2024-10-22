@@ -46,11 +46,12 @@
   [:map
    [:name :keyword]
    [:type :keyword]
+   [:fn {:optional true} [:or fn? list?]]
+   [:when {:optional true} collet.conds/condition?]
    [:params {:optional true}
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
     [:map-of :symbol collet.select/select-path]]
-   [:fn {:optional true} [:or fn? list?]]
    [:return {:optional true}
     collet.select/select-path]])
 
@@ -158,7 +159,10 @@
                   ;; need to reset action state to prevent discrepancies between iterations
                   (assoc-in context [:state action-name] nil)))
             (catch Exception e
-              (throw (ex-info "Action failed" (merge (ex-data e) {:action action-name}) e)))))))))
+              (throw (ex-info "Action failed"
+                              (merge (ex-data e) {:action action-name
+                                                  :params (compile-action-params action-spec context)})
+                              e)))))))))
 
 
 (def task-spec
@@ -183,7 +187,7 @@
       [:or collet.select/select-path fn?]]
      [:next {:optional    true
              :description "answers on the question should we iterate over task actions again"}
-      [:maybe [:or [:vector :any] :boolean]]]]]])
+      [:maybe [:or collet.conds/condition? :boolean]]]]]])
 
 
 (defn execute-actions

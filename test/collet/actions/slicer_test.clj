@@ -13,11 +13,11 @@
 (deftest prep-dataset-test
   (testing "flattening a sequence over the nested collection (by :street value)"
     (let [result (sut/prep-dataset
-                  {:sequence   [{:id 1 :name "John" :addresses [{:street "Main St." :city "Springfield"}
-                                                                {:street "NorthG St." :city "Springfield"}]}
-                                {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
-                                {:id 3 :name "James" :addresses []}]
-                   :flatten-by {:address [:addresses [:$/cat :street]]}})]
+                  {:sequence [{:id 1 :name "John" :addresses [{:street "Main St." :city "Springfield"}
+                                                              {:street "NorthG St." :city "Springfield"}]}
+                              {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
+                              {:id 3 :name "James" :addresses []}]
+                   :apply    [[:flatten {:by {:address [:addresses [:$/cat :street]]}}]]})]
       (is (= 4 (ds/row-count result)))
       (is (= 4 (ds/column-count result)))
       (is (= [:id :name :addresses :address]
@@ -32,8 +32,8 @@
                               {:id 3 :name "James" :street "Elm St."}
                               {:id 4 :name "Jacob" :street "Elm St."}
                               {:id 5 :name "Jason" :street "Main St."}]
-                   :fold-by  {:columns [:street]
-                              :rollup  true}})]
+                   :apply    [[:fold {:by     [:street]
+                                      :rollup true}]]})]
       (is (= 3 (ds/row-count result)))
       (is (= [{:street "Main St." :id [1 5] :name ["John" "Jason"]}
               {:street "NorthG St." :id 2 :name "Jane"}
@@ -49,34 +49,48 @@
                               {:id 5 :name "Joe" :city "Lakeside"}
                               {:id 3 :name "Jack" :city "Springfield"}
                               {:id 5 :name "Joe" :city "Lakeside"}]
-                   :group-by [:city]})]
+                   :apply    [[:group {:by          :city
+                                       :join-groups false}]]})]
       (is (= ["Springfield" "Lakeside"] (keys result)))
       (is (every? ds/dataset? (vals result)))
       (is (= 3 (ds/row-count (get result "Springfield"))))
-      (is (= 4 (ds/row-count (get result "Lakeside"))))))
+      (is (= 4 (ds/row-count (get result "Lakeside")))))
+
+    (let [result (sut/prep-dataset
+                  {:sequence [{:id 1 :name "John" :city "Springfield"}
+                              {:id 3 :name "Jack" :city "Springfield"}
+                              {:id 2 :name "Jane" :city "Lakeside"}
+                              {:id 4 :name "Jill" :city "Lakeside"}
+                              {:id 5 :name "Joe" :city "Lakeside"}
+                              {:id 3 :name "Jack" :city "Springfield"}
+                              {:id 5 :name "Joe" :city "Lakeside"}]
+                   :apply    [[:group {:by :city}]]})]
+      (ds/dataset? result)
+      (is (= 7 (ds/row-count result)))
+      (is (= [:id :name :city :_group_by_key] (ds/column-names result)))))
 
   (testing "joining a sequence with another sequence"
     (let [result (sut/prep-dataset
-                  {:sequence  [{:id 1 :name "John"}
-                               {:id 2 :name "Jane"}
-                               {:id 3 :name "Jack"}]
-                   :join-with {:sequence [{:user {:id 1} :city "Springfield"}
-                                          {:user {:id 2} :city "Lakeside"}
-                                          {:user {:id 3} :city "Springfield"}]
-                               :source   :id
-                               :target   [:user :id]}})]
+                  {:sequence [{:id 1 :name "John"}
+                              {:id 2 :name "Jane"}
+                              {:id 3 :name "Jack"}]
+                   :apply    [[:join {:with   [{:user {:id 1} :city "Springfield"}
+                                               {:user {:id 2} :city "Lakeside"}
+                                               {:user {:id 3} :city "Springfield"}]
+                                      :source :id
+                                      :target [:user :id]}]]})]
       (is (= [:id :name :user :city]
              (ds/column-names result)))
       (is (= 3 (ds/row-count result))))
 
     (let [result (sut/prep-dataset
-                  {:sequence  [{:id 1 :name "John"}
-                               {:id 2 :name "Jane"}]
-                   :join-with {:sequence [{:user {:id 1} :city "Springfield"}
-                                          {:user {:id 2} :city "Lakeside"}
-                                          {:user {:id 3} :city "Springfield"}]
-                               :source   :id
-                               :target   [:user :id]}})]
+                  {:sequence [{:id 1 :name "John"}
+                              {:id 2 :name "Jane"}]
+                   :apply    [[:join {:with   [{:user {:id 1} :city "Springfield"}
+                                               {:user {:id 2} :city "Lakeside"}
+                                               {:user {:id 3} :city "Springfield"}]
+                                      :source :id
+                                      :target [:user :id]}]]})]
       (is (= [:id :name :user :city]
              (ds/column-names result)))
       (is (= 2 (ds/row-count result))
@@ -84,17 +98,18 @@
 
   (testing "multiple transformations"
     (let [result    (sut/prep-dataset
-                     {:sequence   [{:id 1 :name "John" :addresses [{:street "Main St." :city "Springfield"}
-                                                                   {:street "NorthG St." :city "Springfield"}]}
-                                   {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
-                                   {:id 3 :name "Joshua" :addresses [{:street "NorthG St." :city "Springfield"}]}]
-                      :flatten-by {:address [:addresses [:$/cat :street]]}
-                      :join-with  {:sequence [{:user {:id 1} :phone 1234567}
-                                              {:user {:id 2} :phone 7654321}
-                                              {:user {:id 3} :phone 4561237}]
-                                   :source   :id
-                                   :target   [:user :id]}
-                      :group-by   [:address]})
+                     {:sequence [{:id 1 :name "John" :addresses [{:street "Main St." :city "Springfield"}
+                                                                 {:street "NorthG St." :city "Springfield"}]}
+                                 {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
+                                 {:id 3 :name "Joshua" :addresses [{:street "NorthG St." :city "Springfield"}]}]
+                      :apply    [[:flatten {:by {:address [:addresses [:$/cat :street]]}}]
+                                 [:join {:with   [{:user {:id 1} :phone 1234567}
+                                                  {:user {:id 2} :phone 7654321}
+                                                  {:user {:id 3} :phone 4561237}]
+                                         :source :id
+                                         :target [:user :id]}]
+                                 [:group {:by          :address
+                                          :join-groups false}]]})
           main-st   (get result "Main St.")
           northg-st (get result "NorthG St.")]
       (is (= ["Main St." "NorthG St." "Elm St."]
@@ -128,7 +143,9 @@
                                                 :name      :city-events-list
                                                 :selectors {'events [:config :area-events]}
                                                 :params    {:sequence   'events
-                                                            :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]}]}
+                                                            :apply      [[:flatten {:by {:artist [:relations
+                                                                                                  [:$/cat [:$/cond [:not-nil? :artist]]
+                                                                                                   :artist]]}}]]}}]}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 

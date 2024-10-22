@@ -1,4 +1,6 @@
-(ns collet.conditions)
+(ns collet.conditions
+  (:require
+   [malli.core :as m]))
 
 
 (def condition->fn
@@ -50,6 +52,14 @@
      :else
      (and (contains? condition->fn (first condition))
           (valid-condition-value? (second condition))))))
+
+
+(def condition?
+  (m/-simple-schema
+   {:type :condition?
+    :pred valid-condition?
+    :type-properties
+    {:error/message "should be a valid condition predicate"}}))
 
 
 (defn prep-args

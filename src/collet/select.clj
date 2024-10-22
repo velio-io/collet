@@ -9,7 +9,7 @@
                                :keyword
                                :string
                                :int
-                               [:cat [:= :$/cond] [:vector :any]]
+                               [:cat [:= :$/cond] collet.conds/condition?]
                                [:cat [:= :$/op] :keyword]
                                [:cat [:= :$/cat] [:* [:schema [:ref ::select-element]]]]
                                [:map-of :keyword [:or [:ref ::select-element]
