@@ -98,8 +98,8 @@
                                     :setup      [{:type      :slicer
                                                   :name      :event-artists
                                                   :selectors {'events [:config :events]}
-                                                  :params    {:sequence   'events
-                                                              :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]
+                                                  :params    {:sequence 'events
+                                                              :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
                                     :actions    [{:type      :mapper
                                                   :name      :event-artist-item
                                                   :selectors {'event-artists [:state :event-artists]}
@@ -139,7 +139,7 @@
                                                   :name      :events-ratings
                                                   :selectors {'artists [:config :artists]}
                                                   :params    {:sequence 'artists
-                                                              :fold-by  {:columns [:event-id]}}}]
+                                                              :apply    [[:fold {:by [:event-id]}]]}}]
                                     :actions    [{:type      :mapper
                                                   :name      :event-rating
                                                   :selectors {'ratings [:state :events-ratings]}
@@ -220,8 +220,8 @@
                                   :setup    [{:type      :slicer
                                               :name      :event-artists
                                               :selectors {'events [:inputs :area-events]}
-                                              :params    {:sequence   'events
-                                                          :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]
+                                              :params    {:sequence 'events
+                                                          :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
                                   :actions  [{:type      :enrich
                                               :name      :artist-details
                                               :target    [:state :event-artists]
@@ -245,8 +245,7 @@
                                                 :name      :events-with-ratings
                                                 :selectors {'events [:inputs :events-with-artists]}
                                                 :params    {:sequence 'events
-                                                            :fold-by  {:columns [:id]
-                                                                       :rollup  true}}}]
+                                                            :apply    [[:fold {:by [:id] :rollup true}]]}}]
                                   :actions    [{:type      :mapper
                                                 :name      :event-rating
                                                 :selectors {'ratings [:state :events-with-ratings]}

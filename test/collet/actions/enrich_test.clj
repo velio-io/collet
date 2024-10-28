@@ -71,9 +71,9 @@
                                   :setup      [{:type      :slicer
                                                 :name      :city-events-list
                                                 :selectors {'events [:config :area-events]}
-                                                :params    {:sequence   'events
-                                                            :cat?       true
-                                                            :flatten-by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}}]
+                                                :params    {:sequence 'events
+                                                            :cat?     true
+                                                            :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
                                   :actions    [{:type      :enrich
                                                 :name      :enrich-artist-details
                                                 :target    [:state :city-events-list]
