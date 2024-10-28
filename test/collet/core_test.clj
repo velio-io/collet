@@ -274,7 +274,7 @@
                                   :keep-state true
                                   :actions    [{:type      :custom
                                                 :name      :action2
-                                                :selectors '{val1 [:inputs :task1 [:op :first]]}
+                                                :selectors '{val1 [:inputs :task1 [:$/op :first]]}
                                                 :params    '[val1]
                                                 :fn        (fn [v1]
                                                              (Thread/sleep 2000)

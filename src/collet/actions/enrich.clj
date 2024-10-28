@@ -1,34 +1,6 @@
 (ns collet.actions.enrich
   (:require
-   [clojure.walk :as walk]
-   [collet.utils :as utils])
-  (:import
-   [clojure.lang PersistentVector]))
-
-
-(defn replace-vec-element
-  "Replaces elements in a vector according to a replacement map"
-  [replacement-map x]
-  (if (vector? x)
-    (reduce-kv
-     (fn [^PersistentVector acc element replacement]
-       (let [idx (.indexOf acc element)]
-         (if (not= -1 idx)
-           (-> (concat (subvec acc 0 idx)
-                       replacement
-                       (subvec acc (inc idx)))
-               (vec))
-           acc)))
-     x replacement-map)
-    x))
-
-
-(defn replace-all
-  "Traverse the data structure and replace elements according to a replacement map"
-  [data replacement-map]
-  (walk/postwalk
-   (partial replace-vec-element replacement-map)
-   data))
+   [collet.utils :as utils]))
 
 
 (def enrich-params-spec
@@ -65,10 +37,10 @@
         with-sym      (gensym "with")
         selectors'    (reduce-kv
                        (fn [acc sym path]
-                         (->> (replace-all path {:enrich/item [:state mapper-key :current]})
+                         (->> (utils/replace-all path {:$enrich/item [:state mapper-key :current]})
                               (assoc acc sym)))
                        {} selectors)
-        execute-when' (replace-all execute-when {:enrich/item [:state mapper-key :current]})]
+        execute-when' (utils/replace-all execute-when {:$enrich/item [:state mapper-key :current]})]
     ;; return a vector of three actions
     ;; slicer action
     [{:type      :mapper
@@ -102,9 +74,9 @@
         mapper-key  (keyword (str base-name "-mapper"))]
     (-> task
         (assoc :state-format (or (:state-format task) :latest))
-        (update :iterator replace-all
-                {:enrich/item          [:state mapper-key :current]
-                 :enrich/has-next-item [:state mapper-key :next]}))))
+        (update :iterator utils/replace-all
+                {:$enrich/item          [:state mapper-key :current]
+                 :$enrich/has-next-item [:state mapper-key :next]}))))
 
 
 (def enrich-action

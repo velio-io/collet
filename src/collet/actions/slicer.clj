@@ -1,31 +1,32 @@
 (ns collet.actions.slicer
   (:require
-   [collet.utils :as utils]
-   [collet.select :as collet.select]
    [tech.v3.dataset :as ds]
    [tech.v3.dataset.column :as ds.col]
    [tech.v3.dataset.join :as ds.join]
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.bitmap :as dtype.bitmap]
-   [tech.v3.datatype.protocols :as dtype.proto]))
+   [tech.v3.datatype.protocols :as dtype.proto]
+   [collet.conditions :as collet.conds]
+   [collet.utils :as utils]
+   [collet.select :as collet.select]))
 
 
 (defn do-join
-  [dataset {:keys [sequence cat? source target]}]
+  [dataset {:keys [with cat? source target]}]
   (let [source-key     (if (or (keyword? source) (string? source))
                          source
                          :_collet_join_source)
         left-ds        (if (= source-key :_collet_join_source)
                          (ds/row-map dataset
-                                     #(hash-map source-key (-> (collet.select/select source %) :value)))
+                                     #(hash-map source-key (collet.select/select source %)))
                          dataset)
         target-key     (if (or (keyword? target) (string? target))
                          target
                          :_collet_join_target)
-        join-ds        (utils/make-dataset sequence {:cat? cat?})
+        join-ds        (utils/make-dataset with {:cat? cat?})
         right-ds       (if (= target-key :_collet_join_target)
                          (ds/row-map join-ds
-                                     #(hash-map target-key (-> (collet.select/select target %) :value)))
+                                     #(hash-map target-key (collet.select/select target %)))
                          join-ds)
         helper-columns (cond-> []
                          (= source-key :_collet_join_source)
@@ -71,45 +72,124 @@
 
 (defn do-fold-by
   "Fold dataset by the provided columns"
-  [dataset {:keys [columns rollup rollup-except] :or {rollup false rollup-except false}}]
-  (let [multiple-columns? (sequential? columns)
-        fold-by-selector  (if multiple-columns?
-                            (fn [row]
-                              (select-keys row columns))
-                            columns)
+  [dataset {:keys [by rollup rollup-except] :or {rollup false rollup-except false}}]
+  (let [multiple-columns? (sequential? by)
         rollup'           (cond
                             (true? rollup) :all
                             (vector? rollup) (set rollup)
                             :otherwise :none)
-        options           {:rollup         rollup'
+        zip-options       {:rollup         rollup'
                            :rollup-except  rollup-except
                            :target-columns (if multiple-columns?
-                                             (set columns)
-                                             #{columns})}]
-    (-> dataset
-        (ds/group-by fold-by-selector
-                     {:group-by-finalizer (partial zip-columns options)})
-        vals
-        ds/->dataset)))
+                                             (set by)
+                                             #{by})}
+        options           {:group-by-finalizer (partial zip-columns zip-options)}
+        groups            (if multiple-columns?
+                            (ds/group-by dataset #(select-keys % by) options)
+                            (ds/group-by-column dataset by options))]
+    (-> groups vals ds/->dataset)))
+
+
+(defn do-flatten
+  [dataset {:keys [by]}]
+  ;; TODO allow for multiple flatten-by keys
+  (let [[f-key f-path] (first by)]
+    (ds/row-mapcat
+     dataset
+     (fn [row]
+       (let [value (collet.select/select f-path row)]
+         (cond
+           (and (sequential? value) (not-empty value))
+           (map #(hash-map f-key %) value)
+
+           (not-empty value)
+           [{f-key value}]
+
+           :otherwise
+           [{f-key nil}]))))))
+
+
+(defn do-group-by
+  [dataset {:keys [by join-groups group-col]
+            :or   {join-groups true group-col :_group_by_key}}]
+  (let [groups (if (sequential? by)
+                 (ds/group-by dataset #(collet.select/select group-by %))
+                 (ds/group-by-column dataset by))]
+    (if join-groups
+      (let [groups-seq (map (fn [[k d]] (assoc d group-col k)) groups)]
+        (if (< 3 (count groups))
+          (apply ds/concat-inplace groups-seq)
+          (apply ds/concat-copying groups-seq)))
+      groups)))
+
+
+(defn do-filter
+  [dataset {:keys [by predicate]}]
+  (if (sequential? by)
+    (let [condition-fn (collet.conds/compile-conditions by)]
+      (ds/filter dataset condition-fn))
+    (ds/filter-column dataset by predicate)))
+
+
+(defn do-order-by
+  [dataset {:keys [by comp]}]
+  (if (sequential? by)
+    (ds/sort-by dataset #(collet.select/select by %) comp)
+    (ds/sort-by-column dataset by comp)))
+
+
+(defn do-select
+  [dataset {:keys [columns rows drop-cols drop-rows]}]
+  (cond-> dataset
+    (some? columns) (ds/select-columns columns)
+    (some? drop-cols) (ds/drop-columns drop-cols)
+    (some? rows) (ds/select-rows columns rows)
+    (some? drop-rows) (ds/drop-rows drop-rows)))
 
 
 (def slicer-params-spec
-  [:map
-   [:sequence [:or utils/dataset? [:sequential map?]]]
-   [:cat? {:optional true} :boolean]
-   [:flatten-by {:optional true} [:map-of :keyword collet.select/select-path]]
-   [:group-by {:optional true} collet.select/select-path]
-   [:join-with {:optional true}
-    [:map
-     [:sequence [:or utils/dataset? [:sequential map?]]]
-     [:source [:or :string :keyword collet.select/select-path]]
-     [:target [:or :string :keyword collet.select/select-path]]
-     [:cat? {:optional true} :boolean]]]
-   [:fold-by {:optional true}
-    [:map
-     [:columns [:or :keyword [:sequential :keyword]]]
-     [:rollup {:optional true} [:or :boolean [:sequential :keyword]]]
-     [:rollup-except {:optional true} :boolean]]]])
+  [:schema
+   {:registry
+    {::simple-value   [:or :keyword :string :int]
+     ::simple-or-path [:or ::simple-value collet.select/select-path]
+     ::flatten        [:tuple [:= :flatten]
+                       [:map
+                        [:by [:map-of ::simple-value collet.select/select-path]]]]
+     ::group          [:tuple [:= :group]
+                       [:map
+                        [:by ::simple-or-path]
+                        [:join-groups {:optional true} :boolean]
+                        [:group-col {:optional true} ::simple-value]]]
+     ::join           [:tuple [:= :join]
+                       [:map
+                        [:with [:or utils/dataset? [:sequential map?]]]
+                        [:source ::simple-or-path]
+                        [:target ::simple-or-path]
+                        [:cat? {:optional true} :boolean]]]
+     ::fold           [:tuple [:= :fold]
+                       [:map
+                        [:by [:or ::simple-value [:sequential ::simple-value]]]
+                        [:rollup {:optional true} [:or :boolean [:sequential ::simple-value]]]
+                        [:rollup-except {:optional true} :boolean]]]
+     ::filter         [:tuple [:= :filter]
+                       [:map
+                        [:by [:or ::simple-value collet.conds/condition?]]
+                        [:predicate [:or fn? set?]]]]
+     ::order          [:tuple [:= :order]
+                       [:map
+                        [:by ::simple-or-path]
+                        [:comp fn?]]]
+     ::select         [:tuple [:= :select]
+                       [:map
+                        [:columns {:optional true} [:sequential ::simple-value]]
+                        [:drop-cols {:optional true} [:sequential ::simple-value]]
+                        [:rows {:optional true} [:sequential :int]]
+                        [:drop-rows {:optional true} [:sequential :int]]]]}}
+   [:map
+    [:sequence [:or utils/dataset? [:sequential map?]]]
+    [:cat? {:optional true} :boolean]
+    [:apply {:optional true}
+     [:+ [:or ::flatten ::group ::join ::fold ::filter ::order ::select]]]]])
 
 
 (defn prep-dataset
@@ -117,34 +197,20 @@
    Can modify the dataset shape by applying flatten-by, group-by and join-with options."
   {:malli/schema [:=> [:cat slicer-params-spec]
                   [:or utils/linked-hash-map? utils/dataset?]]}
-  [{:keys [flatten-by group-by fold-by join-with cat?] data :sequence}]
-  (let [dataset (utils/make-dataset data {:cat? cat?})
-        [f-key f-path] (first flatten-by)]
-    (cond-> dataset
-      (some? flatten-by)
-      (ds/row-mapcat
-       (fn [row]
-         (let [value (-> (collet.select/select f-path row) :value)]
-           (cond
-             (and (sequential? value) (not-empty value))
-             (map #(hash-map f-key %) value)
-
-             (not-empty value)
-             [{f-key value}]
-
-             :otherwise
-             [{f-key nil}]))))
-
-      (some? join-with)
-      (do-join join-with)
-
-      (some? fold-by)
-      (do-fold-by fold-by)
-
-      (some? group-by)
-      (ds/group-by
-       (fn [row]
-         (-> (collet.select/select group-by row) :value))))))
+  [{:keys [apply cat?] data :sequence}]
+  (let [dataset (utils/make-dataset data {:cat? cat?})]
+    (reduce
+     (fn [d [op args]]
+       (case op
+         :flatten (do-flatten d args)
+         :group (do-group-by d args)
+         :join (do-join d args)
+         :fold (do-fold-by d args)
+         :filter (do-filter d args)
+         :order (do-order-by d args)
+         :select (do-select d args)
+         d))
+     dataset apply)))
 
 
 (def slicer-action

@@ -286,17 +286,17 @@ This path vector support some additional elements.
 ;; This will select this map {:first-name "John" :user-age 30} from the state
 ```
 
-- `:cat` function to iterate over a collection
+- `:$/cat` function to iterate over a collection
 
 ```clojure
-{:data [:state :users [:cat :first-name]]}
+{:data [:state :users [:$/cat :first-name]]}
 ;; This will select all first names from the users collection
 ```
 
-- `:cond` function to select element that match the criteria
+- `:$/cond` function to select element that match the criteria
 
 ```clojure
-{:data [:state :users [:cat :first-name [:cond [:> :age 18]]]]}
+{:data [:state :users [:$/cat :first-name [:cond [:> :age 18]]]]}
 ;; This will select all first names from the users collection where age is greater than 18
 ```
 

@@ -62,7 +62,7 @@
                                                                 :as           :json
                                                                 :query-params {:limit 1
                                                                                :query 'area-query}}
-                                                    :return    [:body :areas [:cat :id]]}
+                                                    :return    [:body :areas [:$/cat :id]]}
                                                    {:type      :clj/ffirst
                                                     :name      :area-id
                                                     :selectors '{area-ids [:state :area-request]}
@@ -98,16 +98,16 @@
                                     :setup      [{:type      :slicer
                                                   :name      :event-artists
                                                   :selectors {'events [:config :events]}
-                                                  :params    {:sequence   'events
-                                                              :flatten-by {:artist [:relations [:cat [:cond [:not-nil? :artist]] :artist]]}}}]
+                                                  :params    {:sequence 'events
+                                                              :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
                                     :actions    [{:type      :mapper
                                                   :name      :event-artist-item
                                                   :selectors {'event-artists [:state :event-artists]}
                                                   :params    {:sequence 'event-artists}}
                                                  {:type      :http
                                                   :name      :artist-details
-                                                  :when      [:not-nil? [:state :event-artist-item :current :artist]]
-                                                  :selectors {'artist-id [:state :event-artist-item :current :artist :id]}
+                                                  :when      [:not-nil? [:$mapper/item :artist]]
+                                                  :selectors {'artist-id [:$mapper/item :artist :id]}
                                                   :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                                               :accept       :json
                                                               :as           :json
@@ -115,8 +115,8 @@
                                                               :query-params {:inc "ratings"}}
                                                   :return    [:body]}]
                                     :iterator   {:data [{:artist-rate [:state :artist-details :rating :value]
-                                                         :event-id    [:state :event-artist-item :current :id]}]
-                                                 :next [:true? [:state :event-artist-item :next]]}}]}
+                                                         :event-id    [:$mapper/item :id]}]
+                                                 :next [:true? [:$mapper/has-next-item]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:events @events})
             {:keys [event-artists-rating]} pipeline]
@@ -139,14 +139,14 @@
                                                   :name      :events-ratings
                                                   :selectors {'artists [:config :artists]}
                                                   :params    {:sequence 'artists
-                                                              :fold-by  {:columns [:event-id]}}}]
+                                                              :apply    [[:fold {:by [:event-id]}]]}}]
                                     :actions    [{:type      :mapper
                                                   :name      :event-rating
                                                   :selectors {'ratings [:state :events-ratings]}
                                                   :params    {:sequence 'ratings}}
                                                  {:type      :custom
                                                   :name      :calculated-rating
-                                                  :selectors {'event-ratings [:state :event-rating :current]}
+                                                  :selectors {'event-ratings [:$mapper/item]}
                                                   :params    ['event-ratings]
                                                   :fn        (fn [{:keys [event-id artist-rate]}]
                                                                (let [rating (if (seq artist-rate)
@@ -156,7 +156,7 @@
                                                                  {:event-id event-id
                                                                   :rating   rating}))}]
                                     :iterator   {:data [:state :calculated-rating]
-                                                 :next [:true? [:state :event-rating :next]]}}]}
+                                                 :next [:true? [:$mapper/has-next-item]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:artists @artists})
             {:keys [best-events]} pipeline]
@@ -185,7 +185,7 @@
                                                               :as           :json
                                                               :query-params {:limit 1
                                                                              :query 'area-query}}
-                                                  :return    [:body :areas [:cat :id]]}
+                                                  :return    [:body :areas [:$/cat :id]]}
                                                  {:type      :clj/ffirst
                                                   :name      :area-id
                                                   :selectors '{area-ids [:state :area-request]}
@@ -220,14 +220,14 @@
                                   :setup    [{:type      :slicer
                                               :name      :event-artists
                                               :selectors {'events [:inputs :area-events]}
-                                              :params    {:sequence   'events
-                                                          :flatten-by {:artist [:relations [:cat [:cond [:not-nil? :artist]] :artist]]}}}]
+                                              :params    {:sequence 'events
+                                                          :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
                                   :actions  [{:type      :enrich
                                               :name      :artist-details
                                               :target    [:state :event-artists]
-                                              :when      [:not-nil? [:enrich/item :artist :id]]
+                                              :when      [:not-nil? [:$enrich/item :artist :id]]
                                               :action    :http
-                                              :selectors {'artist-id [:enrich/item :artist :id]}
+                                              :selectors {'artist-id [:$enrich/item :artist :id]}
                                               :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                                           :accept       :json
                                                           :as           :json
@@ -236,7 +236,7 @@
                                               :return    [:body]
                                               :fold-in   [:artist]}]
                                   :iterator {:data [:state :artist-details]
-                                             :next [:true? [:enrich/has-next-item]]}}
+                                             :next [:true? [:$enrich/has-next-item]]}}
 
                                  {:name       :rated-events
                                   :keep-state true
@@ -245,15 +245,14 @@
                                                 :name      :events-with-ratings
                                                 :selectors {'events [:inputs :events-with-artists]}
                                                 :params    {:sequence 'events
-                                                            :fold-by  {:columns [:id]
-                                                                       :rollup  true}}}]
+                                                            :apply    [[:fold {:by [:id] :rollup true}]]}}]
                                   :actions    [{:type      :mapper
                                                 :name      :event-rating
                                                 :selectors {'ratings [:state :events-with-ratings]}
                                                 :params    {:sequence 'ratings}}
                                                {:type      :custom
                                                 :name      :event-with-rating
-                                                :selectors {'event-ratings [:state :event-rating :current]}
+                                                :selectors {'event-ratings [:$mapper/item]}
                                                 :params    ['event-ratings]
                                                 :fn        (fn [{:keys [artist] :as event}]
                                                              (let [ratings (->> artist
@@ -265,7 +264,7 @@
                                                                              0)]
                                                                (assoc event :rating rating)))}]
                                   :iterator   {:data [:state :event-with-rating]
-                                               :next [:true? [:state :event-rating :next]]}}]}
+                                               :next [:true? [:$mapper/has-next-item]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:city "London"})
 

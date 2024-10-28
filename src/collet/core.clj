@@ -46,11 +46,12 @@
   [:map
    [:name :keyword]
    [:type :keyword]
+   [:fn {:optional true} [:or fn? list?]]
+   [:when {:optional true} collet.conds/condition?]
    [:params {:optional true}
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
     [:map-of :symbol collet.select/select-path]]
-   [:fn {:optional true} [:or fn? list?]]
    [:return {:optional true}
     collet.select/select-path]])
 
@@ -70,7 +71,7 @@
          ;; replace value with the corresponding value from the context
          (and (symbol? x) (contains? selectors x))
          (let [selector-path (get selectors x)]
-           (-> (collet.select/select selector-path context) :value))
+           (collet.select/select selector-path context))
          ;; x could a function call, try to evaluate the form
          (and (list? x) (symbol? (first x)))
          (try (eval x) (catch Exception _ x))
@@ -151,14 +152,17 @@
                                 ;; no parameters
                                 (nil? params) (action-fn))
                       result' (if (some? return)
-                                (-> (collet.select/select return result) :value)
+                                (collet.select/select return result)
                                 result)]
                   (assoc-in context [:state action-name] result')))
               (do (ml/log :collet/action-skipped :action action-name :type action-type)
                   ;; need to reset action state to prevent discrepancies between iterations
                   (assoc-in context [:state action-name] nil)))
             (catch Exception e
-              (throw (ex-info "Action failed" (merge (ex-data e) {:action action-name}) e)))))))))
+              (throw (ex-info "Action failed"
+                              (merge (ex-data e) {:action action-name
+                                                  :params (compile-action-params action-spec context)})
+                              e)))))))))
 
 
 (def task-spec
@@ -183,7 +187,7 @@
       [:or collet.select/select-path fn?]]
      [:next {:optional    true
              :description "answers on the question should we iterate over task actions again"}
-      [:maybe [:or [:vector :any] :boolean]]]]]])
+      [:maybe [:or collet.conds/condition? :boolean]]]]]])
 
 
 (defn execute-actions
@@ -205,7 +209,7 @@
         last-action (-> actions last :name)]
     (cond
       (nil? data) (fn [context] (get-in context [:state last-action]))
-      (vector? data) (fn [context] (-> (collet.select/select data context) :value))
+      (vector? data) (fn [context] (collet.select/select data context))
       :otherwise data)))
 
 
