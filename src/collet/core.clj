@@ -154,6 +154,7 @@
                       result' (if (some? return)
                                 (collet.select/select return result)
                                 result)]
+                  (tap> {:action action-name :type action-type :params params :result result'})
                   (assoc-in context [:state action-name] result')))
               (do (ml/log :collet/action-skipped :action action-name :type action-type)
                   ;; need to reset action state to prevent discrepancies between iterations
@@ -413,7 +414,9 @@
                         (loop [tq (:tasks-queue @state)]
                           (if-some [task-key (first tq)]
                             ;; prepare task context
-                            (let [{::keys [task-fn] :keys [inputs keep-state state-format]} (get tasks task-key)
+                            (let [{::keys [task-fn]
+                                   :keys  [inputs keep-state state-format]
+                                   :as    task} (get tasks task-key)
                                   inputs-map (reduce (fn [is i]
                                                        (assoc is i (get-in @state [:results i])))
                                                      {} inputs)
@@ -428,6 +431,7 @@
                                                                             :flatten (doall (flatten task-result-seq))
                                                                             (doall task-result-seq))
                                                           has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
+                                                      (tap> {:task task-key :task-spec task :context context :result task-result})
                                                       (when (or keep-state has-dependents?)
                                                         (swap! state assoc-in [:results task-key] task-result)))
                                                     ;; update tasks queue
@@ -448,6 +452,7 @@
                                                                 original-error (ex-message root-cause)
                                                                 msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
                                                                                        original-error task action)]
+                                                            (tap> {:message msg :task task :action action :context context :exception e})
                                                             (ml/log :collet/pipeline-execution-failed
                                                                     :message msg :task task :action action :exception e)
                                                             (swap! state assoc

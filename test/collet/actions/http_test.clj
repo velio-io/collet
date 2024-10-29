@@ -186,7 +186,7 @@
                                                               :query-params {:limit 1
                                                                              :query 'area-query}}
                                                   :return    [:body :areas [:$/cat :id]]}
-                                                 {:type      :clj/ffirst
+                                                 {:type      :clj/first
                                                   :name      :area-id
                                                   :selectors '{area-ids [:state :area-request]}
                                                   :params    '[area-ids]}
@@ -245,7 +245,9 @@
                                                 :name      :events-with-ratings
                                                 :selectors {'events [:inputs :events-with-artists]}
                                                 :params    {:sequence 'events
-                                                            :apply    [[:fold {:by [:id] :rollup true}]]}}]
+                                                            :apply    [[:fold {:by            :id
+                                                                               :rollup        [:artist]
+                                                                               :rollup-except true}]]}}]
                                   :actions    [{:type      :mapper
                                                 :name      :event-rating
                                                 :selectors {'ratings [:state :events-with-ratings]}

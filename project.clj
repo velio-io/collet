@@ -53,6 +53,7 @@
                 :jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
                 :dependencies [[eftest "0.6.0"]
                                [clj-test-containers "0.7.4"]
+                               [djblue/portal "0.58.2"]
                                [vvvvalvalval/scope-capture "0.3.3"]]
                 :injections   [(require 'sc.api)]}
 
