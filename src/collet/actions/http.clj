@@ -4,7 +4,7 @@
    [clojure.string :as string]
    [collet.utils :as utils]
    [org.httpkit.client :as http]
-   [cheshire.core :as json]
+   [charred.api :as charred]
    [diehard.core :as dh]
    [diehard.rate-limiter :as rl])
   (:import
@@ -16,7 +16,9 @@
   [^InputStream input keywordize]
   (when (some? input)
     (with-open [rdr (io/reader input)]
-      (json/parse-stream rdr keywordize))))
+      (if keywordize
+        (charred/read-json rdr :key-fn keyword)
+        (charred/read-json rdr)))))
 
 
 (defn wrap-rate-limiter
@@ -117,7 +119,7 @@
                    (and (= content-type :json)
                         (some? body)
                         (not (string? body)))
-                   (assoc :body (json/encode body))
+                   (assoc :body (charred/write-json-str body))
 
                    :always (assoc :method method))
         response (http-request request)]

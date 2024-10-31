@@ -34,6 +34,7 @@
  @p
  (prn @p)
  (p/clear)
+ (remove-tap #'p/submit)
 
  (test)
 

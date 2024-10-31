@@ -288,7 +288,8 @@
         (is (every? #(contains? % :artist) events-with-artists)
             "all artists should have an artist field")
 
-        (is (= 40 (count rated-events))
+        (is (= (->> area-events (map :id) (distinct) (count)) ;; sometimes API returns same events in different pages
+               (count rated-events))
             "should match the number of events fetched in the first step")
 
         (is (every? #(contains? % :rating) rated-events)
