@@ -18,3 +18,4 @@ pom.xml.asc
 /data
 /tmp
 /dev/src/local.clj
+.portal

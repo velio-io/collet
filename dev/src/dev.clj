@@ -2,7 +2,8 @@
   (:require
    [malli.dev :as mdev]
    [com.brunobonacci.mulog :as ml]
-   [eftest.runner :refer [find-tests run-tests]]))
+   [eftest.runner :refer [find-tests run-tests]]
+   [portal.api :as p]))
 
 
 (mdev/start!)
@@ -23,6 +24,16 @@
 
 
 (comment
+ ;; choose one of the following options to start the portal
+ (def p (p/open))
+ (def p (p/open {:launcher :intellij}))
+ (def p (p/open {:launcher :vs-code}))
+
+ (add-tap #'p/submit)
+
+ @p
+ (prn @p)
+ (p/clear)
 
  (test)
 
