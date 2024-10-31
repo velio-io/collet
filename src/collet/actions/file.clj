@@ -1,62 +1,23 @@
 (ns collet.actions.file
   (:require
-   [clojure.data.csv :as csv]
    [clojure.java.io :as io]
-   [cheshire.core :as json]
    [collet.utils :as utils]
-   [diehard.core :as dh])
+   [diehard.core :as dh]
+   [tech.v3.dataset :as ds])
   (:import
-   [java.io ByteArrayInputStream File InputStream Writer]
+   [java.io ByteArrayInputStream File InputStream]
    [java.nio.file Files]))
-
-
-(defn write-json
-  "Writes the input data to a JSON file."
-  [^Writer w input]
-  (doseq [record input]
-    (->> (json/generate-string record)
-         (.write w))
-    (.write w "\n")))
-
-
-(defn write-csv
-  "Writes the input data to a CSV file.
-   Options:
-   :input       - the data to write
-   :csv-header? - if true, the CSV file will have a header row"
-  [^Writer w input & {:keys [csv-header?]}]
-  (let [item (first input)
-        data (cond
-               (map? item)
-               (let [header    (keys item)
-                     header-fn (mapv (fn [k] #(get % k)) header)
-                     rows      (map (apply juxt header-fn) input)]
-                 (if csv-header?
-                   (cons (map name header) rows)
-                   rows))
-
-               (sequential? item)
-               (if csv-header?
-                 input
-                 (rest input))
-
-               :otherwise
-               (throw (ex-info (str "Invalid input for file action.
-                                     Input data should be either a collection of maps or collection of sequential items.
-                                     Provided input type: " (type input))
-                               {:input-type (type input)})))]
-    (csv/write-csv w data)))
 
 
 (def file-params-spec
   [:map
    [:input
     [:sequential [:or map? [:sequential :any]]]]
+   [:cat? {:optional true :default false}
+    :boolean]
    [:format
     [:enum :json :csv]]
    [:file-name :string]
-   [:override? {:optional true :default false}
-    :boolean]
    [:csv-header? {:optional true :default false}
     :boolean]])
 
@@ -75,20 +36,16 @@
                   [:map
                    [:file-name :string]
                    [:path :string]]]}
-  [{:keys [input format file-name override? csv-header?]
-    :or   {override? false csv-header? false}}]
-  (let [file    (io/file file-name)
-        exists? (.exists file)]
-    (when (and exists? override?)
-      (io/delete-file file))
-
+  [{:keys [input format file-name csv-header? cat?]
+    :or   {csv-header? false cat? false}}]
+  (let [dataset (utils/make-dataset input {:cat? cat?})
+        file    (io/file file-name)]
     (when-not (.exists file)
       (io/make-parents file))
 
-    (with-open [w (io/writer file :append (not override?))]
-      (case format
-        :json (write-json w input)
-        :csv (write-csv w input :csv-header? csv-header?)))
+    (case format
+      :json (ds/write! dataset file-name)
+      :csv (ds/write! dataset file-name {:headers? csv-header?}))
 
     {:file-name file-name
      :path      (.getAbsolutePath file)}))
@@ -185,6 +142,8 @@
    [:file-name :string]
    [:input
     [:sequential [:or map? [:sequential :any]]]]
+   [:cat? {:optional true :default false}
+    :boolean]
    [:csv-header? {:optional true :default false}
     :boolean]])
 
@@ -202,18 +161,20 @@
                   [:map
                    [:bucket :string]
                    [:key :string]]]}
-  [{:keys [aws-creds bucket format file-name input csv-header?]}]
-  (let [ext       (case format
-                    :csv ".csv"
-                    :json ".json")
-        file      (File/createTempFile file-name ext)
-        s3-client (utils/make-client :s3 aws-creds)]
+  [{:keys [aws-creds bucket format file-name input cat? csv-header?]
+    :or   {cat? false}}]
+  (let [dataset        (utils/make-dataset input {:cat? cat?})
+        ext            (case format
+                         :csv ".csv"
+                         :json ".json")
+        file           (File/createTempFile file-name ext)
+        temp-file-path (.getAbsolutePath file)
+        s3-client      (utils/make-client :s3 aws-creds)]
     (.deleteOnExit file)
 
-    (with-open [w (io/writer file)]
-      (case format
-        :json (write-json w input)
-        :csv (write-csv w input :csv-header? csv-header?)))
+    (case format
+      :json (ds/write! dataset temp-file-path)
+      :csv (ds/write! dataset temp-file-path {:headers? csv-header?}))
 
     (dh/with-retry
       {:retry-on        Exception

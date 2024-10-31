@@ -6,20 +6,19 @@
   {*warn-on-reflection* true}
 
   :plugins
-  [[lein-ancient "0.7.0"]] ;; =>> lein ancient
+  [[lein-ancient "0.7.0"]]    ;; =>> lein ancient
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
    [org.clojure/java.jmx "1.1.0"]
-   [org.clojure/data.csv "1.1.0"]
    [org.clojure/tools.cli "1.1.230"]
    [weavejester/dependency "0.2.1"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [http-kit "2.8.0"]
+   [com.cnuernber/charred "1.034"]
    [techascent/tech.ml.dataset "7.032"]
    [clj-commons/pomegranate "1.2.24"]
-   [com.github.oliyh/martian "0.1.26"]
    [com.github.seancorfield/next.jdbc "1.3.955"]
    [com.github.seancorfield/honeysql "2.6.1196"]
    [com.brunobonacci/mulog "0.9.0"]

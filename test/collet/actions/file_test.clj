@@ -1,13 +1,12 @@
 (ns collet.actions.file-test
   (:require
    [clojure.test :refer :all]
-   [clojure.data.csv :as csv]
    [clojure.java.io :as io]
+   [clj-test-containers.core :as tc]
+   [charred.api :as charred]
+   [next.jdbc :as jdbc]
    [collet.test-fixtures :as tf]
    [collet.utils :as utils]
-   [next.jdbc :as jdbc]
-   [cheshire.core :as json]
-   [clj-test-containers.core :as tc]
    [collet.actions.jdbc-test :as jdbc-test]
    [collet.core :as collet]
    [collet.actions.file :as sut]))
@@ -22,26 +21,23 @@
           file-name "./tmp/file-test.json"
           options   {:input     input
                      :format    :json
-                     :file-name file-name
-                     :override? true}]
+                     :file-name file-name}]
       (sut/write-into-file options)
 
       (is (.exists (io/file file-name)))
 
-      (with-open [rdr (io/reader file-name)]
-        (is (= input
-               (->> (line-seq rdr)
-                    (mapv #(json/parse-string % true))))))
+      (is (= input
+             (-> (slurp file-name)
+                 (charred/read-json :key-fn keyword))))
 
-      (testing "appending new rows"
+      (testing "overriding existing file"
         (let [new-input [{:a 5 :b 6} {:a 7 :b 8}]
-              options   (assoc options :input new-input :override? false)]
+              options   (assoc options :input new-input)]
           (sut/write-into-file options)
 
-          (with-open [rdr (io/reader file-name)]
-            (is (= (concat input new-input)
-                   (->> (line-seq rdr)
-                        (mapv #(json/parse-string % true))))))))
+          (is (= new-input
+                 (-> (slurp file-name)
+                     (charred/read-json :key-fn keyword))))))
 
       (io/delete-file (io/file file-name))))
 
@@ -61,33 +57,16 @@
 
         (with-open [rdr (io/reader file-name)]
           (is (= [["a" "b"] ["1" "2"] ["3" "4"]]
-                 (doall (csv/read-csv rdr)))))
+                 (doall (charred/read-csv rdr)))))
 
-        (testing "appending new rows"
+        (testing "overriding existing file"
           (let [new-input [{:a 5 :b 6} {:a 7 :b 8}]
-                options   (assoc options :input new-input :csv-header? false)]
+                options   (assoc options :input new-input)]
             (sut/write-into-file options)
 
             (with-open [rdr (io/reader file-name)]
-              (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"] ["7" "8"]]
-                     (doall (csv/read-csv rdr)))))))
-
-        (io/delete-file (io/file file-name))))
-
-    (testing "exporting a collection of sequential items"
-      (let [input     [["a" "b"] [1 2] [3 4]]
-            file-name "./tmp/file-test.csv"
-            options   {:input       input
-                       :format      :csv
-                       :file-name   file-name
-                       :csv-header? true}]
-        (sut/write-into-file options)
-
-        (is (.exists (io/file file-name)))
-
-        (with-open [rdr (io/reader file-name)]
-          (is (= [["a" "b"] ["1" "2"] ["3" "4"]]
-                 (doall (csv/read-csv rdr)))))
+              (is (= [["a" "b"] ["5" "6"] ["7" "8"]]
+                     (doall (charred/read-csv rdr)))))))
 
         (io/delete-file (io/file file-name))))))
 
@@ -130,7 +109,7 @@
                 ["1" "Alice" "30"]
                 ["2" "Bob" "40"]
                 ["3" "Charlie" "50"]]
-               (doall (csv/read-csv rdr)))))
+               (doall (charred/read-csv rdr)))))
 
       (tc/stop! pg)
       (io/delete-file (io/file "./tmp/file-sink-test.csv")))))
@@ -175,7 +154,7 @@
                               {:Bucket "test-bucket"
                                :Key    "test/test-file.csv"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
-             (csv/read-csv (io/reader (:Body file))))))
+             (charred/read-csv (io/reader (:Body file))))))
 
     (tc/stop! container)))
 
@@ -259,6 +238,6 @@
                               {:Bucket "pipe-test-bucket"
                                :Key    "pipe-test-file.csv"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
-             (csv/read-csv (io/reader (:Body file))))))
+             (charred/read-csv (io/reader (:Body file))))))
 
     (tc/stop! container)))

@@ -5,12 +5,10 @@
    [collet.actions.common :as common]))
 
 
-;; TODO not all collections can be represented as a dataset
-;; TODO iterate over maps (regular and produced by the ds/group-by)
-
 (def mapper-params-spec
   [:map
-   [:sequence [:sequential :any]]])
+   [:sequence [:sequential :any]]
+   [:cat? {:optional true} :boolean]])
 
 
 (def mapper-state-spec
@@ -27,22 +25,28 @@
   {:malli/schema [:=> [:cat mapper-params-spec
                        [:maybe mapper-state-spec]]
                   mapper-state-spec]}
-  [{data-seq :sequence} prev-state]
+  [{:keys [cat?] data-seq :sequence} prev-state]
   (let [state        (if (nil? prev-state)
                        ;; initialize action state
-                       {:dataset (if (ds/dataset? data-seq)
-                                   data-seq
-                                   (ds/->dataset data-seq))
+                       {:dataset (try (utils/make-dataset data-seq {:cat? cat?})
+                                      ;; if seq cannot be converted to dataset, use it as is
+                                      (catch Exception _e data-seq))
                         :idx     0}
                        ;; use previously created state
                        (update prev-state :idx inc))
         {:keys [dataset idx]} state
-        current-item (ds/row-at dataset idx)
+        ds?          (ds/dataset? dataset)
+        current-item (if ds?
+                       (ds/row-at dataset idx)
+                       (nth dataset idx))
+        rows-count   (if ds?
+                       (ds/row-count dataset)
+                       (count dataset))
         next-idx     (inc idx)]
     ;; return the next state
     {:current current-item
      :idx     idx
-     :next    (< next-idx (ds/row-count dataset))
+     :next    (< next-idx rows-count)
      :dataset dataset}))
 
 

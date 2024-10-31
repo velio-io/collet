@@ -2,16 +2,12 @@
   (:require
    [next.jdbc.result-set :as rs]
    [next.jdbc.prepare :as p]
-   [cheshire.core :as json]
-   [cheshire.generate :as json-gen])
+   [charred.api :as charred])
   (:import
    [clojure.lang IPersistentMap IPersistentVector]
    [java.sql PreparedStatement]
    [java.time Duration]
    [org.postgresql.util PGInterval PGobject]))
-
-
-(json-gen/add-encoder Duration json-gen/encode-str)
 
 
 (defn ->pg-interval
@@ -51,10 +47,10 @@
 
 
 (def ->json
-  json/encode)
+  charred/write-json-str)
 
 (def <-json
-  #(json/decode % true))
+  #(charred/read-json % :key-fn keyword))
 
 
 (defn ->pgobject

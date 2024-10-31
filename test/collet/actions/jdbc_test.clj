@@ -1,9 +1,9 @@
 (ns collet.actions.jdbc-test
   (:require
    [clojure.test :refer :all]
-   [collet.test-fixtures :as tf]
    [next.jdbc :as jdbc]
    [clj-test-containers.core :as tc]
+   [collet.test-fixtures :as tf]
    [collet.core :as collet]
    [collet.deps :as collet.deps]
    [collet.actions.jdbc :as sut])

@@ -1,8 +1,7 @@
 (ns collet.actions.jdbc
   (:require
    [clojure.java.io :as io]
-   [cheshire.core :as json]
-   [cheshire.generate :as json-gen]
+   [charred.api :as charred]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [next.jdbc.connection :as connection]
@@ -36,11 +35,6 @@
     (.toLocalTime v)))
 
 
-(json-gen/add-encoder LocalDate json-gen/encode-str)
-(json-gen/add-encoder LocalTime json-gen/encode-str)
-(json-gen/add-encoder LocalDateTime json-gen/encode-str)
-
-
 (extend-protocol rs/ReadableColumn
   Array
   (read-column-by-label [^Array v _]
@@ -62,7 +56,7 @@
   [^Writer writer ^ResultSet row]
   (let [row-keys (rs/column-names row)
         row-data (select-keys row row-keys)
-        row-json (json/generate-string row-data)]
+        row-json ^String (charred/write-json-str row-data)]
     (.write writer row-json)
     (.write writer "\n")))
 
@@ -74,7 +68,7 @@
   (lazy-seq
    (let [row (first xs)]
      (if row
-       (cons (-> row (json/parse-string true) (mapper))
+       (cons (-> row (charred/read-json :key-fn keyword) (mapper))
              (->rows-seq (rest xs) mapper cleanup))
        (do (cleanup) nil)))))
 
@@ -172,6 +166,7 @@
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
+  ;; TODO figure out the response size. If it's small enough, don't use temp file pathway
   (let [result-file ^File (File/createTempFile "jdbc-query-data" ".json")
         rs-types    (atom {})]
     (.deleteOnExit result-file)
@@ -179,7 +174,7 @@
                 conn   (prep-connection connection)]
       (let [append-row   (fn [row]
                            (append-row-to-file writer row)
-                           (when preserve-types?
+                           (when (and preserve-types? (empty? @rs-types))
                              (swap! rs-types merge (get-columns-types row prefix-table?))))
             query-string (if (map? query)
                            (sql/format query options)
