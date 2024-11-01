@@ -4,7 +4,7 @@ RUN mkdir -p /build
 COPY project.clj /build/project.clj
 COPY src /build/src
 
-RUN cd /build && lein with-profile +standalone uberjar
+RUN cd /build && lein uberjar
 
 
 FROM eclipse-temurin:21.0.4_7-jdk
@@ -29,6 +29,6 @@ WORKDIR /app
 ENTRYPOINT ["/tini", "--"]
 
 CMD java \
--XX:+UseContainerSupport -XX:InitialRAMPercentage=40.0 -XX:MaxRAMPercentage=90.0 \
+-XX:+UseContainerSupport -XX:InitialRAMPercentage=40.0 -XX:MaxRAMPercentage=80.0 \
 -javaagent:/app/jmx/jmx_prometheus_javaagent-0.20.0.jar=$JMX_PORT:/app/jmx/jmx.yaml \
 -jar collet.jar -s "${PIPELINE_SPEC}" -c "${PIPELINE_CONFIG}"

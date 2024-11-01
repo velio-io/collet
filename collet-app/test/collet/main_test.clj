@@ -24,7 +24,7 @@
 
 (deftest parse-options-test
   (testing "options parsed correctly"
-    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "resources/pipeline-test-config.edn") sut/cli-options)]
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-test-config.edn") sut/cli-options)]
       (is (nil? errors))
       (is (= {} (:pipeline-config options)))
       (is (= :test-pipeline (-> options :pipeline-spec :name))))
@@ -33,9 +33,9 @@
       (is (nil? errors))
       (is (= {:foo :bar} (:pipeline-config options)))
       (is (= :raw-pipe-name (-> options :pipeline-spec :name)))
-      (is (string/ends-with? (-> options :pipeline-spec :pwd) "/collet")))
+      (is (string/ends-with? (-> options :pipeline-spec :pwd) "/collet-app")))
 
-    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "resources/pipeline-test-config.edn" "-c" "{}") sut/cli-options)]
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-test-config.edn" "-c" "{}") sut/cli-options)]
       (is (nil? errors))
       (is (= {} (:pipeline-config options)))
       (is (= :test-pipeline (-> options :pipeline-spec :name)))))
@@ -45,7 +45,7 @@
       (is (not (nil? errors)))))
 
   (testing "file should exist and raw options should be valid"
-    (let [{:keys [errors]} (tools.cli/parse-opts '("-s" "resources/pipeline-test-config.edn" "-c" "[]") sut/cli-options)]
+    (let [{:keys [errors]} (tools.cli/parse-opts '("-s" "configs/pipeline-test-config.edn" "-c" "[]") sut/cli-options)]
       (is (not (nil? errors)))
       (is (string/includes? (first errors) "Must provide a map for the pipeline config")))
 
@@ -67,7 +67,7 @@
                      {:Bucket                    "test-bucket"
                       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
-      (with-open [file-stream (io/input-stream "resources/pipeline-test-config.edn")]
+      (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
         (utils/invoke! s3-client :PutObject
                        {:Bucket "test-bucket"
                         :Key    "test-pipeline-config.edn"
@@ -85,4 +85,4 @@
   (testing "config values can refer to env variables"
     (let [config (sut/read-config-string "{:pwd #env \"PWD\" :port #env [\"NOT_SET_VAR_PORT\" Int :or 8080]}")]
       (is (= 8080 (:port config)))
-      (is (string/ends-with? (:pwd config) "/collet")))))
+      (is (string/ends-with? (:pwd config) "/collet-app")))))
