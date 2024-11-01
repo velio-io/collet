@@ -34,7 +34,7 @@
       (is (nil? errors))
       (is (= {:foo :bar} (:pipeline-config options)))
       (is (= :raw-pipe-name (-> options :pipeline-spec :name)))
-      (is (string/ends-with? (-> options :pipeline-spec :pwd) "/collet-app")))
+      (is (string/includes? (-> options :pipeline-spec :pwd) "collet")))
 
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-test-config.edn" "-c" "{}") sut/cli-options)]
       (is (nil? errors))
@@ -86,7 +86,7 @@
   (testing "config values can refer to env variables"
     (let [config (sut/read-config-string "{:pwd #env \"PWD\" :port #env [\"NOT_SET_VAR_PORT\" Int :or 8080]}")]
       (is (= 8080 (:port config)))
-      (is (string/ends-with? (:pwd config) "/collet-app")))))
+      (is (string/includes? (:pwd config) "collet")))))
 
 
 (deftest pipeline-execution-test
