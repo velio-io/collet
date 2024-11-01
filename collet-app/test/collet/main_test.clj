@@ -6,7 +6,7 @@
    [clojure.tools.cli :as tools.cli]
    [clojure.java.shell :refer [sh]]
    [clj-test-containers.core :as tc]
-   [collet.utils :as utils]
+   [collet.aws :as aws]
    [collet.main :as sut]))
 
 
@@ -63,18 +63,18 @@
                           :endpoint-override {:protocol :http
                                               :hostname "localhost"
                                               :port     container-port}}
-          s3-client      (utils/make-client :s3 aws-creds)]
-      (utils/invoke! s3-client :CreateBucket
+          s3-client      (aws/make-client :s3 aws-creds)]
+      (aws/invoke! s3-client :CreateBucket
                      {:Bucket                    "test-bucket"
                       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
       (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
-        (utils/invoke! s3-client :PutObject
+        (aws/invoke! s3-client :PutObject
                        {:Bucket "test-bucket"
                         :Key    "test-pipeline-config.edn"
                         :Body   file-stream}))
 
-      (with-redefs [utils/make-client (fn [& _] s3-client)]
+      (with-redefs [aws/make-client (fn [& _] s3-client)]
         (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1") sut/cli-options)]
           (is (nil? errors))
           (is (= :test-pipeline (-> options :pipeline-spec :name)))))
