@@ -4,6 +4,7 @@
    [clojure.string :as string]
    [clojure.test :refer :all]
    [clojure.tools.cli :as tools.cli]
+   [clojure.java.shell :refer [sh]]
    [clj-test-containers.core :as tc]
    [collet.utils :as utils]
    [collet.main :as sut]))
@@ -86,3 +87,10 @@
     (let [config (sut/read-config-string "{:pwd #env \"PWD\" :port #env [\"NOT_SET_VAR_PORT\" Int :or 8080]}")]
       (is (= 8080 (:port config)))
       (is (string/ends-with? (:pwd config) "/collet-app")))))
+
+
+(deftest pipeline-execution-test
+  (let [{:keys [exit out]}
+        (sh "/usr/local/bin/lein" "run" "-s" "configs/sample-pipeline.edn" "-c" "{}")]
+    (is (zero? exit))
+    (is (string/includes? out "Pipeline completed."))))
