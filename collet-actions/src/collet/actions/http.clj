@@ -3,6 +3,7 @@
    [clojure.java.io :as io]
    [clojure.string :as string]
    [collet.utils :as utils]
+   [collet.action :as action]
    [org.httpkit.client :as http]
    [charred.api :as charred]
    [diehard.core :as dh]
@@ -87,7 +88,7 @@
    [:unexceptional-status {:optional true}
     [:set :int]]
    [:rate {:optional true}
-    :int]
+    number?]
    [:basic-auth {:optional true}
     [:tuple :string :string]]])
 
@@ -135,9 +136,12 @@
       (some? rate) (assoc-in [:params ::rate-limiter] (rl/rate-limiter {:rate rate})))))
 
 
-(def request-action
-  {:action make-request
-   :prep   attach-rate-limiter})
+(defmethod action/action-fn :http [_]
+  make-request)
+
+
+(defmethod action/prep :http [action-spec]
+  (attach-rate-limiter action-spec))
 
 
 (defn ->scope [scope]
@@ -180,5 +184,5 @@
      :headers headers)))
 
 
-(def oauth2-action
-  {:action get-oauth2-token})
+(defmethod action/action-fn :oauth2 [_]
+  get-oauth2-token)

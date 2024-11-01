@@ -1,12 +1,45 @@
 (ns collet.actions.file
   (:require
    [clojure.java.io :as io]
-   [collet.utils :as utils]
+   [tech.v3.dataset :as ds]
+   [cognitect.aws.client.api :as aws]
+   [cognitect.aws.credentials :as credentials]
    [diehard.core :as dh]
-   [tech.v3.dataset :as ds])
+   [collet.utils :as utils]
+   [collet.action :as action])
   (:import
    [java.io ByteArrayInputStream File InputStream]
    [java.nio.file Files]))
+
+
+(defn make-client
+  "Creates an AWS client for the S3 service."
+  [api {:keys [aws-region aws-key aws-secret endpoint-override]}]
+  (aws/client
+   (utils/assoc-some {:api api}
+     :region aws-region
+     :credentials-provider (when (and (some? aws-key) (some? aws-secret))
+                             (credentials/basic-credentials-provider
+                              {:access-key-id     aws-key
+                               :secret-access-key aws-secret}))
+     :endpoint-override endpoint-override)))
+
+
+(defn invoke!
+  "Calls AWS invoke and captures the error message string and full response.
+   - `client` (required) aws service client
+   - `operation` (required) a keyword such as :GetObject
+   - `params` (required) aws api request options"
+  [client operation params]
+  (let [params*  {:op operation :request params}
+        response (aws/invoke client params*)
+        error    (or (get-in response [:ErrorResponse :Error :Message])
+                     (get-in response [:Error :Message])
+                     (get-in response [:cognitect.anomalies/message]))]
+    (if (some? (:cognitect.anomalies/category response))
+      (throw (ex-info (str "AWS error response: " error)
+                      (merge params* {:response response})))
+      response)))
 
 
 (def file-params-spec
@@ -51,8 +84,8 @@
      :path      (.getAbsolutePath file)}))
 
 
-(def write-file-action
-  {:action write-into-file})
+(defmethod action/action-fn :file-sink [_]
+  write-into-file)
 
 
 ;; S3 upload action
@@ -65,7 +98,7 @@
 (defn initiate-multipart-upload
   "Initiates the multipart upload process."
   [s3-client bucket key]
-  (let [response (utils/invoke! s3-client :CreateMultipartUpload
+  (let [response (invoke! s3-client :CreateMultipartUpload
                                 {:Bucket bucket
                                  :Key    key})]
     (:UploadId response)))
@@ -74,7 +107,7 @@
 (defn upload-part
   "Uploads a part of a file to S3."
   [s3-client bucket key upload-id part-number part-content]
-  (let [response (utils/invoke! s3-client :UploadPart
+  (let [response (invoke! s3-client :UploadPart
                                 {:Bucket     bucket
                                  :Key        key
                                  :UploadId   upload-id
@@ -87,7 +120,7 @@
 (defn complete-multipart-upload
   "Completes the multipart upload process."
   [s3-client bucket key upload-id parts]
-  (utils/invoke! s3-client :CompleteMultipartUpload
+  (invoke! s3-client :CompleteMultipartUpload
                  {:Bucket          bucket
                   :Key             key
                   :UploadId        upload-id
@@ -118,7 +151,7 @@
                             parts)))]
         (complete-multipart-upload s3-client bucket key upload-id parts))
       (catch Exception e
-        (utils/invoke! s3-client :AbortMultipartUpload
+        (invoke! s3-client :AbortMultipartUpload
                        {:Bucket   bucket
                         :Key      key
                         :UploadId upload-id})
@@ -169,7 +202,7 @@
                          :json ".json")
         file           (File/createTempFile file-name ext)
         temp-file-path (.getAbsolutePath file)
-        s3-client      (utils/make-client :s3 aws-creds)]
+        s3-client      (make-client :s3 aws-creds)]
     (.deleteOnExit file)
 
     (case format
@@ -185,7 +218,7 @@
         (if (> (Files/size (.toPath file)) five-gb-in-bytes)
           (multipart-upload s3-client bucket file-name is)
           ;; regular upload
-          (utils/invoke! s3-client :PutObject
+          (invoke! s3-client :PutObject
                          {:Bucket bucket
                           :Key    file-name
                           :Body   is}))))
@@ -196,5 +229,5 @@
      :key    file-name}))
 
 
-(def upload-file-action
-  {:action upload-file})
+(defmethod action/action-fn :s3-sink [_]
+  upload-file)

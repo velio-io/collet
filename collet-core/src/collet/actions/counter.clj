@@ -1,5 +1,6 @@
 (ns collet.actions.counter
   (:require
+   [collet.action :as action]
    [collet.actions.common :as common]))
 
 
@@ -14,6 +15,9 @@
     (min (+ prev-state step) end)))
 
 
-(def counter-action
-  {:action do-count
-   :prep   common/prep-stateful-action})
+(defmethod action/action-fn :counter [_]
+  do-count)
+
+
+(defmethod action/prep :counter [action-spec]
+  (common/prep-stateful-action action-spec))

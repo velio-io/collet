@@ -1,5 +1,6 @@
 (ns collet.actions.mapper
   (:require
+   [collet.action :as action]
    [tech.v3.dataset :as ds]
    [collet.utils :as utils]
    [collet.actions.common :as common]))
@@ -7,7 +8,7 @@
 
 (def mapper-params-spec
   [:map
-   [:sequence [:sequential :any]]
+   [:sequence [:or utils/dataset? [:sequential :any]]]
    [:cat? {:optional true} :boolean]])
 
 
@@ -50,15 +51,16 @@
      :dataset dataset}))
 
 
-(defn expand-task-params
-  "Unwraps the mapper bindings and replaces the iterator with the mapper keys"
-  [task action]
+(defmethod action/action-fn :mapper [_]
+  map-sequence)
+
+
+(defmethod action/prep :mapper [action-spec]
+  (common/prep-stateful-action action-spec))
+
+
+(defmethod action/expand :mapper [task action]
+  ;; Unwraps the mapper bindings and replaces the iterator with the mapper keys
   (let [action-name (:name action)]
     (utils/replace-all task {:$mapper/item          [:state action-name :current]
                              :$mapper/has-next-item [:state action-name :next]})))
-
-
-(def mapper-action
-  {:action map-sequence
-   :expand expand-task-params
-   :prep   common/prep-stateful-action})

@@ -8,16 +8,13 @@
    [weavejester.dependency :as dep]
    [diehard.core :as dh]
    [com.brunobonacci.mulog :as ml]
-   [collet.actions.http :as collet.http]
-   [collet.actions.odata :as collet.odata]
-   [collet.actions.counter :as collet.counter]
-   [collet.actions.slicer :as collet.slicer]
-   [collet.actions.jdbc :as collet.jdbc]
-   [collet.actions.file :as collet.file]
-   [collet.actions.queue :as collet.queue]
-   [collet.actions.fold :as collet.fold]
-   [collet.actions.enrich :as collet.enrich]
-   [collet.actions.mapper :as collet.mapper]
+   [collet.action :as collet.action]
+   ;; built-in actions
+   [collet.actions.counter]
+   [collet.actions.slicer]
+   [collet.actions.fold]
+   [collet.actions.enrich]
+   [collet.actions.mapper]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
    [collet.deps :as collet.deps])
@@ -80,39 +77,18 @@
      params)))
 
 
-(def actions-map
-  ;; external sources
-  {:http    collet.http/request-action
-   :oauth2  collet.http/oauth2-action
-   :odata   collet.odata/odata-action
-   :jdbc    collet.jdbc/action
-   :file    collet.file/write-file-action
-   :s3      collet.file/upload-file-action
-   :queue   collet.queue/cues-action
-
-   ;; data processing
-   :counter collet.counter/counter-action
-   :slicer  collet.slicer/slicer-action
-   :fold    collet.fold/fold-action
-   :enrich  collet.enrich/enrich-action
-   :mapper  collet.mapper/mapper-action})
-
-
 (defn compile-action
   "Compiles an action spec into a function.
    Resulting function should be executed with a task context (configuration and current state).
    Action can be a producer or a consumer of data, depending on the action type."
   {:malli/schema [:=> [:cat action-spec]
                   [:=> [:cat context-spec] :any]]}
-  [{action-type :type :as action-spec}]
-  (let [predefined-action? (contains? actions-map action-type)
-        {:keys       [return]
-         action-type :type action-name :name execute-when :when
-         :as         action-spec}
-        (if-let [prep-fn (and predefined-action?
-                              (get-in actions-map [action-type :prep]))]
-          (prep-fn action-spec)
-          action-spec)]
+  [action-spec]
+  (let [{:keys        [return]
+         action-type  :type
+         action-name  :name
+         execute-when :when
+         :as          action-spec} (collet.action/prep action-spec)]
     (if (sequential? action-spec)
       ;; expand to multiple actions
       (mapv compile-action action-spec)
@@ -131,12 +107,8 @@
                                   (eval func)
                                   func))
                               ;; Predefined actions
-                              predefined-action?
-                              (get-in actions-map [action-type :action])
-                              ;; Unknown action type
                               :otherwise
-                              (throw (ex-info (str "Unknown action type: " action-type)
-                                              {:spec action-spec})))
+                              (collet.action/action-fn action-spec))
             execute-when-fn (when (collet.conds/valid-condition? execute-when)
                               (collet.conds/compile-conditions execute-when))]
         (fn [context]
@@ -249,14 +221,8 @@
                   task-spec]}
   [{:keys [actions] :as task}]
   (reduce
-   (fn [acc action]
-     (let [action-type (:type action)]
-       (if (contains? actions-map action-type)
-         (let [expand (get-in actions-map [action-type :expand])]
-           (if (fn? expand)
-             (expand acc action)
-             acc))
-         acc)))
+   (fn [t action]
+     (collet.action/expand t action))
    task actions))
 
 

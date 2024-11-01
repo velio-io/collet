@@ -3,6 +3,7 @@
    [clojure.set :as set]
    [clojure.string :as string]
    [clojure.walk :as walk]
+   [collet.action :as action]
    [malli.core :as m]
    [collet.actions.common :as common]
    [collet.actions.http :as collet.http]
@@ -296,6 +297,11 @@
         (collet.http/make-request))))
 
 
-(def odata-action
-  {:action odata-request
-   :prep   (comp collet.http/attach-rate-limiter common/prep-stateful-action)})
+(defmethod action/action-fn :odata [_]
+  odata-request)
+
+
+(defmethod action/prep :odata [action-spec]
+  (-> action-spec
+      (common/prep-stateful-action)
+      (collet.http/attach-rate-limiter)))

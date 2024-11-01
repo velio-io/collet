@@ -6,6 +6,7 @@
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.bitmap :as dtype.bitmap]
    [tech.v3.datatype.protocols :as dtype.proto]
+   [collet.action :as action]
    [collet.conditions :as collet.conds]
    [collet.utils :as utils]
    [collet.select :as collet.select]))
@@ -186,7 +187,7 @@
                         [:rows {:optional true} [:sequential :int]]
                         [:drop-rows {:optional true} [:sequential :int]]]]}}
    [:map
-    [:sequence [:or utils/dataset? [:sequential map?]]]
+    [:sequence [:or utils/dataset? [:sequential :any]]]
     [:cat? {:optional true} :boolean]
     [:apply {:optional true}
      [:+ [:or ::flatten ::group ::join ::fold ::filter ::order ::select]]]]])
@@ -213,5 +214,5 @@
      dataset apply)))
 
 
-(def slicer-action
-  {:action prep-dataset})
+(defmethod action/action-fn :slicer [_]
+  prep-dataset)

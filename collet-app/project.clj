@@ -17,7 +17,10 @@
    [com.brunobonacci/mulog "0.9.0"]
    [com.brunobonacci/mulog-zipkin "0.9.0"]
    [com.brunobonacci/mulog-elasticsearch "0.9.0"]
-   [org.slf4j/slf4j-nop "2.0.16"]]
+   [org.slf4j/slf4j-nop "2.0.16"]
+   [com.cognitect.aws/api "0.8.692"]
+   [com.cognitect.aws/endpoints "1.1.12.772"]
+   [com.cognitect.aws/s3 "869.2.1687.0"]]
 
    ;;:jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
 

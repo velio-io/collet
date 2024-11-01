@@ -1,5 +1,6 @@
 (ns collet.actions.enrich
   (:require
+   [collet.action :as action]
    [collet.utils :as utils]))
 
 
@@ -61,14 +62,18 @@
       :name      action-name
       :selectors {item-sym [:state mapper-key :current]
                   with-sym [:state action-key]}
-      :params    {:item item-sym
-                  :in   fold-in
-                  :with with-sym}}]))
+      :params    (utils/assoc-some
+                   {:item item-sym
+                    :with with-sym}
+                   :in fold-in)}]))
 
 
-(defn expand-task-params
-  "Unwraps the enrich bindings and replaces the iterator with the mapper keys"
-  [task action]
+(defmethod action/prep :enrich [action-spec]
+  (enrich action-spec))
+
+
+(defmethod action/expand :enrich [task action]
+  ;; Unwraps the enrich bindings and replaces the iterator with the mapper keys
   (let [action-name (:name action)
         base-name   (name action-name)
         mapper-key  (keyword (str base-name "-mapper"))]
@@ -77,8 +82,3 @@
         (update :iterator utils/replace-all
                 {:$enrich/item          [:state mapper-key :current]
                  :$enrich/has-next-item [:state mapper-key :next]}))))
-
-
-(def enrich-action
-  {:prep   enrich
-   :expand expand-task-params})

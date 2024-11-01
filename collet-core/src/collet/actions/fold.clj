@@ -1,5 +1,6 @@
 (ns collet.actions.fold
   (:require
+   [collet.action :as action]
    [collet.actions.common :as common]))
 
 
@@ -50,13 +51,14 @@
     (conj data (conjoin item in with))))
 
 
-(defn expand-task-params
-  "Keep latest state from task as fold will accumulate value"
-  [task _action]
+(defmethod action/action-fn :fold [_]
+  fold)
+
+
+(defmethod action/prep :fold [action-spec]
+  (common/prep-stateful-action action-spec))
+
+
+(defmethod action/expand :fold [task _action]
+  ;; Keep latest state from task as fold will accumulate value
   (assoc task :state-format (or (:state-format task) :latest)))
-
-
-(def fold-action
-  {:action fold
-   :prep   common/prep-stateful-action
-   :expand expand-task-params})

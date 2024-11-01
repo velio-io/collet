@@ -2,6 +2,7 @@
   (:require
    [clojure.java.io :as io]
    [charred.api :as charred]
+   [collet.action :as action]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [next.jdbc.connection :as connection]
@@ -201,5 +202,5 @@
       (->rows-seq lines row-mapping-fn cleanup-fn))))
 
 
-(def action
-  {:action make-query})
+(defmethod action/action-fn :jdbc [_]
+  make-query)

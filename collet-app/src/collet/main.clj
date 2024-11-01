@@ -7,6 +7,7 @@
    [clojure.tools.cli :as tools.cli]
    [com.brunobonacci.mulog :as ml]
    [collet.core :as collet]
+   [collet.aws :as aws]
    [collet.utils :as utils])
   (:import
    [java.net URI URISyntaxException]))
@@ -84,11 +85,11 @@
         [access-key secret-key] (if (some? creds)
                                   (string/split creds #":")
                                   [nil nil])
-        client (utils/make-client :s3 (utils/assoc-some {}
-                                        :aws-region region
-                                        :aws-key access-key
-                                        :aws-secret secret-key))]
-    (-> (utils/invoke! client :GetObject {:Bucket bucket :Key path})
+        client (aws/make-client :s3 (utils/assoc-some {}
+                                      :aws-region region
+                                      :aws-key access-key
+                                      :aws-secret secret-key))]
+    (-> (aws/invoke! client :GetObject {:Bucket bucket :Key path})
         :Body
         slurp)))
 

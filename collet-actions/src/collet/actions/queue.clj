@@ -1,5 +1,6 @@
 (ns collet.actions.queue
   (:require
+   [collet.action :as action]
    [cues.queue :as q]))
 
 
@@ -42,6 +43,9 @@
         (assoc-in [:params ::appender] appender))))
 
 
-(def cues-action
-  {:action write-into-queue
-   :prep   attach-queue})
+(defmethod action/action-fn :queue [_]
+  write-into-queue)
+
+
+(defmethod action/prep :queue [action-spec]
+  (attach-queue action-spec))

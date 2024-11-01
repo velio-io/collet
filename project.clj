@@ -7,6 +7,7 @@
 
   :sub
   ["collet-core"
+   "collet-actions"
    "collet-app"]
 
   :dependencies
