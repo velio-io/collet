@@ -1,34 +1,13 @@
 # COLLET
 
-Collet is a powerful Clojure library designed to simplify the creation and
+Collet is a powerful Clojure library designed to simplify the development and
 execution of data processing pipelines (ETL or ELT).
 It provides a declarative approach to defining task sequences and their dependencies,
 making it easier to manage complex data workflows.
 
 ![Collet](collet.png)
 
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-    - [Pipeline configuration](#pipeline-specification)
-    - [Actions library](#actions-library)
-    - [General options](#general-options)
-- [Development](#development)
-
-## Features
-
-- Declarative pipeline definition
-- Support for both ETL and ELT workflows
-- Usable as a standalone Docker container or as a Clojure library
-- Robust logging and monitoring capabilities
-- Flexible configuration options
-- Predefined actions for various data sources
-- Task dependency management (DAG support)
-
-## Installation
-
-### As a Docker container
+## Quick start
 
 Pull the latest Collet image from DockerHub:
 
@@ -36,48 +15,38 @@ Pull the latest Collet image from DockerHub:
 docker pull velio-io/collet:latest
 ```
 
-### As a library
-
-Add the following dependency to your project:
-
-For Leiningen:
+Create a pipeline spec file `demo-pipeline.edn` with the following content:
 
 ```clojure
-[com.github.velio-io/collet "0.1.0"]
+{:name  :demo-pipeline
+ :tasks [{:name    :print-hello-world
+          :actions [{:name   :print
+                     :type   :clj/println
+                     :params ["Hello, world!"]}]}]}
 ```
 
-For deps.edn:
-
-```clojure
-com.github.velio-io/collet {:mvn/version "0.1.0"}
-```
-
-## Usage
-
-### As a Docker container
-
-To run Collet, you need to provide a pipeline specification and optionally a pipeline config map.
-These can be provided as environment variables in three ways:
-
-1. As a raw Clojure map
+Run the pipeline using the following command:
 
 ```shell
-docker run -p 8080:8080 -e PIPELINE_SPEC="{:name :my-pipeline ...}" -e PIPELINE_CONFIG="{:my-secret #env SECRET_VALUE}" collet
+docker run \
+  -v "$(pwd)"/demo-pipeline.edn:/config/demo-pipeline.edn \ 
+  -e PIPELINE_SPEC="/config/demo-pipeline.edn" \
+  collet
 ```
 
-2. Local file (mount the volume with the pipeline spec)
+Now you should see the output `Hello, world!` in the console.
+Looks a little bit overcomplicated for such a simple task, right?
+Stay tuned, it will make more sense as we dive deeper into the Collet features.
+
+### Using Collet with Docker
+
+Pull the latest Collet image from DockerHub:
 
 ```shell
-docker run -p 8080:8080 -v ./test/collet:/app/data -e PIPELINE_SPEC="/app/data/sample-pipeline.edn" collet
+docker pull velio-io/collet:latest
 ```
 
-3. S3 file:
-
-```shell
-docker run -p 8080:8080  -e PIPELINE_SPEC="s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1" collet
-```
-
-If you want to build Collet image from source code, clone this repository:
+Or if you want to build Collet image from the source code, clone this repository:
 
 ```shell
 git clone git@github.com:velio-io/collet.git && cd collet
@@ -93,7 +62,53 @@ docker build -t collet .
 docker build --platform=linux/amd64 -t collet .
 ```
 
-### As a library
+To run Collet, you need to provide a pipeline specification and optionally a pipeline config map.
+These can be provided as environment variables in three ways:
+
+1. As a raw Clojure map
+
+```shell
+docker run \
+  -p 8080:8080 \
+  -e PIPELINE_SPEC="{:name :my-pipeline ...}" \
+  -e PIPELINE_CONFIG="{:my-secret #env SECRET_VALUE}" \
+  collet
+```
+
+2. Local file (mount the volume with the pipeline spec)
+
+```shell
+docker run \
+  -p 8080:8080 \
+  -v ./test/collet:/app/data \
+  -e PIPELINE_SPEC="/app/data/sample-pipeline.edn" \
+  collet
+```
+
+3. S3 file:
+
+```shell
+docker run \
+  -p 8080:8080  \
+  -e PIPELINE_SPEC="s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1" \
+  collet
+```
+
+### Collet as a library
+
+Add the following dependency to your project:
+
+For Leiningen:
+
+```clojure
+[com.github.velio-io/collet-core "0.1.0"]
+```
+
+For deps.edn:
+
+```clojure
+com.github.velio-io/collet-core {:mvn/version "0.1.0"}
+```
 
 After adding Collet to your project dependencies, you can use it as follows:
 
@@ -146,9 +161,8 @@ It could be a regular Clojure map, e.g.
  :db-pass "my-pass"}
 ```
 
-Another way to provide this configuration is to store that map into EDN file.
-In this case Collet has a special reader for values - `#env`.
-You can use this tag to refer environment variables available during execution time.
+If you're using Collet Docker image you can provide this configuration as EDN file.
+In this case Collet has a special reader for environment variables - `#env`.
 
 Example:
 
@@ -168,64 +182,67 @@ Here's a complete example of a real world pipeline specification.
 Don't worry if you don't understand everything at once, we will explain it step by step.
 
 ```clojure
-{:name  :comments-sentiment-analysis
+{:name :comments-sentiment-analysis
  ;; include postgres jdbc driver as a runtime dependency
- :deps  {:coordinates [[org.postgresql/postgresql "42.7.3"]]
-         :requires    [[collet.actions.jdbc-pg]]}
- ;; define the pipeline tasks
- ;; first task will fetch all comments for the specific post from the postgres database
- :tasks [{:name    :post-comments
-          :actions [{:name      :comments
-                     :type      :jdbc
-                     :selectors {post-id           [:config :post-id]
-                                 postgres-jdbc-url [:config :postgres-jdbc-url]}
-                     :params    {:connection {:jdbcUrl postgres-jdbc-url}
-                                 :query      {:select [:id :text]
-                                              :from   :comments
-                                              :where  [:= :post-id post-id]}}}]}
+ :deps {:coordinates [[org.postgresql/postgresql "42.7.3"]
+                      ;; also you can include a library with some prebuilt actions
+                      [com.github.velio-io/collet-actions "0.1.0"]]
+        ;; you'll need to require namaespaces with actions we're going to use
+        :requires    [[collet.actions.jdbc-pg] ;; postgres specific bindings
+                      ;; define the pipeline tasks
+                      ;; first task will fetch all comments for the specific post from the postgres database
+                      :tasks [{:name    :post-comments
+                               :actions [{:name      :comments
+                                          :type      :collet.actions.jdbc/query
+                                          :selectors {post-id           [:config :post-id]
+                                                      postgres-jdbc-url [:config :postgres-jdbc-url]}
+                                          :params    {:connection {:jdbcUrl postgres-jdbc-url}
+                                                      :query      {:select [:id :text]
+                                                                   :from   :comments
+                                                                   :where  [:= :post-id post-id]}}}]}
 
-         ;; second task will analyze the sentiment of each comment using Google Cloud NLP API
-         {:name     :comments-sentiment
-          :inputs   [:post-comments]
-          :actions  [{:name      :comment
-                      :type      :slicer
-                      :selectors {post-comments [:inputs :post-comments]}
-                      :params    {:sequence post-comments}}
+                              ;; second task will analyze the sentiment of each comment using Google Cloud NLP API
+                              {:name     :comments-sentiment
+                               :inputs   [:post-comments] ;; this task will depend on the previous one
+                               :actions  [{:name      :for-each-comment
+                                           :type      :mapper
+                                           :selectors {post-comments [:inputs :post-comments]}
+                                           :params    {:sequence post-comments}}
 
-                     {:name      :sentiment
-                      :type      :http
-                      :selectors {comment-text    [:state :comment :current :text]
-                                  gc-access-token [:config :gc-access-token]}
-                      :params    {:url          "https://language.googleapis.com/v2/documents:analyzeSentiment"
-                                  :method       :post
-                                  :oauth-token  gc-access-token
-                                  :content-type :json
-                                  :as           :json
-                                  :body         {:encodingType "UTF8"
-                                                 :document     {:type    "PLAIN_TEXT"
-                                                                :content comment-text}}
-                                  :return       [:documentSentiment]}}]
-          ;; returned data will be a map with keys :comment-id, :magnitude and :score
-          :iterator {:data [{:comment-id [:state :comment :current :id]
-                             :magnitude  [:state :sentiment :documentSentiment :magnitude]
-                             :score      [:state :sentiment :documentSentiment :score]}]
-                     ;; we will iterate over all comments one by one
-                     :next [:not-nil? [:state :comment :next]]}}
+                                          {:name      :sentiment-request
+                                           :type      :collet.actions.http/request
+                                           :selectors {comment-text    [:$mapper/item :text]
+                                                       gc-access-token [:config :gc-access-token]}
+                                           :params    {:url          "https://language.googleapis.com/v2/documents:analyzeSentiment"
+                                                       :method       :post
+                                                       :oauth-token  gc-access-token
+                                                       :content-type :json ;; send as json
+                                                       :as           :json ;; read response as json
+                                                       :body         {:encodingType "UTF8"
+                                                                      :document     {:type    "PLAIN_TEXT"
+                                                                                     :content comment-text}}
+                                                       :return       [:documentSentiment]}}]
+                               ;; returned data will be a map with keys :comment-id, :magnitude and :score
+                               :iterator {:data [{:comment-id [:$mapper/item :id]
+                                                  :magnitude  [:state :sentiment-request :documentSentiment :magnitude]
+                                                  :score      [:state :sentiment-request :documentSentiment :score]}]
+                                          ;; we will iterate over all comments one by one until there are no more comments
+                                          :next [:true? [:$mapper/has-next-item]]}}
 
-         ;; third task will store the sentiment analysis report to the S3 bucket
-         {:name    :report
-          :inputs  [:comments-sentiment]
-          :actions [{:name      :store-report
-                     :type      :s3
-                     :selectors {sentiments  [:inputs :comments-sentiment]
-                                 s3-bucket   [:config :s3-bucket]
-                                 report-path [:config :report-path]}
-                     :params    {:aws-creds   {:aws-region "eu-west-1"}
-                                 :input       sentiments
-                                 :format      :csv
-                                 :bucket      s3-bucket
-                                 :file-name   report-path
-                                 :csv-header? true}}]}]}
+                              ;; third task will store the sentiment analysis report to the S3 bucket
+                              {:name    :report
+                               :inputs  [:comments-sentiment]
+                               :actions [{:name      :store-report
+                                          :type      :collet.actions.s3/sink
+                                          :selectors {sentiments  [:inputs :comments-sentiment]
+                                                      s3-bucket   [:config :s3-bucket]
+                                                      report-path [:config :report-path]}
+                                          :params    {:aws-creds   {:aws-region "eu-west-1"}
+                                                      :input       sentiments
+                                                      :format      :csv
+                                                      :bucket      s3-bucket
+                                                      :file-name   report-path
+                                                      :csv-header? true}}]}]}
 ```
 
 The basic structure of that can be represented as follows:
@@ -236,9 +253,10 @@ The basic structure of that can be represented as follows:
  :tasks [...]}
 ```
 
-- `:name` (required): A keyword representing the pipeline name.
+- `:name` (required): A keyword representing the pipeline name (in order to distinct results from multiple executions).
 - `:tasks` (required): A vector of task maps.
-- `:deps` (optional): A map for loading runtime dependencies (from maven or clojars).
+- `:deps` (optional): A map for loading runtime dependencies (from maven or clojars). Check the deps
+  format [here](./docs/deps.md).
 
 Task is a logical unit of work that can be executed. Tasks can depend on other tasks, forming a Directed Acyclic Graph.
 Task can be executed multiple times if it requires iteration over the data. Every task iteration will contribute
@@ -253,11 +271,13 @@ Each task map can contain the following keys:
   tasks names
 - `:skip-on-error` (optional): a boolean value that represents whether the task should be skipped if an error occurs.
   Otherwise, the pipeline will stop on the first error.
-- `:keep-state` (optional): a boolean value that represents whether the task should keep the state after the execution.
-  Otherwise, the state will be cleaned up after the task execution. Useful for debugging purposes.
-- `:keep-latest` (optional): a boolean value that represents whether the task should keep only the latest state after
-  the
-  execution. Useful for tasks that iterate over the same data multiple times (on a mutable objects).
+- `:keep-state` (optional): a boolean value that represents whether the pipeline should keep the task state after the
+  execution.
+  Otherwise, the state will be cleaned up after the task execution if no other tasks referring to this data. Useful for
+  debugging purposes.
+- `:state-format` (optional): a keyword that represents how task data will be added to the pipeline state. Available
+  options are `:latest` `:flatten`. In case of `:latest` value, pipeline state will contain only the last task iteration
+  value. In case of `:flatten` value, pipeline state will contain all task iterations values as a flattened sequence.
 - `:retry` (optional): A map that represents the retry policy. This map can contain the following keys:
     - `:max-retries` - how many times the task should be retried
     - `:backoff-ms` - a vector `[initial-delay-ms max-delay-ms multiplier]` to control the delay between each retry, the
@@ -267,9 +287,9 @@ Each task map can contain the following keys:
     - `:data` - what part of the data should be treated as an task output
     - `:next` - responds to the question: should the iteration continue?
 
-The most interesting part here is the  `:iterator` key. It allows you to iterate over the data and execute the actions
+The most interesting part here is the `:iterator` key. It allows you to iterate over the data and execute the actions
 multiple times. The `:data` key is a path to the specific part of the task state that should be treated as an output.
-The value of the `:data` key should be a path vector (think of it as a vector for `get-in` Clojure function).
+The value of the `:data` key should be a "path vector" (think of it as a vector for `get-in` Clojure function).
 It might look like this:
 
 ```clojure
@@ -277,28 +297,8 @@ It might look like this:
 {:data [:state :action-name :nested-key :more-nested-key]}
 ```
 
-This path vector support some additional elements.
-
-- You can use a map syntax to select multiple keys at the same time:
-
-```clojure
-{:data [:state :user {:name :first-name :age :user-age}]}
-;; This will select this map {:first-name "John" :user-age 30} from the state
-```
-
-- `:$/cat` function to iterate over a collection
-
-```clojure
-{:data [:state :users [:$/cat :first-name]]}
-;; This will select all first names from the users collection
-```
-
-- `:$/cond` function to select element that match the criteria
-
-```clojure
-{:data [:state :users [:$/cat :first-name [:cond [:> :age 18]]]]}
-;; This will select all first names from the users collection where age is greater than 18
-```
+This path vector supports some additional elements like map syntax, `:$/cat`, `:$/cond` and `:$/op` functions.
+See the details [here](./docs/select-syntax.md).
 
 If `:data` key is omitted, data returned from the last executed task will be treated as an output.
 
@@ -311,12 +311,7 @@ part of the state. If value under this path is `nil` the iteration will stop.
 {:next [:state :action-name :nested-key]}
 ```
 
-For more complex use cases you can provide a condition vector. Condition vector is a vector of shape
-`[:function-name :value-path :arguments]`.
-Available functions are:`:and`, `:or`, `:pos?`, `:neg?`, `:zero?`, `:>`,
-`:>=`, `:<`, `:<=`, `:=`, `:always-true`, `:true?`, `:false?`, `:contains`, `:absent`, `:regex`, `:nil?`, `:not-nil?`,
-`:not=`, `:empty?`, `:not-empty?`.
-Value path it's a well known path vector. Arguments are optional and should be concrete values.
+For more complex use cases you can provide a `condition vector`, which looks like this:
 
 ```clojure
 {:next [:and
@@ -324,21 +319,22 @@ Value path it's a well known path vector. Arguments are optional and should be c
         [:not-nil? [:state :next-token]]]}
 ```
 
-### Actions library
+For more details see [here](./docs/condition-syntax.md).
+
+### Collet Actions
 
 Collet has a set of predefined actions, you can think of them as building blocks (functions) for your pipeline tasks.
-Action is defined by it's `type`. Type keyword refers to the specific function that will be executed.
-List of predefined actions: `:http`, `:oauth2`, `:odata`, `:counter`, `:slicer`, `:jdbc`, `:file`, `:s3`, `:queue`,
-`:fold`, `:enrich`
+Action is defined by its `type`. Type keyword refers to the specific function that will be executed.
+List of predefined actions: `:counter`, `:slicer`, `:mapper`, `:fold`, `:enrich`
+
+Here's an example of the `:counter` action:
 
 ```clojure
-{:name      :paginated-http-request
- :type      :http
- :selectors {page [:state :pager :next-page]}
- :params    {:url          "https://some-api.com/v1"
-             :query-params {:page page}
-             :as           :json
-             :return       [:body]}}
+{:name   :events-count
+ :type   :counter
+ :params {:start 0
+          :end   150
+          :step  10}}
 ```
 
 Apart from the predefined actions, you can define your own custom actions or refer to the Clojure core functions or
@@ -377,7 +373,14 @@ action execution.
 will be called without arguments.
 `:return` is a path vector (with special syntax supported)
 
-### General options
+Also, Collet provides a separate package for more complex actions - `[com.github.velio-io/collet-actions "0.1.0"]`
+This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
+`:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
+`:collet.actions.queue/enqueue`
+
+Check the [actions documentation](./docs/actions.md) for more details.
+
+### Options for Docker container
 
 Collet uses the mulog library for logging and tracing. When running as a Docker container,
 you can configure various publishers using environment variables:
@@ -393,16 +396,3 @@ you can configure various publishers using environment variables:
 
 JMX metrics are exposed on port `8080` by default.
 You can change this using the `JMX_PORT` environment variable.
-
-## Development
-
-- start the REPL as usual
-- spin up containers for monitoring pipelines execution with command
-  `docker-compose rm -f && docker-compose up` (includes elasticsearch, kibana, jaeger, prometheus, grafana)
-- navigate to the `dev/src/dev.clj` namespace
-- execute `(start-publishers)` to enable logging and tracing
-- you can run all tests in the project with `(test)` command
-
-Graphana is available at `http://localhost:3000` with default credentials `admin/grafana`
-Jaeger is available at `http://localhost:16686`
-Kibana is available at `http://localhost:9000`
