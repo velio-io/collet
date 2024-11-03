@@ -92,7 +92,7 @@
       (testing "compile and execute action"
         (let [action  (collet/compile-action
                        {:name      :query-action
-                        :type      :jdbc
+                        :type      :collet.actions.jdbc/query
                         :selectors {'connection [:config :connection]}
                         :params    {:connection 'connection
                                     :query      {:select   [:*]
@@ -108,7 +108,7 @@
       (testing "pass parameters to query action"
         (let [action  (collet/compile-action
                        {:name      :query-action
-                        :type      :jdbc
+                        :type      :collet.actions.jdbc/query
                         :selectors {'connection [:config :connection]
                                     'name       [:config :name]}
                         :params    {:connection    'connection
@@ -165,7 +165,7 @@
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
-                                              :type      :jdbc
+                                              :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
                                               :params    {:connection 'connection
                                                           :query      {:select [:*]
@@ -208,7 +208,7 @@
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
-                                              :type      :jdbc
+                                              :type      :collet.actions.jdbc/query
                                               :selectors '{connection [:config :connection]
                                                            mood       [:config :mood]}
                                               :params    '{:connection connection
@@ -229,7 +229,7 @@
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
-                                              :type      :jdbc
+                                              :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
                                               :params    {:connection      'connection
                                                           :preserve-types? true
@@ -297,7 +297,7 @@
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
-                                              :type      :jdbc
+                                              :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
                                               :params    {:connection 'connection
                                                           :query      {:select   [:*]
@@ -375,7 +375,7 @@
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
-                                              :type      :jdbc
+                                              :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
                                               :params    {:connection 'connection
                                                           :query      {:select   [:u/username

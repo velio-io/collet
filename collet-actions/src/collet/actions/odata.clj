@@ -297,11 +297,11 @@
         (collet.http/make-request))))
 
 
-(defmethod action/action-fn :odata [_]
+(defmethod action/action-fn ::request [_]
   odata-request)
 
 
-(defmethod action/prep :odata [action-spec]
+(defmethod action/prep ::request [action-spec]
   (-> action-spec
       (common/prep-stateful-action)
       (collet.http/attach-rate-limiter)))

@@ -488,6 +488,26 @@
     {:error/message "should be an instance of Pipeline"}}))
 
 
+(def tasks->actions-namespaces-xf
+  (comp (mapcat (fn [{:keys [actions]}]
+                  (map (fn [{:keys [type action]}]
+                         ;; enrich is a special case, actual action type specified under the :action key
+                         (if (= type :enrich) action type))
+                       actions)))
+        (filter (fn [action-type]
+                  (let [action-ns (namespace action-type)]
+                    ;; clj namespace is reserved for clojure core functions
+                    (and (some? action-ns) (not= action-ns "clj")))))
+        (distinct)
+        (map #(-> % namespace symbol vector))))
+
+
+(defn get-actions-deps
+  "Extracts the dependencies from the actions types from all tasks"
+  [tasks]
+  (transduce tasks->actions-namespaces-xf conj tasks))
+
+
 (defn compile-pipeline
   "Compiles a pipeline spec into a function.
    Resulting function can be executed with a configuration map
@@ -506,6 +526,10 @@
 
   (when (some? deps)
     (collet.deps/add-dependencies deps))
+
+  (let [actions-deps (get-actions-deps tasks)]
+    (when (seq actions-deps)
+      (collet.deps/add-dependencies {:requires actions-deps})))
 
   (let [pipeline-id (random-uuid)
         tasks-map   (->> tasks

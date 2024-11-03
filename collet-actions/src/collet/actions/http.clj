@@ -136,11 +136,11 @@
       (some? rate) (assoc-in [:params ::rate-limiter] (rl/rate-limiter {:rate rate})))))
 
 
-(defmethod action/action-fn :http [_]
+(defmethod action/action-fn ::request [_]
   make-request)
 
 
-(defmethod action/prep :http [action-spec]
+(defmethod action/prep ::request [action-spec]
   (attach-rate-limiter action-spec))
 
 
@@ -184,5 +184,5 @@
      :headers headers)))
 
 
-(defmethod action/action-fn :oauth2 [_]
+(defmethod action/action-fn ::oauth2 [_]
   get-oauth2-token)

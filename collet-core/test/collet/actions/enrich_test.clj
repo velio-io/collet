@@ -26,7 +26,7 @@
   (testing "enrich function returns a set of actions"
     (let [actual (sut/enrich {:name      :enrich-artist-details
                               :target    [:inputs :area-events]
-                              :action    :http
+                              :action    :collet.actions.http/request
                               :selectors {'artist-id [:path :to :artist :id]}
                               :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                           :accept       :json
@@ -36,7 +36,7 @@
                               :return    [:body]
                               :fold-in   [:artist]})]
       (is (= 3 (count actual)))
-      (is (= (map :type actual) [:mapper :http :fold]))))
+      (is (= (map :type actual) [:mapper :collet.actions.http/request :fold]))))
 
   (testing "enrich action in the context of task execution"
     (let [task-spec {:name     :enrich-test
@@ -66,8 +66,7 @@
 (deftest enrich-data-pipeline-test
   (testing "enrich action in the context of pipeline execution"
     (let [pipeline-spec {:name  :city-events-with-artists
-                         :deps  {:coordinates '[[collet/collet-actions "0.1.0-SNAPSHOT"]]
-                                 :requires    '[[collet.actions.http]]}
+                         :deps  {:coordinates '[[collet/collet-actions "0.1.0-SNAPSHOT"]]}
                          :tasks [{:name       :events-with-artists
                                   :keep-state true
                                   :setup      [{:type      :slicer
@@ -80,7 +79,7 @@
                                                 :name      :enrich-artist-details
                                                 :target    [:state :city-events-list]
                                                 :when      [:not-nil? [:$enrich/item :artist :id]]
-                                                :action    :http
+                                                :action    :collet.actions.http/request
                                                 :selectors {'artist-id [:$enrich/item :artist :id]}
                                                 :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                                             :accept       :json

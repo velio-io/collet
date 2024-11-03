@@ -36,7 +36,7 @@
                     {:name  :queue-sink-test
                      :tasks [{:name    :write-messages
                               :actions [{:name   :queue-action
-                                         :type   :queue
+                                         :type   :collet.actions.queue/enqueue
                                          :params {:input      [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
                                                   :queue-name :pipeline-queue-test}}]}]})]
 
@@ -57,7 +57,7 @@
                     {:name  :queue-sink-test
                      :tasks [{:name    :write-messages
                               :actions [{:name   :queue-action
-                                         :type   :queue
+                                         :type   :collet.actions.queue/enqueue
                                          :params {:input      {:a 1 :b 2}
                                                   :queue-name :pipeline-queue-test}}]}]})]
 

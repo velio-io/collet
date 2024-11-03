@@ -202,5 +202,5 @@
       (->rows-seq lines row-mapping-fn cleanup-fn))))
 
 
-(defmethod action/action-fn :jdbc [_]
+(defmethod action/action-fn ::query [_]
   make-query)

@@ -296,7 +296,7 @@
       (let [pipeline-spec {:name  :people-pipeline
                            :tasks [{:name       :people
                                     :keep-state true
-                                    :actions    [{:type   :odata
+                                    :actions    [{:type   :collet.actions.odata/request
                                                   :name   :people-request
                                                   :params {:service-url      "http://services.odata.org/V4/TripPinService/"
                                                            :segment          [:People]
@@ -322,7 +322,7 @@
                                                   :name      :skip
                                                   :selectors {'bs [:config :batch-size]}
                                                   :params    {:start 0 :step 'bs}}
-                                                 {:type      :odata
+                                                 {:type      :collet.actions.odata/request
                                                   :name      :people-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}
@@ -349,7 +349,7 @@
       (let [pipeline-spec {:name  :people-pipeline
                            :tasks [{:name       :people
                                     :keep-state true
-                                    :setup      [{:type   :odata
+                                    :setup      [{:type   :collet.actions.odata/request
                                                   :name   :total-people-count
                                                   :params {:service-url     "http://services.odata.org/V4/TripPinService/"
                                                            :segment         [:People]
@@ -359,7 +359,7 @@
                                                   :name      :skip
                                                   :selectors {'bs [:config :batch-size]}
                                                   :params    {:start 0 :step 'bs}}
-                                                 {:type      :odata
+                                                 {:type      :collet.actions.odata/request
                                                   :name      :people-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}

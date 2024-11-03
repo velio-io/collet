@@ -43,9 +43,9 @@
         (assoc-in [:params ::appender] appender))))
 
 
-(defmethod action/action-fn :queue [_]
+(defmethod action/action-fn ::enqueue [_]
   write-into-queue)
 
 
-(defmethod action/prep :queue [action-spec]
+(defmethod action/prep ::enqueue [action-spec]
   (attach-queue action-spec))

@@ -54,7 +54,7 @@
                                                     :name      :area-query
                                                     :selectors {'city [:config :city]}
                                                     :params    ["area:%s AND type:City" 'city]}
-                                                   {:type      :http
+                                                   {:type      :collet.actions.http/request
                                                     :name      :area-request
                                                     :selectors {'area-query [:state :area-query]}
                                                     :params    {:url          "https://musicbrainz.org/ws/2/area"
@@ -71,7 +71,7 @@
                                                     :name      :events-query
                                                     :selectors '{area-id [:state :area-id]}
                                                     :params    ["aid:%s AND type:Concert" 'area-id]}]
-                                    :actions      [{:type      :http
+                                    :actions      [{:type      :collet.actions.http/request
                                                     :name      :events-request
                                                     :selectors {'events-query [:state :events-query]}
                                                     :params    {:url          "https://musicbrainz.org/ws/2/event"
@@ -104,7 +104,7 @@
                                                   :name      :event-artist-item
                                                   :selectors {'event-artists [:state :event-artists]}
                                                   :params    {:sequence 'event-artists}}
-                                                 {:type      :http
+                                                 {:type      :collet.actions.http/request
                                                   :name      :artist-details
                                                   :when      [:not-nil? [:$mapper/item :artist]]
                                                   :selectors {'artist-id [:$mapper/item :artist :id]}
@@ -177,7 +177,7 @@
                                                   :name      :area-query
                                                   :selectors {'city [:config :city]}
                                                   :params    ["area:%s AND type:City" 'city]}
-                                                 {:type      :http
+                                                 {:type      :collet.actions.http/request
                                                   :name      :area-request
                                                   :selectors {'area-query [:state :area-query]}
                                                   :params    {:url          "https://musicbrainz.org/ws/2/area"
@@ -200,7 +200,7 @@
                                                   :name      :offset
                                                   :selectors {'req-count [:state :req-count]}
                                                   :params    ['req-count 10]}
-                                                 {:type      :http
+                                                 {:type      :collet.actions.http/request
                                                   :name      :events-request
                                                   :selectors {'events-query [:state :events-query]
                                                               'offset       [:state :offset]}
@@ -226,7 +226,7 @@
                                               :name      :artist-details
                                               :target    [:state :event-artists]
                                               :when      [:not-nil? [:$enrich/item :artist :id]]
-                                              :action    :http
+                                              :action    :collet.actions.http/request
                                               :selectors {'artist-id [:$enrich/item :artist :id]}
                                               :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
                                                           :accept       :json
