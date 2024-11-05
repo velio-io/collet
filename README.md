@@ -101,13 +101,13 @@ Add the following dependency to your project:
 For Leiningen:
 
 ```clojure
-[io.github.velio-io/collet-core "0.1.0"]
+[io.velio/collet-core "0.1.0"]
 ```
 
 For deps.edn:
 
 ```clojure
-io.github.velio-io/collet-core {:mvn/version "0.1.0"}
+io.velio/collet-core {:mvn/version "0.1.0"}
 ```
 
 After adding Collet to your project dependencies, you can use it as follows:
@@ -186,7 +186,7 @@ Don't worry if you don't understand everything at once, we will explain it step 
  ;; include postgres jdbc driver as a runtime dependency
  :deps {:coordinates [[org.postgresql/postgresql "42.7.3"]
                       ;; also you can include a library with some prebuilt actions
-                      [io.github.velio-io/collet-actions "0.1.0"]]
+                      [io.velio/collet-actions "0.1.0"]]
         ;; you'll need to require namaespaces with actions we're going to use
         :requires    [[collet.actions.jdbc-pg] ;; postgres specific bindings
                       ;; define the pipeline tasks
@@ -383,7 +383,7 @@ action execution.
 will be called without arguments.
 `:return` is a path vector (with special syntax supported)
 
-Also, Collet provides a separate package for more complex actions - `[com.github.velio-io/collet-actions "0.1.0"]`
+Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.1.0"]`
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
 `:collet.actions.queue/enqueue`

@@ -323,7 +323,7 @@ Of course you can combine multiple transformations together.
 ### Actions to work with external datasource's
 
 Collet has a separate package with actions to work with external datasource's like third-party APIs, databases, etc.
-You'll have to include that package as a dependency `[com.github.velio-io/collet-actions "0.1.0"]`
+You'll have to include that package as a dependency `[io.velio/collet-actions "0.1.0"]`
 Available actions are:
 
 - `:collet.actions.http/request` performs an arbitrary HTTP request.
@@ -421,7 +421,7 @@ Available actions are:
 
 ```clojure
 {:name  :products-bought-by-users
- :deps  {:coordinates [[com.github.velio-io/collet-actions "0.1.0"]
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0"]
                        [com.mysql/mysql-connector-j "9.0.0"]]}
  :tasks [{:name    :query
           :actions [{:name   :query-action
@@ -456,7 +456,7 @@ Available actions are:
 
 ```clojure
 {:name  :s3-sink-test
- :deps  {:coordinates [[com.github.velio-io/collet-actions "0.1.0"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0"]]}
  :tasks [{:name    :s3-test-task
           :actions [{:name   :s3-action
                      :type   :collet.actions.s3/sink
@@ -500,7 +500,7 @@ Available actions are:
 
 ```clojure
 {:name  :queue-sink-test
- :deps  {:coordinates [[com.github.velio-io/collet-actions "0.1.0"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0"]]}
  :tasks [{:name    :write-messages
           :actions [{:name   :queue-action
                      :type   :collet.actions.queue/enqueue
