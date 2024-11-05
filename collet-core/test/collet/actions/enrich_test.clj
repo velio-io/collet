@@ -66,7 +66,7 @@
 (deftest enrich-data-pipeline-test
   (testing "enrich action in the context of pipeline execution"
     (let [pipeline-spec {:name  :city-events-with-artists
-                         :deps  {:coordinates '[[collet/collet-actions "0.1.0-SNAPSHOT"]]}
+                         :deps  {:coordinates '[[io.github.velio-io/collet-actions "0.1.0-SNAPSHOT"]]}
                          :tasks [{:name       :events-with-artists
                                   :keep-state true
                                   :setup      [{:type      :slicer

@@ -1,4 +1,4 @@
-(defproject collet "0.1.0-SNAPSHOT"
+(defproject io.github.velio-io/collet "0.1.0-SNAPSHOT"
   :description "Library for defining and executing workflows"
   :url "https://github.com/velio-io/collet"
 
@@ -11,4 +11,8 @@
    "collet-app"]
 
   :dependencies
-  [[org.clojure/clojure "1.12.0"]])
+  [[org.clojure/clojure "1.12.0"]]
+
+  :aliases
+  {"install" ["sub" "install"]
+   "test"    ["sub" "test"]})

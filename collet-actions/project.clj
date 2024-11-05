@@ -1,4 +1,4 @@
-(defproject collet/collet-actions "0.1.0-SNAPSHOT"
+(defproject io.github.velio-io/collet-actions "0.1.0-SNAPSHOT"
   :description "Actions library for Collet workflows"
   :url "https://github.com/velio-io/collet"
 
@@ -12,7 +12,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
-   [collet/collet-core "0.1.0-SNAPSHOT"]
+   [io.github.velio-io/collet-core "0.1.0-SNAPSHOT"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [http-kit "2.8.0"]
