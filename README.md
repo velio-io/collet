@@ -270,6 +270,8 @@ In a nutshell, task is a logical unit of work that can be executed. Tasks can de
 Acyclic Graph. Task can be executed multiple times if it requires iteration over the data. Every task iteration will
 contribute to the resulting pipeline state.
 
+![collet dataflow](collet-dataflow.png)
+
 Each task map can contain the following keys:
 
 - `:name` (required): A keyword that represents the name of the task
