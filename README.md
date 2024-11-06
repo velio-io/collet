@@ -330,6 +330,27 @@ For more complex use cases you can provide a `condition vector`, which looks lik
 
 For more details on condition syntax see [here](./docs/condition-syntax.md).
 
+One more feature you can use with Collet app is `#include` tag in the pipeline specification.
+It allows you to split the pipeline into multiple files and include them in the main pipeline spec.
+This way you can create reusable tasks and inject them into different pipelines.
+
+```clojure
+;; ./tasks/common-task.edn
+{:name    :task-2
+ :actions [...]}
+
+;; ./my-pipeline.edn
+{:name  :my-pipeline
+ :tasks [{:name    :task-1
+          :actions [...]}
+
+         ;; here the task-2 will be injected from the separate file
+         #include "./tasks/common-task.edn"
+
+         {:name    :task-3
+          :actions [...]}]}
+```
+
 ### Collet Actions
 
 Collet has a set of predefined actions, you can think of them as building blocks (functions) for your pipeline tasks.
