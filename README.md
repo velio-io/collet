@@ -101,13 +101,13 @@ Add the following dependency to your project:
 For Leiningen:
 
 ```clojure
-[com.github.velio-io/collet-core "0.1.0"]
+[io.velio/collet-core "0.1.0"]
 ```
 
 For deps.edn:
 
 ```clojure
-com.github.velio-io/collet-core {:mvn/version "0.1.0"}
+io.velio/collet-core {:mvn/version "0.1.0"}
 ```
 
 After adding Collet to your project dependencies, you can use it as follows:
@@ -149,7 +149,7 @@ After adding Collet to your project dependencies, you can use it as follows:
 (collet/pipe-error my-pipeline)
 ```
 
-## Configuration
+### Pipeline Configuration
 
 As mentioned before, when executing a Collet pipeline you can provide a configuration map,
 which can be used to store sensitive data or any other configuration values.
@@ -186,7 +186,7 @@ Don't worry if you don't understand everything at once, we will explain it step 
  ;; include postgres jdbc driver as a runtime dependency
  :deps {:coordinates [[org.postgresql/postgresql "42.7.3"]
                       ;; also you can include a library with some prebuilt actions
-                      [com.github.velio-io/collet-actions "0.1.0"]]
+                      [io.velio/collet-actions "0.1.0"]]
         ;; you'll need to require namaespaces with actions we're going to use
         :requires    [[collet.actions.jdbc-pg] ;; postgres specific bindings
                       ;; define the pipeline tasks
@@ -258,9 +258,19 @@ The basic structure of that can be represented as follows:
 - `:deps` (optional): A map for loading runtime dependencies (from maven or clojars). Check the deps
   format [here](./docs/deps.md).
 
-Task is a logical unit of work that can be executed. Tasks can depend on other tasks, forming a Directed Acyclic Graph.
-Task can be executed multiple times if it requires iteration over the data. Every task iteration will contribute
-to the resulting data.
+One way you can think of a pipeline is a data structure that evolves over time.
+When you initialize a pipeline it has some internal state of the shape `{:state {} :config {}}`.
+Where the `state` key is an empty map and the `config` key is a map with the configuration values (provided an the
+startup). When pipeline is running every task will contribute to the `state` key. The `state` key will contain
+data returned from tasks. If a task executed multiple times, the `state` key will contain all the iterations data
+as a sequence of task results (see `:state-format` option). Also, tasks can refer to each other data using the `:inputs`
+key (will be fulfilled for each task individually).
+
+In a nutshell, task is a logical unit of work that can be executed. Tasks can depend on other tasks, forming a Directed
+Acyclic Graph. Task can be executed multiple times if it requires iteration over the data. Every task iteration will
+contribute to the resulting pipeline state.
+
+![collet dataflow](collet-dataflow.png)
 
 Each task map can contain the following keys:
 
@@ -271,10 +281,6 @@ Each task map can contain the following keys:
   tasks names
 - `:skip-on-error` (optional): a boolean value that represents whether the task should be skipped if an error occurs.
   Otherwise, the pipeline will stop on the first error.
-- `:keep-state` (optional): a boolean value that represents whether the pipeline should keep the task state after the
-  execution.
-  Otherwise, the state will be cleaned up after the task execution if no other tasks referring to this data. Useful for
-  debugging purposes.
 - `:state-format` (optional): a keyword that represents how task data will be added to the pipeline state. Available
   options are `:latest` `:flatten`. In case of `:latest` value, pipeline state will contain only the last task iteration
   value. In case of `:flatten` value, pipeline state will contain all task iterations values as a flattened sequence.
@@ -282,6 +288,9 @@ Each task map can contain the following keys:
     - `:max-retries` - how many times the task should be retried
     - `:backoff-ms` - a vector `[initial-delay-ms max-delay-ms multiplier]` to control the delay between each retry, the
       delay for nth retry will be `(min (* initial-delay-ms (expt 2 (- n 1))) max-delay-ms)`
+- `:keep-state` (optional): a boolean value that represents whether the pipeline should keep the task state after the
+  execution. Otherwise, the state will be cleaned up after the task execution if no other tasks referring to this data.
+  Useful for debugging purposes.
 - `:iterator` (optional): A map that represents the iteration of actions. If iterator is skipped, the actions will be
   executed only once. This map can contain the following keys:
     - `:data` - what part of the data should be treated as an task output
@@ -297,14 +306,14 @@ It might look like this:
 {:data [:state :action-name :nested-key :more-nested-key]}
 ```
 
-This path vector supports some additional elements like map syntax, `:$/cat`, `:$/cond` and `:$/op` functions.
+This path vector supports some additional elements like "map syntax", `:$/cat`, `:$/cond` and `:$/op` functions.
 See the details [here](./docs/select-syntax.md).
 
 If `:data` key is omitted, data returned from the last executed task will be treated as an output.
 
 The `:next` key is responsible for the continuation of the iteration.
 Setting it to true will mean an infinite loop, false - means no iteration at all.
-Also, you can provide a path vector as for `:data` (but special syntax not supported here) to point to the specific
+Also, you can provide a "path vector" as for `:data` (but special syntax is not supported here) to point to the specific
 part of the state. If value under this path is `nil` the iteration will stop.
 
 ```clojure
@@ -319,7 +328,7 @@ For more complex use cases you can provide a `condition vector`, which looks lik
         [:not-nil? [:state :next-token]]]}
 ```
 
-For more details see [here](./docs/condition-syntax.md).
+For more details on condition syntax see [here](./docs/condition-syntax.md).
 
 ### Collet Actions
 
@@ -360,6 +369,7 @@ Basic structure of the action map is:
 
 - `:name` (required): A keyword that represents the name of the action
 - `:type` (required): A keyword that represents the type of the action
+- `:when` (optional): A condition vector that represents whether the action should be executed
 - `:fn` (optional): If you want to define a custom action you can provide a regular Clojure function
 - `:params` (optional): Represents the parameters (function arguments) for the action
 - `:selectors` (optional): You can bind any value in the pipeline state to the specific symbol and refer to it in the
@@ -373,7 +383,7 @@ action execution.
 will be called without arguments.
 `:return` is a path vector (with special syntax supported)
 
-Also, Collet provides a separate package for more complex actions - `[com.github.velio-io/collet-actions "0.1.0"]`
+Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.1.0"]`
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
 `:collet.actions.queue/enqueue`

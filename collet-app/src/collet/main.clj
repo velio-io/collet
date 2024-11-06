@@ -59,8 +59,18 @@
          (coerce value type))))))
 
 
-(defn read-config-string [s]
-  (edn/read-string {:eof nil :readers {'env get-env}} s))
+(declare read-config-file)
+
+
+(defn include-spec
+  [path]
+  (read-config-file :spec (new URI path)))
+
+
+(defn read-config-string [target s]
+  (if (= target :config)
+    (edn/read-string {:eof nil :readers {'env get-env}} s)
+    (edn/read-string {:eof nil :readers {'include include-spec}} s)))
 
 
 (defn query->map
@@ -118,37 +128,43 @@
         :publishers publishers}))))
 
 
+(defn read-config-file
+  "Reads the content of the file from the provided URI"
+  [target ^URI uri]
+  (let [file-path (.getPath uri)]
+    (case (.getScheme uri)
+      "s3"
+      (->> (s3-file-content uri)
+           (read-config-string target))
+      ("http" "https")
+      (->> (slurp uri)
+           (read-config-string target))
+      ;; defaults to local file
+      (let [file (io/as-file file-path)]
+        (if (.exists file)
+          (->> file slurp (read-config-string target))
+          (throw (ex-info "File does not exist" {:file file-path})))))))
+
+
 (defn file-or-map
   "Parses the provided string argument as a content of the file path or a raw Clojure map"
-  [s]
+  [target s]
   (if-some [uri ^URI (try (new URI s)
                           (catch URISyntaxException _ nil))]
     ;; read as a file
-    (let [file-path (.getPath uri)]
-      (case (.getScheme uri)
-        "s3"
-        (-> (s3-file-content uri)
-            (read-config-string))
-        ("http" "https")
-        (-> (slurp uri)
-            (read-config-string))
-        ;; defaults to local file
-        (let [file (io/as-file file-path)]
-          (if (.exists file)
-            (-> file slurp read-config-string)
-            (throw (ex-info "File does not exist" {:file file-path}))))))
+    (read-config-file target uri)
     ;; parse as map
-    (read-config-string s)))
+    (read-config-string target s)))
 
 
 (def cli-options
   [["-s" "--pipeline-spec PIPELINE_SPEC" "(Required) Path to the pipeline spec file"
     :missing true
-    :parse-fn file-or-map
+    :parse-fn (partial file-or-map :spec)
     :validate [not-empty "Must provide a pipeline spec file"]]
    ["-c" "--pipeline-config PIPELINE_CONFIG" "(Optional) Dynamic configuration for the pipeline"
     :default {}
-    :parse-fn file-or-map
+    :parse-fn (partial file-or-map :config)
     :validate [map? "Must provide a map for the pipeline config"]]])
 
 

@@ -30,11 +30,11 @@
       (is (= {} (:pipeline-config options)))
       (is (= :test-pipeline (-> options :pipeline-spec :name))))
 
-    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :raw-pipe-name :pwd #env \"PWD\"}" "-c" "{:foo :bar}") sut/cli-options)]
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :raw-pipe-name}" "-c" "{:foo :bar :pwd #env \"PWD\"}") sut/cli-options)]
       (is (nil? errors))
-      (is (= {:foo :bar} (:pipeline-config options)))
-      (is (= :raw-pipe-name (-> options :pipeline-spec :name)))
-      (is (string/includes? (-> options :pipeline-spec :pwd) "collet")))
+      (is (= :bar (-> options :pipeline-config :foo)))
+      (is (string/includes? (-> options :pipeline-config :pwd) "collet"))
+      (is (= :raw-pipe-name (-> options :pipeline-spec :name))))
 
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-test-config.edn" "-c" "{}") sut/cli-options)]
       (is (nil? errors))
@@ -54,6 +54,12 @@
       (is (not (nil? errors)))
       (is (string/includes? (first errors) "File does not exist"))))
 
+  (testing "spec supports include tag"
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :parent-pipe :include-config #include \"configs/pipeline-test-config.edn\"}") sut/cli-options)]
+      (is (nil? errors))
+      (is (= :parent-pipe (-> options :pipeline-spec :name)))
+      (is (= :test-pipeline (-> options :pipeline-spec :include-config :name)))))
+
   (testing "file upload from S3"
     (let [container      (localstack-container)
           container-port (get-in container [:mapped-ports 4566])
@@ -65,14 +71,14 @@
                                               :port     container-port}}
           s3-client      (aws/make-client :s3 aws-creds)]
       (aws/invoke! s3-client :CreateBucket
-                     {:Bucket                    "test-bucket"
-                      :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+                   {:Bucket                    "test-bucket"
+                    :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
       (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
         (aws/invoke! s3-client :PutObject
-                       {:Bucket "test-bucket"
-                        :Key    "test-pipeline-config.edn"
-                        :Body   file-stream}))
+                     {:Bucket "test-bucket"
+                      :Key    "test-pipeline-config.edn"
+                      :Body   file-stream}))
 
       (with-redefs [aws/make-client (fn [& _] s3-client)]
         (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1") sut/cli-options)]
@@ -84,7 +90,7 @@
 
 (deftest config-string-parse-test
   (testing "config values can refer to env variables"
-    (let [config (sut/read-config-string "{:pwd #env \"PWD\" :port #env [\"NOT_SET_VAR_PORT\" Int :or 8080]}")]
+    (let [config (sut/read-config-string :config "{:pwd #env \"PWD\" :port #env [\"NOT_SET_VAR_PORT\" Int :or 8080]}")]
       (is (= 8080 (:port config)))
       (is (string/includes? (:pwd config) "collet")))))
 

@@ -21,7 +21,6 @@
 
 (defn write-into-file
   "Writes the input to a file.
-   For JSON format, the resulting file will contain one JSON object per line.
    The input data should be a collection of maps or a collection of sequential items.
    Options:
    :input       - the data to write
