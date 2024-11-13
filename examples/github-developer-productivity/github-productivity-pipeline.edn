@@ -1,0 +1,161 @@
+{:name  :devs-productivity-pipeline
+
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0-SNAPSHOT"]]
+         :requires    [[tech.v3.datatype.datetime :as dtype-dt]]
+         :imports     [[java.time LocalDateTime]]}
+
+ :tasks [{:name     :repos
+          :setup    [{:name      :org-repos
+                      :type      :collet.actions.http/request
+                      :selectors {gh-token [:config :gh-token]
+                                  org-name [:config :org-name]}
+                      :params    {:url          ["https://api.github.com/orgs/%s/repos" org-name]
+                                  :headers      {"Accept"               "application/vnd.github+json"
+                                                 "X-GitHub-Api-Version" "2022-11-28"}
+                                  :oauth-token  gh-token
+                                  :query-params {:per_page 100}
+                                  :as           :json}
+                      :return    [{:repos [:body [:$/cat :name]]
+                                   :link  [:headers :link]}]}
+
+                     {:name      :next-link
+                      :type      :clj/re-find
+                      :when      [:not-nil? [:state :org-repos :link]]
+                      :selectors {next-link [:state :org-repos :link]}
+                      :params    [#"(?<=<)([\S]*)(?=>; rel=\"next\")" next-link]
+                      :return    [[:$/op :first]]}]
+
+          :actions  [{:name      :more-repos
+                      :type      :collet.actions.http/request
+                      :when      [:not-nil? [:state :next-link]]
+                      :selectors {next-link [:state :next-link]
+                                  gh-token  [:config :gh-token]}
+                      :params    {:url         next-link
+                                  :headers     {"Accept"               "application/vnd.github+json"
+                                                "X-GitHub-Api-Version" "2022-11-28"}
+                                  :oauth-token gh-token
+                                  :as          :json}
+                      :return    [{:repos [:body [:$/cat :name]]
+                                   :link  [:headers :link]}]}
+
+                     {:name      :all-repos
+                      :type      :fold
+                      :selectors {repos      [:state :org-repos :repos]
+                                  more-repos [:state :more-repos :repos]}
+                      :params    {:op   :concat
+                                  :into repos
+                                  :item more-repos}}
+
+                     {:name      :next-link
+                      :type      :clj/re-find
+                      :when      [:not-nil? [:state :more-repos :link]]
+                      :selectors {next-link [:state :more-repos :link]}
+                      :params    [#"(?<=<)([\S]*)(?=>; rel=\"next\")" next-link]
+                      :return    [[:$/op :first]]}]
+
+          :iterator {:data [:state :all-repos]
+                     :next [:not-nil? [:state :next-link]]}}
+
+         {:name     :pulls
+          :inputs   [:repos]
+          :actions  [{:name :paginate-or-request
+                      :type :switch
+                      :case [{:condition [:nil? [:state :repo-pulls :link]]
+                              :actions   [{:name      :repo
+                                           :type      :mapper
+                                           :selectors {repos [:inputs :repos]}
+                                           :params    {:sequence repos}}
+                                          {:name      :repo-pulls
+                                           :type      :collet.actions.http/request
+                                           :selectors {gh-token [:config :gh-token]
+                                                       org-name [:config :org-name]
+                                                       repo     [:$mapper/item]}
+                                           :params    {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
+                                                       :headers      {"Accept"               "application/vnd.github+json"
+                                                                      "X-GitHub-Api-Version" "2022-11-28"}
+                                                       :oauth-token  gh-token
+                                                       :query-params {:per_page 100 :state "closed"}
+                                                       :as           :json}
+                                           :return    [{:pulls [:body [:$/cat {:title   :title
+                                                                               :date    :closed_at
+                                                                               :user-id [:user :login]}]]
+                                                        :link  [:headers :link]}]}]}
+
+                             {:condition [:regex [:state :repo-pulls :link] #".*rel=\"next\".*"]
+                              :actions   [{:name      :next-link
+                                           :type      :clj/re-find
+                                           :selectors {next-link [:state :repo-pulls :link]}
+                                           :params    [#"(?<=<)([\S]*)(?=>; rel=\"next\")" next-link]
+                                           :return    [[:$/op :first]]}
+                                          {:name      :repo-pulls
+                                           :type      :collet.actions.http/request
+                                           :selectors {next-link [:state :next-link]
+                                                       gh-token  [:config :gh-token]}
+                                           :params    {:url         next-link
+                                                       :headers     {"Accept"               "application/vnd.github+json"
+                                                                     "X-GitHub-Api-Version" "2022-11-28"}
+                                                       :oauth-token gh-token
+                                                       :as          :json}
+                                           :return    [{:pulls [:body [:$/cat {:title   :title
+                                                                               :date    :closed_at
+                                                                               :user-id [:user :login]}]]
+                                                        :link  [:headers :link]}]}]}
+
+                             {:condition :default
+                              :actions   [{:name   :repo-pulls
+                                           :type   :clj/identity
+                                           :params {:pulls [] :link nil}}]}]}
+
+                     {:name      :all-repo-pulls
+                      :type      :fold
+                      :selectors {pulls [:state :repo-pulls :pulls]}
+                      :params    {:item pulls
+                                  :op   :concat}}]
+          :iterator {:data [:state :all-repo-pulls]
+                     :next [:or [:not-nil? [:state :repo-pulls :link]]
+                            [:true? [:$mapper/has-next-item]]]}}
+
+         {:name    :prs-by-member
+          :inputs  [:pulls]
+          :setup   [{:name      :prs-dataset
+                     :type      :slicer
+                     :selectors {pulls [:inputs :pulls]}
+                     :params    {:sequence pulls
+                                 :parse    {:date :instant}}}]
+
+          :actions [{:name      :total-prs-by-member
+                     :type      :slicer
+                     :selectors {pulls [:state :prs-dataset]}
+                     :params    {:sequence pulls
+                                 :apply    [[:fold {:by :user-id}]
+                                            [:map {:with (fn [{:keys [title]}]
+                                                           {:pulls-count (count title)})}]
+                                            [:select {:columns [:user-id :pulls-count]}]]}}
+
+                    {:name      :save-total-report
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :total-prs-by-member]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "total-prs-by-member.csv"}}
+
+                    {:name      :monthly-prs-by-member
+                     :type      :slicer
+                     :selectors {pulls [:state :prs-dataset]}
+                     :params    {:sequence pulls
+                                 :apply    [[:map {:with (fn [{:keys [date]}]
+                                                           (let [dt ^LocalDateTime (dtype-dt/instant->local-date-time date)]
+                                                             {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
+                                            [:fold {:by [:user-id :year-month]}]
+                                            [:map {:with (fn [{:keys [title]}]
+                                                           {:pulls-count (count title)})}]
+                                            [:select {:columns [:user-id :pulls-count :year-month]}]]}}
+
+                    {:name      :save-monthly-report
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :monthly-prs-by-member]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "monthly-prs-by-member.csv"}}]}]}

@@ -32,7 +32,7 @@
                               {:id 3 :name "James" :street "Elm St."}
                               {:id 4 :name "Jacob" :street "Elm St."}
                               {:id 5 :name "Jason" :street "Main St."}]
-                   :apply    [[:fold {:by     [:street]
+                   :apply    [[:fold {:by     :street
                                       :rollup true}]]})]
       (is (= 3 (ds/row-count result)))
       (is (= [{:street "Main St." :id [1 5] :name ["John" "Jason"]}

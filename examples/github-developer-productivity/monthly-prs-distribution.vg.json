@@ -1,0 +1,29 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "width": 1000,
+  "data": {
+    "url": "monthly-prs-by-member.csv",
+    "format": {
+      "type": "csv"
+    }
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "year-month",
+      "type": "temporal",
+      "timeUnit": "yearmonth",
+      "title": "Month of the year"
+    },
+    "y": {
+      "field": "pulls-count",
+      "type": "quantitative",
+      "title": "Number of closed PRs"
+    },
+    "color": {
+      "field": "user-id",
+      "type": "nominal",
+      "title": "Members"
+    }
+  }
+}

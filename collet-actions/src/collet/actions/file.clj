@@ -9,7 +9,8 @@
 (def file-params-spec
   [:map
    [:input
-    [:sequential [:or map? [:sequential :any]]]]
+    [:or utils/dataset?
+     [:sequential [:or map? [:sequential :any]]]]]
    [:cat? {:optional true :default false}
     :boolean]
    [:format

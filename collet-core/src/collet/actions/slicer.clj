@@ -114,7 +114,7 @@
   [dataset {:keys [by join-groups group-col]
             :or   {join-groups true group-col :_group_by_key}}]
   (let [groups (if (sequential? by)
-                 (ds/group-by dataset #(collet.select/select group-by %))
+                 (ds/group-by dataset #(collet.select/select by %))
                  (ds/group-by-column dataset by))]
     (if join-groups
       (let [groups-seq (map (fn [[k d]] (assoc d group-col k)) groups)]
@@ -146,6 +146,15 @@
     (some? drop-cols) (ds/drop-columns drop-cols)
     (some? rows) (ds/select-rows columns rows)
     (some? drop-rows) (ds/drop-rows drop-rows)))
+
+
+(defn do-map-with
+  [dataset {:keys [with as-dataset?] :or {as-dataset? false}}]
+  (let [map-fn (if (list? with) (eval with) with)]
+    (if (ds/dataset? dataset)
+      (ds/row-map dataset map-fn)
+      (cond-> (map map-fn dataset)
+        as-dataset? (ds/->dataset)))))
 
 
 (def slicer-params-spec
@@ -185,7 +194,11 @@
                         [:columns {:optional true} [:sequential ::simple-value]]
                         [:drop-cols {:optional true} [:sequential ::simple-value]]
                         [:rows {:optional true} [:sequential :int]]
-                        [:drop-rows {:optional true} [:sequential :int]]]]}}
+                        [:drop-rows {:optional true} [:sequential :int]]]]
+     ::map            [:tuple [:= :map]
+                       [:map
+                        [:with [:or fn? list?]]
+                        [:as-dataset? {:optional true} :boolean]]]}}
    [:map
     [:sequence [:or utils/dataset? [:sequential :any]]]
     [:cat? {:optional true} :boolean]
@@ -198,8 +211,8 @@
    Can modify the dataset shape by applying flatten-by, group-by and join-with options."
   {:malli/schema [:=> [:cat slicer-params-spec]
                   [:or utils/linked-hash-map? utils/dataset?]]}
-  [{:keys [apply cat?] data :sequence}]
-  (let [dataset (utils/make-dataset data {:cat? cat?})]
+  [{:keys [apply cat? parse] data :sequence}]
+  (let [dataset (utils/make-dataset data {:cat? cat? :parse parse})]
     (reduce
      (fn [d [op args]]
        (case op
@@ -210,6 +223,7 @@
          :filter (do-filter d args)
          :order (do-order-by d args)
          :select (do-select d args)
+         :map (do-map-with d args)
          d))
      dataset apply)))
 

@@ -15,6 +15,7 @@
    [collet.actions.fold]
    [collet.actions.enrich]
    [collet.actions.mapper]
+   [collet.actions.switch]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
    [collet.deps :as collet.deps])
@@ -69,7 +70,7 @@
          (and (symbol? x) (contains? selectors x))
          (let [selector-path (get selectors x)]
            (collet.select/select selector-path context))
-         ;; x could a function call, try to evaluate the form
+         ;; x could be a function call, try to evaluate the form
          (and (list? x) (symbol? (first x)))
          (try (eval x) (catch Exception _ x))
          ;; return as is
@@ -98,6 +99,7 @@
                               (and (qualified-keyword? action-type)
                                    (= (namespace action-type) "clj"))
                               (-> (name action-type) symbol resolve)
+
                               ;; Custom functions
                               (= action-type :custom)
                               (let [func (:fn action-spec)]
@@ -106,6 +108,15 @@
                                   ;; TODO might be dangerous to eval arbitrary code
                                   (eval func)
                                   func))
+
+                              (= action-type :switch)
+                              (-> action-spec
+                                  (update :case
+                                          #(mapv (fn [{:keys [actions] :as switch-case}]
+                                                   (assoc switch-case :actions (mapv compile-action actions)))
+                                                 %))
+                                  (collet.action/action-fn))
+
                               ;; Predefined actions
                               :otherwise
                               (collet.action/action-fn action-spec))
@@ -115,27 +126,38 @@
           (try
             (if (or (nil? execute-when-fn) (execute-when-fn context))
               (ml/trace :collet/executing-action [:action action-name :type action-type]
-                (let [params  (compile-action-params action-spec context)
-                      result  (cond
-                                ;; multiple parameters passed
-                                (vector? params) (apply action-fn params)
-                                ;; single map parameter
-                                (map? params) (action-fn params)
-                                ;; no parameters
-                                (nil? params) (action-fn))
-                      result' (if (some? return)
-                                (collet.select/select return result)
-                                result)]
-                  (tap> {:action action-name :type action-type :params params :result result'})
-                  (assoc-in context [:state action-name] result')))
+                (if (= action-type :switch)
+                  (let [context' (action-fn context)]
+                    (update context :state merge (:state context')))
+
+                  (let [params  (compile-action-params action-spec context)
+                        result  (cond
+                                  ;; multiple parameters passed
+                                  (vector? params) (apply action-fn params)
+                                  ;; single map parameter
+                                  (map? params) (action-fn params)
+                                  ;; no parameters
+                                  (nil? params) (action-fn))
+                        result' (if (some? return)
+                                  (collet.select/select return result)
+                                  result)]
+                    (tap> {:action action-name :type action-type :params params :result result'})
+                    (assoc-in context [:state action-name] result'))))
               (do (ml/log :collet/action-skipped :action action-name :type action-type)
                   ;; need to reset action state to prevent discrepancies between iterations
-                  (assoc-in context [:state action-name] nil)))
+                  (when-not (:keep-state action-spec)
+                    (assoc-in context [:state action-name] nil))))
             (catch Exception e
               (throw (ex-info "Action failed"
                               (merge (ex-data e) {:action action-name
                                                   :params (compile-action-params action-spec context)})
                               e)))))))))
+
+
+(defn execute-action
+  [action config]
+  (let [afn (compile-action action)]
+    (afn (->context config))))
 
 
 (def task-spec
@@ -222,7 +244,11 @@
   [{:keys [actions] :as task}]
   (reduce
    (fn [t action]
-     (collet.action/expand t action))
+     (if (= (:type action) :switch)
+       (reduce (fn [task-acc switch-action]
+                 (collet.action/expand task-acc switch-action))
+               t (->> action :case (mapcat :actions)))
+       (collet.action/expand t action)))
    task actions))
 
 
@@ -278,6 +304,12 @@
                     :vf extract-data
                     :kf next-iteration)))
      {::task task})))
+
+
+(defn execute-task
+  [task config]
+  (let [task-fn (compile-task task)]
+    (task-fn (->context config))))
 
 
 (def pipeline-spec
@@ -488,18 +520,27 @@
     {:error/message "should be an instance of Pipeline"}}))
 
 
+(defn extract-actions-types
+  "Extracts the action types from the task"
+  [{:keys [actions]}]
+  (->> actions
+       (map (fn [{:keys [type] :as action}]
+              ;; enrich is a special case, actual action type specified under the :action key
+              (cond (= type :enrich) (:action action)
+                    (= type :switch) (->> (:case action) (map extract-actions-types))
+                    :otherwise type)))
+       (flatten)))
+
+
 (def tasks->actions-namespaces-xf
-  (comp (mapcat (fn [{:keys [actions]}]
-                  (map (fn [{:keys [type action]}]
-                         ;; enrich is a special case, actual action type specified under the :action key
-                         (if (= type :enrich) action type))
-                       actions)))
+  (comp (mapcat extract-actions-types)
         (filter (fn [action-type]
                   (let [action-ns (namespace action-type)]
                     ;; clj namespace is reserved for clojure core functions
                     (and (some? action-ns) (not= action-ns "clj")))))
+        (map #(-> % namespace symbol))
         (distinct)
-        (map #(-> % namespace symbol vector))))
+        (map vector)))
 
 
 (defn get-actions-deps

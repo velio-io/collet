@@ -61,8 +61,9 @@
 
 
 (defn make-dataset
-  [data {:keys [cat?]}]
-  (cond
-    (ds/dataset? data) data
-    cat? (ds/->dataset (sequence cat data))
-    :otherwise (ds/->dataset data)))
+  [data {:keys [cat? parse]}]
+  (let [options (assoc-some {} :parser-fn parse)]
+    (cond
+      (ds/dataset? data) data
+      cat? (ds/->dataset (sequence cat data) options)
+      :otherwise (ds/->dataset data options))))
