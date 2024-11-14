@@ -7,7 +7,9 @@
    [clojure.java.shell :refer [sh]]
    [clj-test-containers.core :as tc]
    [collet.aws :as aws]
-   [collet.main :as sut]))
+   [collet.main :as sut])
+  (:import
+   [java.util.regex Pattern]))
 
 
 (defn localstack-container []
@@ -59,6 +61,11 @@
       (is (nil? errors))
       (is (= :parent-pipe (-> options :pipeline-spec :name)))
       (is (= :test-pipeline (-> options :pipeline-spec :include-config :name)))))
+
+  (testing "parsing regex in edn"
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :parent-pipe :regex #rgx \"foo\"}") sut/cli-options)]
+      (is (nil? errors))
+      (is (instance? Pattern (-> options :pipeline-spec :regex)))))
 
   (testing "file upload from S3"
     (let [container      (localstack-container)

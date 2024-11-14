@@ -37,6 +37,8 @@
 (def fold-params-spec
   [:map
    [:item :any]
+   [:into {:optional true} [:sequential :any]]
+   [:op {:optional true} [:enum :concat]]
    [:in {:optional true} [:vector [:or :string :keyword :int]]]
    [:with {:optional true} :any]])
 
@@ -46,9 +48,13 @@
   {:malli/schema [:=> [:cat fold-params-spec
                        [:maybe [:vector :any]]]
                   [:vector :any]]}
-  [{:keys [item in with]} prev-state]
-  (let [data (or prev-state [])]
-    (conj data (conjoin item in with))))
+  [{:keys [into op item in with]
+    :or   {into []}}
+   prev-state]
+  (let [data (or prev-state into)]
+    (if (= op :concat)
+      (vec (concat data item))
+      (conj data (conjoin item in with)))))
 
 
 (defmethod action/action-fn :fold [_]
