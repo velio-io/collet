@@ -95,9 +95,12 @@ Action above will increment the counter by 10 on every iteration starting from 0
  :iterator {:next [:true? :$mapper/has-next-item]}}
 ```
 
-Also, `:fold` action allows you to provide two additional keys: `:in` and `:with`. Using these parameters you can
+Also, `:fold` action allows you to provide some additional keys: `:into`, `:op`, `:in` and `:with`. Using these
+parameters you can
 modify the way the items are collected. For example, in the example above, you can merge the weather response with
-mapped item under the `:city-name` key before collecting it:
+mapped item under the `:city-name` key before collecting it.
+With `:into` parameter you can provide an initial value for the collection.
+If item is a sequence of values you can use `:op` parameter with value `:concat` to concatenate them.
 
 ```clojure
 {:actions  [{:name   :city
@@ -138,6 +141,8 @@ Notice that `:enrich` action has its own `:$enrich/item` and `:$enrich/has-next-
   hood. You can think of it as a dataframes. You must provide a `:sequence` key which should point to the collection and
   `:slicer` action will create a dataset from it as a result. Additionally, you can define a set of transformation on
   the resulting dataset. Available transformations are: `:flatten` `:group` `:join` `:fold` `:filter` `:order` `:select`
+  `:map`. If you need to format some columns while creating a dataset you can provide a `:parse` key with a map of
+  column names and their types (e.g. `{:column-name-1 :instant :column-name-2 int32}`).
 
 ```clojure
 ;; let's say you have a dataset like this:
@@ -270,6 +275,17 @@ Join multiple datasets together with `:join` transformation.
  {:id 3, :name "Jack", :user {:id 3}, :city "Springfield"}]
 ```
 
+Use `:map` function to iterate on over every row in the dataset
+
+```clojure
+{:actions [{:name   :users
+            :type   :slicer
+            :params {:sequence [{:id 1 :name "John" :city "Springfield"}
+                                {:id 2 :name "Jane" :city "Lakeside"}
+                                {:id 3 :name "Jack" :city "Springfield"}]
+                     :apply    [[:map {:fn (fn [row] (assoc row :city "New York"))}]]}}]}
+```
+
 Of course you can combine multiple transformations together.
 
 ```clojure
@@ -318,6 +334,18 @@ Of course you can combine multiple transformations together.
   :user          {:id 2},
   :phone         7654321,
   :_group_by_key "Elm St."}]
+```
+
+- with `:switch` action you can create multiple branches which will be invoked if conditions met
+
+```clojure
+{:name :insert-or-update
+ :type :switch
+ :case [{:condition [:nil? [:state :user-record]]
+         :actions   [{:name :insert-user}]}
+        ;; default condition will be executed if none of the conditions above met
+        {:condition :default
+         :actions   [{:name :update-user}]}]}
 ```
 
 ### Actions to work with external datasource's
@@ -488,7 +516,8 @@ Available actions are:
           :csv-header? true}}
 ```
 
-- `:collet.actions.queue/enqueue` Writes the input (message) into the [Chronicle queue](https://github.com/OpenHFT/Chronicle-Queue).
+- `:collet.actions.queue/enqueue` Writes the input (message) into
+  the [Chronicle queue](https://github.com/OpenHFT/Chronicle-Queue).
   Input can be a single message or a sequence of messages. Message should be a Clojure map.
   Options:
   `:input` - the message to write
