@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A simple bar chart with embedded data.",
+  "data": {
+    "url": "total-prs-by-member.csv",
+    "format": {
+      "type": "csv"
+    }
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "title": "Members",
+      "field": "user-id",
+      "type": "nominal",
+      "axis": {
+        "labelAngle": 45
+      }
+    },
+    "y": {
+      "title": "Number of closed PRs",
+      "field": "pulls-count",
+      "type": "quantitative"
+    }
+  }
+}

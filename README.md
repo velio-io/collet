@@ -55,9 +55,10 @@ git clone git@github.com:velio-io/collet.git && cd collet
 Then build the image with the following command:
 
 ```shell
+cd collet-app
+
 # on Linux
 docker build -t collet .
-
 # on MacOS
 docker build --platform=linux/amd64 -t collet .
 ```
@@ -162,9 +163,7 @@ It could be a regular Clojure map, e.g.
 ```
 
 If you're using Collet Docker image you can provide this configuration as EDN file.
-In this case Collet has a special reader for environment variables - `#env`.
-
-Example:
+In this case Collet has a special reader - `#env` for reading environment variables.
 
 ```clojure
 {:post-id           #uuid "f47ac10b-58cc-4372-a567-0e02b2c3d479"
@@ -173,7 +172,7 @@ Example:
  ;; refers to REPORT_PATH environment variable, casts it to string and sets default value to ./reports/comments_sentiment_analysis.csv
  :report-path       #env ["REPORT_PATH" Str :or "./reports/comments_sentiment_analysis.csv"]
  :gc-access-token   #env "GC_ACCESS_TOKEN"
- :s3-bucket         #env "S3_BUCKET"} }
+ :s3-bucket         #env "S3_BUCKET"}
 ```
 
 ### Pipeline specification
@@ -242,7 +241,7 @@ Don't worry if you don't understand everything at once, we will explain it step 
                                                       :format      :csv
                                                       :bucket      s3-bucket
                                                       :file-name   report-path
-                                                      :csv-header? true}}]}]}
+                                                      :csv-header? true}}]}]}}
 ```
 
 The basic structure of that can be represented as follows:
@@ -349,6 +348,19 @@ This way you can create reusable tasks and inject them into different pipelines.
 
          {:name    :task-3
           :actions [...]}]}
+```
+
+By default, you can't use regular expressions in EDN files.
+If you need one, you can use `#rgx` tag for parsing regular expressions.
+Notice that you have to double escape special characters.
+
+```clojure
+{:some-key #rgx "foo"}
+
+;; double escaping
+{:name   :find-pattern
+ :type   :clj/re-find
+ :params [#rgx "foo\\d+" "foo123"]}
 ```
 
 ### Collet Actions

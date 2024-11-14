@@ -10,4 +10,9 @@
    :task (do (fs/create-dir "collet-actions/checkouts")
              (fs/create-sym-link "collet-actions/checkouts/collet-core" "../../collet-core/")
              (fs/create-dir "collet-app/checkouts")
-             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/"))}}}
+             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/"))}
+
+  dev-cleanup
+  {:doc  "Cleanup dev resources"
+   :task (do (fs/delete-tree "collet-actions/checkouts")
+             (fs/delete-tree "collet-app/checkouts"))}}}

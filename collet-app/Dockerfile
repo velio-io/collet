@@ -4,6 +4,10 @@ RUN mkdir -p /build
 COPY project.clj /build/project.clj
 COPY src /build/src
 
+# for local builds
+#RUN mkdir -p /root/.m2/repository/io
+#ADD  velio /root/.m2/repository/io/velio
+
 RUN cd /build && lein uberjar
 
 
@@ -13,6 +17,10 @@ ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
 ENV PIPELINE_CONFIG="{}"
 ENV TINI_VERSION=v0.19.0
+
+# for local builds
+#RUN mkdir -p /root/.m2/repository/io
+#ADD  velio /root/.m2/repository/io/velio
 
 RUN mkdir -p /app
 COPY --from=builder /build/target/collet.jar /app/collet.jar

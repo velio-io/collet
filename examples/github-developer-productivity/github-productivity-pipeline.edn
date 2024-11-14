@@ -1,0 +1,187 @@
+{:name  :devs-productivity-pipeline
+
+ ;; include collet actions library
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0-SNAPSHOT"]]
+         ;; and helpers library to deal with datetime, then you can refer to the namespace alias in your code
+         :requires    [[tech.v3.datatype.datetime :as dtype-dt]]
+         ;; if you refer to some Java classes, you need to import them
+         :imports     [java.time.LocalDateTime]}
+
+ :tasks [{:name     :repositories
+          ;; this is an initial request before the task iteration starts
+          :setup    [{:name      :repositories-request
+                      :type      :collet.actions.http/request
+                      ;; get some static config values
+                      :selectors {gh-token [:config :gh-token]
+                                  org-name [:config :org-name]}
+                      :params    {:url          ["https://api.github.com/orgs/%s/repos" org-name]
+                                  :headers      {"Accept"               "application/vnd.github+json"
+                                                 "X-GitHub-Api-Version" "2022-11-28"}
+                                  :oauth-token  gh-token
+                                  :query-params {:per_page 100}
+                                  :as           :json}
+                      ;; the returned data will be a map with :repos and :link keys
+                      ;; the :repos key will contain the list of repositories names
+                      :return    [{:repos [:body [:$/cat :name]]
+                                   :link  [:headers :link]}]}]
+
+          ;; we will collect all repositories names and then paginate through the list
+          :actions  [{:name      :all-repositories
+                      :type      :fold
+                      ;; referring to the current repositories list batch
+                      :selectors {repos [:state :repositories-request :repos]}
+                      :params    {:op :concat :item repos}}
+
+                     ;; GitHub returns a set of links in the response headers so we have to unpack the next link
+                     {:name      :next-page-link
+                      :type      :clj/re-find
+                      :when      [:not-nil? [:state :repositories-request :link]]
+                      :selectors {next-link [:state :repositories-request :link]}
+                      :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
+                      :return    [[:$/op :first]]}
+
+                     ;; if there is a next page link, we will make another request
+                     {:name      :repositories-request
+                      :type      :collet.actions.http/request
+                      :when      [:not-nil? [:state :next-page-link]]
+                      :selectors {next-page [:state :next-page-link]
+                                  gh-token  [:config :gh-token]}
+                      :params    {:url         next-page ;; link returned from the previous action
+                                  :headers     {"Accept"               "application/vnd.github+json"
+                                                "X-GitHub-Api-Version" "2022-11-28"}
+                                  :oauth-token gh-token
+                                  :as          :json}
+                      ;; collecting the repositories names from the next page again
+                      :return    [{:repos [:body [:$/cat :name]]
+                                   :link  [:headers :link]}]}]
+
+          :iterator {:data [:state :all-repositories] ;; all collected repositories names
+                     ;; we will iterate until there is no next page link
+                     :next [:not-nil? [:state :next-page-link]]}}
+
+         {:name     :pull-requests
+          :inputs   [:repositories]
+          ;; now for each repository we will get all closed pull requests, maximum amount for single request is 100
+          ;; so we have to paginate through the list
+          :actions  [{:name :paginate-or-request
+                      :type :switch
+                      ;; first condition checks if we don't have a next pagination link then we need to map over remaining repositories
+                      :case [{:condition [:nil? [:state :repository-prs :link]]
+                              :actions   [{:name      :repository
+                                           :type      :mapper
+                                           :selectors {repos [:inputs :repositories]}
+                                           :params    {:sequence repos}}
+                                          ;; this will be an initial request for the repository pull requests
+                                          {:name      :repository-prs
+                                           :type      :collet.actions.http/request
+                                           :selectors {gh-token [:config :gh-token]
+                                                       org-name [:config :org-name]
+                                                       repo     [:$mapper/item]} ;; :$mapper/item refers to the current repository name
+                                           :params    {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
+                                                       :headers      {"Accept"               "application/vnd.github+json"
+                                                                      "X-GitHub-Api-Version" "2022-11-28"}
+                                                       :oauth-token  gh-token
+                                                       :query-params {:per_page 100 :state "closed"}
+                                                       :as           :json}
+                                           ;; the returned data will be a map with :prs and :link keys
+                                           ;; individual PR is represented as a map with :title, :closed_at and :user-id keys
+                                           :return    [{:prs  [:body [:$/cat {:title   :title
+                                                                              :date    :closed_at
+                                                                              :user-id [:user :login]}]]
+                                                        :link [:headers :link]}]}]}
+
+                             ;; if we didn't fall into the first condition, then we have a next pagination link
+                             ;; this condition will check if we have a next pagination link in the links header
+                             {:condition [:regex [:state :repository-prs :link] ".*rel=\"next\".*"]
+                              :actions   [{:name      :next-page-link
+                                           :type      :clj/re-find
+                                           :selectors {next-link [:state :repository-prs :link]}
+                                           :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
+                                           :return    [[:$/op :first]]}
+                                          ;; this is a request for the next page of pull requests
+                                          {:name      :repository-prs
+                                           :type      :collet.actions.http/request
+                                           :selectors {next-page [:state :next-page-link]
+                                                       gh-token  [:config :gh-token]}
+                                           :params    {:url         next-page
+                                                       :headers     {"Accept"               "application/vnd.github+json"
+                                                                     "X-GitHub-Api-Version" "2022-11-28"}
+                                                       :oauth-token gh-token
+                                                       :as          :json}
+                                           ;; resulting data will be the same as from initial request
+                                           :return    [{:prs  [:body [:$/cat {:title   :title
+                                                                              :date    :closed_at
+                                                                              :user-id [:user :login]}]]
+                                                        :link [:headers :link]}]}]}
+
+                             ;; :default condition means that we have a links header but there is no next link
+                             ;; so we need to stop the pagination and move to the next repository
+                             {:condition :default
+                              :actions   [{:name   :repository-prs
+                                           :type   :clj/identity
+                                           :params {:prs [] :link nil}}]}]}
+
+                     ;; pull requests are collected on each iteration
+                     {:name      :all-repository-prs
+                      :type      :fold
+                      :selectors {pulls [:state :repository-prs :prs]}
+                      :params    {:op :concat :item pulls}}]
+
+          :iterator {:data [:state :all-repository-prs]
+                     ;; we will iterate until there is no next page link and we have more repositories to map over
+                     :next [:or [:not-nil? [:state :repository-prs :link]]
+                            [:true? [:$mapper/has-next-item]]]}}
+
+         {:name    :productivity-reports
+          :inputs  [:pull-requests]
+          ;; to work with the resulting data efficiently we will wrap pull requests collection into a dataset
+          :setup   [{:name      :prs-dataset
+                     :type      :slicer
+                     :selectors {pulls [:inputs :pull-requests]}
+                     :params    {:sequence pulls
+                                 :parse    {:date :instant}}}]
+
+          ;; preparing dataset for the first report
+          :actions [{:name      :total-prs-by-member
+                     :type      :slicer
+                     :selectors {pulls [:state :prs-dataset]}
+                     :params    {:sequence pulls
+                                 :apply    [[:fold {:by :user-id}] ;; collapsing all rows with the same user-id
+                                            ;; title column will become a vector of all PRs for the same user
+                                            ;; pulls-count will be a new column with the count of PRs
+                                            [:map {:with (fn [{:keys [title]}]
+                                                           {:pulls-count (count title)})}]
+                                            [:select {:columns [:user-id :pulls-count]}]]}}
+
+                    ;; storin report into a local file
+                    {:name      :save-total-report
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :total-prs-by-member]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "/data/report/total-prs-by-member.csv"}}
+
+                    {:name      :monthly-prs-by-member
+                     :type      :slicer
+                     :selectors {pulls [:state :prs-dataset]}
+                     :params    {:sequence pulls
+                                 ;; we need a monthly activity report so we need to extract year and month parts from the date
+                                 :apply    [[:map {:with (fn [{:keys [date]}]
+                                                           (let [dt ^LocalDateTime (dtype-dt/instant->local-date-time date)]
+                                                             {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
+                                            ;; collapsing all rows with the same user-id and year-month
+                                            [:fold {:by [:user-id :year-month]}]
+                                            ;; title column will become a vector of all PRs for the same user and year-month
+                                            [:map {:with (fn [{:keys [title]}]
+                                                           {:pulls-count (count title)})}]
+                                            [:select {:columns [:user-id :pulls-count :year-month]}]]}}
+
+                    ;; storing report into a local file
+                    {:name      :save-monthly-report
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :monthly-prs-by-member]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "/data/report/monthly-prs-by-member.csv"}}]}]}

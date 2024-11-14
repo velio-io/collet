@@ -67,10 +67,15 @@
   (read-config-file :spec (new URI path)))
 
 
+(defn read-regex
+  [rgx]
+  (re-pattern rgx))
+
+
 (defn read-config-string [target s]
   (if (= target :config)
     (edn/read-string {:eof nil :readers {'env get-env}} s)
-    (edn/read-string {:eof nil :readers {'include include-spec}} s)))
+    (edn/read-string {:eof nil :readers {'include include-spec 'rgx read-regex}} s)))
 
 
 (defn query->map
@@ -172,6 +177,7 @@
  (fn [thread ex]
    (ml/log :collet/uncaught-exception
            :exception ex :thread (.getName thread))
+   (Thread/sleep 2000)
    (throw ex)))
 
 
@@ -188,8 +194,8 @@
           (System/exit 1))
       ;; run the pipeline
       (let [{:keys [pipeline-spec pipeline-config]} options
-            pipeline        (collet/compile-pipeline pipeline-spec)
             stop-publishers (start-publishers)
+            pipeline        (collet/compile-pipeline pipeline-spec)
             stop-fn         (fn []
                               (ml/log :collet/stopping)
                               (when (not= (collet/pipe-status pipeline) :stopped)

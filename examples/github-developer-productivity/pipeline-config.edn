@@ -1,0 +1,2 @@
+{:gh-token #env "GITHUB_TOKEN"
+ :org-name #env "GITHUB_ORG_NAME"}
