@@ -62,9 +62,21 @@
 (declare read-config-file)
 
 
+(defn deep-merge
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+
 (defn include-spec
   [path]
-  (read-config-file :spec (new URI path)))
+  (if (sequential? path)
+    (let [[path overrides] path]
+      (deep-merge
+       (read-config-file :spec (new URI path))
+       overrides))
+    (read-config-file :spec (new URI path))))
 
 
 (defn read-regex
@@ -109,30 +121,6 @@
         slurp)))
 
 
-(defn start-publishers
-  "Starts the publishers based on the provided configuration (environment variables)"
-  []
-  (let [console-publisher-pretty    (get-env "CONSOLE_PUBLISHER_PRETTY" 'Bool :or true)
-        file-publisher-filename     (get-env "FILE_PUBLISHER_FILENAME" 'Str :or "tmp/collet-*.log")
-        elasticsearch-publisher-url (get-env "ELASTICSEARCH_PUBLISHER_URL" 'Str :or "http://localhost:9200/")
-        zipkin-publisher-url        (get-env "ZIPKIN_PUBLISHER_URL" 'Str :or "http://localhost:9411")
-        publishers                  (cond-> []
-                                      (get-env "CONSOLE_PUBLISHER" 'Bool)
-                                      (conj {:type :console :pretty? console-publisher-pretty})
-                                      (get-env "ELASTICSEARCH_PUBLISHER" 'Bool)
-                                      (conj {:type :elasticsearch :url elasticsearch-publisher-url})
-                                      (get-env "ZIPKIN_PUBLISHER" 'Bool)
-                                      (conj {:type :zipkin :url zipkin-publisher-url})
-                                      (get-env "FILE_PUBLISHER" 'Bool)
-                                      (conj {:type         :custom
-                                             :fqn-function "collet.file-publisher/file-publisher"
-                                             :filename     file-publisher-filename}))]
-    (when (not-empty publishers)
-      (ml/start-publisher!
-       {:type       :multi
-        :publishers publishers}))))
-
-
 (defn read-config-file
   "Reads the content of the file from the provided URI"
   [target ^URI uri]
@@ -171,6 +159,30 @@
     :default {}
     :parse-fn (partial file-or-map :config)
     :validate [map? "Must provide a map for the pipeline config"]]])
+
+
+(defn start-publishers
+  "Starts the publishers based on the provided configuration (environment variables)"
+  []
+  (let [console-publisher-pretty    (get-env "CONSOLE_PUBLISHER_PRETTY" 'Bool :or true)
+        file-publisher-filename     (get-env "FILE_PUBLISHER_FILENAME" 'Str :or "tmp/collet-*.log")
+        elasticsearch-publisher-url (get-env "ELASTICSEARCH_PUBLISHER_URL" 'Str :or "http://localhost:9200/")
+        zipkin-publisher-url        (get-env "ZIPKIN_PUBLISHER_URL" 'Str :or "http://localhost:9411")
+        publishers                  (cond-> []
+                                      (get-env "CONSOLE_PUBLISHER" 'Bool)
+                                      (conj {:type :console :pretty? console-publisher-pretty})
+                                      (get-env "ELASTICSEARCH_PUBLISHER" 'Bool)
+                                      (conj {:type :elasticsearch :url elasticsearch-publisher-url})
+                                      (get-env "ZIPKIN_PUBLISHER" 'Bool)
+                                      (conj {:type :zipkin :url zipkin-publisher-url})
+                                      (get-env "FILE_PUBLISHER" 'Bool)
+                                      (conj {:type         :custom
+                                             :fqn-function "collet.file-publisher/file-publisher"
+                                             :filename     file-publisher-filename}))]
+    (when (not-empty publishers)
+      (ml/start-publisher!
+       {:type       :multi
+        :publishers publishers}))))
 
 
 (Thread/setDefaultUncaughtExceptionHandler

@@ -1,0 +1,9 @@
+{:name      :gh-request
+ :type      :collet.actions.http/request
+ :selectors {gh-token [:config :gh-token]
+             org-name [:config :org-name]}
+ :params    {:headers      {"Accept"               "application/vnd.github+json"
+                            "X-GitHub-Api-Version" "2022-11-28"}
+             :oauth-token  gh-token
+             :query-params {:per_page 100}
+             :as           :json}}

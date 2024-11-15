@@ -62,6 +62,29 @@
       (is (= :parent-pipe (-> options :pipeline-spec :name)))
       (is (= :test-pipeline (-> options :pipeline-spec :include-config :name)))))
 
+  (testing "spec supports include tag with overrides"
+    (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-with-includes.edn") sut/cli-options)
+          inc-actions (->> (-> options :pipeline-spec :tasks)
+                           (map (comp first :actions)))]
+      (is (nil? errors))
+      (is (every? #(and (= (:name %) :gh-request)
+                        (= (:type %) :collet.actions.http/request)
+                        (= (get-in % [:selectors 'gh-token]) [:config :gh-token]))
+                  inc-actions)
+          "all included actions has the common properties")
+
+      (is (= ["https://api.github.com/orgs/%s/repos" 'org-name]
+             (-> inc-actions first :params :url)))
+      (is (= ["https://api.github.com/repos/%s/%s/pulls" 'org-name 'repo]
+             (-> inc-actions second :params :url)))
+
+      (is (= {:state "closed" :per_page 100}
+             (-> inc-actions second :params :query-params
+                 (select-keys [:state :per_page]))))
+
+      (is (instance? Pattern (-> inc-actions second :params :query-params :rx))
+          "regex is parsed correctly")))
+
   (testing "parsing regex in edn"
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :parent-pipe :regex #rgx \"foo\"}") sut/cli-options)]
       (is (nil? errors))
