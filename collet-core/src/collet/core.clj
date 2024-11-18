@@ -1,6 +1,9 @@
 (ns collet.core
   (:require
+   [clojure.java.io :as io]
+   [clojure.string :as string]
    [clojure.walk :as walk]
+   [clojure.edn :as edn]
    [malli.core :as m]
    [malli.dev.pretty :as pretty]
    [malli.error :as me]
@@ -21,6 +24,7 @@
    [collet.deps :as collet.deps])
   (:import
    [clojure.lang IFn ILookup]
+   [java.io File]
    [weavejester.dependency MapDependencyGraph]))
 
 
@@ -237,6 +241,45 @@
     (constantly nil)))
 
 
+(defn read-regex
+  "Parse regex strings from the EDN file"
+  [rgx]
+  (re-pattern rgx))
+
+
+(defn read-action
+  "Read the action from EDN file if it exists"
+  [path-key]
+  (let [sep       File/separator
+        file-path (str (string/replace (namespace path-key) "." sep) sep (name path-key))
+        file      (io/as-file file-path)]
+    (if (.exists file)
+      (->> file slurp (edn/read-string {:eof nil :readers {'rgx read-regex}}))
+      (throw (ex-info "File does not exist" {:file file-path})))))
+
+
+(defn deep-merge
+  "Deeply merges maps"
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+
+(defn replace-external-actions
+  "Replace the actions which refers to external files"
+  [actions]
+  (mapv
+   (fn [action]
+     (if (= (:type action) :switch)
+       (assoc action :case (map #(update % :actions replace-external-actions)
+                                (:case action)))
+       (if (string/ends-with? (name (:type action)) ".edn")
+         (deep-merge action (read-action (:type action)))
+         action)))
+   actions))
+
+
 (defn expand-on-actions
   "Actions can expand (modify) task definition if provides expand hook"
   {:malli/schema [:=> [:cat task-spec]
@@ -261,7 +304,11 @@
                   [:=> [:cat context-spec] [:sequential :any]]]}
   [task]
   (let [{:keys [name setup actions iterator retry skip-on-error]
-         :as   task} (expand-on-actions task)
+         :as   task}
+        (-> task
+            (update :actions replace-external-actions)
+            (expand-on-actions))
+
         setup-actions   (flatten (map compile-action setup))
         task-actions    (flatten (map compile-action actions))
         extract-data    (extract-data-fn task)
@@ -536,8 +583,10 @@
   (comp (mapcat extract-actions-types)
         (filter (fn [action-type]
                   (let [action-ns (namespace action-type)]
-                    ;; clj namespace is reserved for clojure core functions
-                    (and (some? action-ns) (not= action-ns "clj")))))
+                    (and (some? action-ns)
+                         ;; clj namespace is reserved for clojure core functions
+                         (not= action-ns "clj")
+                         (not (string/ends-with? (name action-type) ".edn"))))))
         (map #(-> % namespace symbol))
         (distinct)
         (map vector)))
