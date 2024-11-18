@@ -1,0 +1,35 @@
+{:deps
+ {org.babashka/cli {:mvn/version "0.8.60"}}
+
+ :tasks
+ {:requires
+  ([babashka.pods :as pods])
+
+  :init
+  (do (pods/load-pod 'io.velio/collet-pod "0.1.0")
+
+      (require '[pod.collet.core :as collet])
+
+      (defn print-error [{:keys [spec type cause msg option] :as data}]
+        (if (= :org.babashka/cli type)
+          (case cause
+            :require
+            (println
+              (format "Missing required argument: %s\n" option))
+            :validate
+            (println
+              (format "%s!\n" msg)))))
+
+      (def collet-cli-spec
+        {:spec     {:spec   {:desc  "Pipeline spec file"
+                             :alias :s}
+                    :config {:desc  "Pipeline config file"
+                             :alias :c}}
+         :error-fn print-error}))
+
+  print-config
+  {:doc  "Compiles and prints the configuration for a specific pipeline"
+   :task (->> (cli/parse-opts *command-line-args* collet-cli-spec)
+           :spec
+           (collet/compile :spec)
+           (println))}}}

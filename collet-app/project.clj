@@ -22,10 +22,12 @@
    [com.cognitect.aws/endpoints "1.1.12.772"]
    [com.cognitect.aws/s3 "869.2.1687.0"]]
 
-   ;;:jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
+  ;;:jvm-opts     ["-javaagent:resources/jmx_prometheus_javaagent-0.20.0.jar=8080:resources/jmx.yaml"]
 
   :profiles
   {:dev     {:dependencies [[clj-test-containers "0.7.4"]]}
+
+   :pod     {:dependencies [[nrepl/bencode "1.2.0"]]}
 
    :uberjar {:uberjar-name "collet.jar"
              :aot          :all}})

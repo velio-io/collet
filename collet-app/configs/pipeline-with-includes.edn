@@ -3,6 +3,7 @@
           :actions [;; include request action
                     #include ["configs/github-request-action.edn"
                               {:params {:url ["https://api.github.com/orgs/%s/repos" org-name]}}]
+
                     ;; next action
                     {:name :process-repositories}]}
 
