@@ -331,7 +331,8 @@ For more details on condition syntax see [here](./docs/condition-syntax.md).
 
 One more feature you can use with Collet app is `#include` tag in the pipeline specification.
 It allows you to split the pipeline into multiple files and include them in the main pipeline spec.
-This way you can create reusable tasks and inject them into different pipelines.
+This way you can create reusable tasks or actions and inject them into different pipelines.
+Include path could be a local file, HTTP URL or S3 key.
 
 ```clojure
 ;; ./tasks/common-task.edn
@@ -348,6 +349,20 @@ This way you can create reusable tasks and inject them into different pipelines.
 
          {:name    :task-3
           :actions [...]}]}
+```
+
+If you need to override some parameters in the included block, you can use a vector with two elements.
+First element should be a path to the file and second is a map with the parameters you want to override.
+
+```clojure
+{:actions [{:name :first-action
+            ...}
+
+           #include ["path/to/my-action.edn"
+                     {:params {:some-key "some-value"}}]
+
+           {:name :third-action
+            ...}]}
 ```
 
 By default, you can't use regular expressions in EDN files.
@@ -367,7 +382,7 @@ Notice that you have to double escape special characters.
 
 Collet has a set of predefined actions, you can think of them as building blocks (functions) for your pipeline tasks.
 Action is defined by its `type`. Type keyword refers to the specific function that will be executed.
-List of predefined actions: `:counter`, `:slicer`, `:mapper`, `:fold`, `:enrich`
+List of predefined actions: `:counter`, `:slicer`, `:mapper`, `:fold`, `:enrich`, `:switch`
 
 Here's an example of the `:counter` action:
 

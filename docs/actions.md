@@ -33,6 +33,29 @@ available in classpath ([see deps](./deps.md) sections) and then use the fully q
                      :params ["<root><child>data</child></root>"]}]}]}
 ```
 
+If you have a common action, used in different places multiple times you can create a separate file for that action.
+Then you can use this action by providing the action type that match with a relative path to that file.
+
+Let's say you have a such file `my-folder/with-actions/my-action.edn`
+
+```clojure
+{:name   :my-action
+ :type   :clj/format
+ :params ["Hello, %s" "world"]}
+```
+
+Then you can use this action in your pipeline like this:
+
+```clojure
+{:name  :pipeline
+ :tasks [{:name    :task-1
+          :actions [{:name   :external-file-action
+                     :type   :my-folder.with-actions/my-action.edn
+                     :params ["Hello, %s" "user"]}]}]}
+```
+
+The `:params` key in the pipeline file will take precedence over the `:params` key in the external file.
+
 Finally, you can define your own functions and use them as actions.
 You can use `:custom` key as a action type in this case.
 
