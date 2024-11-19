@@ -184,7 +184,19 @@
           result    (task {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
-      (is (= (first result) 11)))))
+      (is (= (first result) 11))))
+
+  (testing "Task with external actions"
+    (let [task-spec {:name     :test-task
+                     :actions  [{:name   :count-action
+                                 :type   :test.collet/counter-action.edn
+                                 :params [0]}]
+                     ;; name of the action is overridden by the external action
+                     :iterator {:data [:state :my-external-action]
+                                :next false}}
+          task      (sut/compile-task task-spec)
+          result    (task {:config {} :state {}})]
+      (is (= 1 (first result))))))
 
 
 (deftest handle-task-errors-test
