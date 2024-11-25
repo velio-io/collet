@@ -26,9 +26,7 @@
 
   :profiles
   {:dev     {:dependencies [[clj-test-containers "0.7.4"]]}
-
-   :pod     {:dependencies [[nrepl/bencode "1.2.0"]]}
-
+   
    :uberjar {:uberjar-name "collet.jar"
              :aot          :all}})
 

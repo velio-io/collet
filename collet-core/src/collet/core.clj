@@ -12,6 +12,7 @@
    [diehard.core :as dh]
    [com.brunobonacci.mulog :as ml]
    [collet.action :as collet.action]
+   [collet.utils :as utils]
    ;; built-in actions
    [collet.actions.counter]
    [collet.actions.slicer]
@@ -158,10 +159,27 @@
                               e)))))))))
 
 
+(defn find-action
+  [spec action]
+  (->> (:tasks spec)
+       (mapcat :actions)
+       (utils/find-first #(= (:name %) action))))
+
+
+(defn list-actions
+  [spec]
+  (->> (:tasks spec)
+       (mapcat :actions)
+       (mapv :name)))
+
+
 (defn execute-action
-  [action config]
-  (let [afn (compile-action action)]
-    (afn (->context config))))
+  ([action config]
+   (execute-action action {} config))
+
+  ([action state config]
+   (let [afn (compile-action action)]
+     (afn (assoc (->context config) :state state)))))
 
 
 (def task-spec
@@ -353,10 +371,27 @@
      {::task task})))
 
 
+(defn find-task
+  [spec task]
+  (->> (:tasks spec)
+       (utils/find-first #(= (:name %) task))))
+
+
+(defn list-tasks
+  [spec]
+  (->> (:tasks spec)
+       (mapv :name)))
+
+
 (defn execute-task
-  [task config]
-  (let [task-fn (compile-task task)]
-    (task-fn (->context config))))
+  ([task config]
+   (execute-task task {} config))
+
+  ([task state config]
+   (let [task-fn (compile-task task)]
+     (-> (task-fn (assoc (->context config) :state state))
+         (seq)
+         (doall)))))
 
 
 (def pipeline-spec
@@ -598,6 +633,16 @@
   (transduce tasks->actions-namespaces-xf conj tasks))
 
 
+(defn check-dependencies
+  [deps tasks]
+  (when (some? deps)
+    (collet.deps/add-dependencies deps))
+
+  (let [actions-deps (get-actions-deps tasks)]
+    (when (seq actions-deps)
+      (collet.deps/add-dependencies {:requires actions-deps}))))
+
+
 (defn compile-pipeline
   "Compiles a pipeline spec into a function.
    Resulting function can be executed with a configuration map
@@ -614,12 +659,7 @@
          (ex-info "Invalid pipeline spec.")
          (throw)))
 
-  (when (some? deps)
-    (collet.deps/add-dependencies deps))
-
-  (let [actions-deps (get-actions-deps tasks)]
-    (when (seq actions-deps)
-      (collet.deps/add-dependencies {:requires actions-deps})))
+  (check-dependencies deps tasks)
 
   (let [pipeline-id (random-uuid)
         tasks-map   (->> tasks
