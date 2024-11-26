@@ -42,7 +42,13 @@
 
 (defn ask-command []
   (let [{:keys [status result]}
-        (b/gum :choose ["repeat action" "run action" "run task" "run pipeline" "show spec" "exit"]
+        (b/gum :choose ["repeat action"
+                        "run action"
+                        "run task"
+                        "run pipeline"
+                        "show spec"
+                        "open portal view"
+                        "exit"]
                :header "Choose an command")]
     (first result)))
 
@@ -101,6 +107,7 @@
              "run pipeline" (run-pipeline options)
              "show spec" (do (puget/cprint (collet/compile :spec (:pipe-spec options)))
                              (println))
+             "open portal view" (collet/open-portal)
              "exit" (do (message "Bye!")
                         (System/exit 0))
              nil)

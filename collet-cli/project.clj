@@ -9,4 +9,5 @@
   :dependencies
   [[org.clojure/clojure "1.12.0"]
    [io.velio/collet-app "0.1.0-SNAPSHOT"]
-   [nrepl/bencode "1.1.0"]])
+   [nrepl/bencode "1.1.0"]
+   [djblue/portal "0.58.2"]])

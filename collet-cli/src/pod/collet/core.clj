@@ -7,7 +7,8 @@
    [clojure.walk :as walk]
    [bencode.core :as bencode]
    [collet.main :as collet.main]
-   [collet.core :as collet.core])
+   [collet.core :as collet.core]
+   [portal.api :as p])
   (:import
    [java.io EOFException PushbackInputStream StringWriter]))
 
@@ -80,13 +81,19 @@
     (:results @(.-state pipeline))))
 
 
+(defn open-portal []
+  (p/open)
+  (add-tap #'p/submit))
+
+
 (def lookup
   {'pod.collet.core/compile      collet.main/file-or-map
    'pod.collet.core/list-actions list-actions
    'pod.collet.core/list-tasks   list-tasks
    'pod.collet.core/run-action   run-action
    'pod.collet.core/run-task     run-task
-   'pod.collet.core/run-pipeline run-pipeline})
+   'pod.collet.core/run-pipeline run-pipeline
+   'pod.collet.core/open-portal  open-portal})
 
 
 (def describe-map
@@ -100,7 +107,8 @@
                           {:name list-tasks}
                           {:name run-action}
                           {:name run-task}
-                          {:name run-pipeline}]}]
+                          {:name run-pipeline}
+                          {:name open-portal}]}]
      :opts       {:shutdown {}}}))
 
 
