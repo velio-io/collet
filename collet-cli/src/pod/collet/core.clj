@@ -49,28 +49,26 @@
     (collet.core/list-tasks spec)))
 
 
-(defn run-action [{:keys [pipe-spec pipe-config action-name state-file]}]
+(defn run-action [{:keys [pipe-spec pipe-config context-file action-name]}]
   (let [spec        (collet.main/file-or-map :spec pipe-spec)
         config      (collet.main/file-or-map :config pipe-config)
-        state       (or state-file {})
+        context     (if (some? context-file)
+                      (collet.main/file-or-map :config context-file)
+                      {})
         action-spec (collet.core/find-action spec action-name)]
     (collet.core/check-dependencies (:deps spec) (:tasks spec))
-    (collet.core/execute-action action-spec state config)))
-
-(comment
- (collet.main/file-or-map :spec "test/sample-pipeline.edn")
- (run-action {:pipe-spec   "test/sample-pipeline.edn"
-              :pipe-config "{}"
-              :action-name :count-action}))
+    (collet.core/execute-action action-spec config context)))
 
 
-(defn run-task [{:keys [pipe-spec pipe-config task-name state-file]}]
+(defn run-task [{:keys [pipe-spec pipe-config task-name context-file]}]
   (let [spec      (collet.main/file-or-map :spec pipe-spec)
         config    (collet.main/file-or-map :config pipe-config)
-        state     (or state-file {})
+        context   (if (some? context-file)
+                    (collet.main/file-or-map :config context-file)
+                    {})
         task-spec (collet.core/find-task spec task-name)]
     (collet.core/check-dependencies (:deps spec) (:tasks spec))
-    (collet.core/execute-task task-spec state config)))
+    (collet.core/execute-task task-spec config context)))
 
 
 (defn run-pipeline [{:keys [pipe-spec pipe-config]}]

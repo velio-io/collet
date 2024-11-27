@@ -175,11 +175,11 @@
 
 (defn execute-action
   ([action config]
-   (execute-action action {} config))
+   (execute-action action config {}))
 
-  ([action state config]
+  ([action config context]
    (let [afn (compile-action action)]
-     (afn (assoc (->context config) :state state)))))
+     (afn (merge (->context config) context)))))
 
 
 (def task-spec
@@ -387,9 +387,9 @@
   ([task config]
    (execute-task task {} config))
 
-  ([task state config]
+  ([task config context]
    (let [task-fn (compile-task task)]
-     (-> (task-fn (assoc (->context config) :state state))
+     (-> (task-fn (merge (->context config) context))
          (seq)
          (doall)))))
 

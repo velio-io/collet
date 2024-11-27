@@ -24,11 +24,13 @@
 
 
 (def collet-cli-spec
-  {:spec     {:pipe-spec {:desc  "Pipeline spec file"
-                          :alias :s}
-              :config    {:desc    "Pipeline config file"
-                          :alias   :c
-                          :default "{}"}}
+  {:spec     {:pipe-spec    {:desc  "Pipeline spec file"
+                             :alias :s}
+              :context-file {:desc  "File with the context data"
+                             :alias :x}
+              :config       {:desc    "Pipeline config file"
+                             :alias   :c
+                             :default "{}"}}
    :error-fn print-error})
 
 
@@ -58,10 +60,10 @@
         (b/gum :choose (collet/list-actions (:pipe-spec options))
                :header "Choose action")
         action-name   (-> result first (subs 1) keyword)
-        action-result (-> (collet/run-action {:pipe-spec   (:pipe-spec options)
-                                              :pipe-config (:config options)
-                                              :action-name action-name
-                                              :state-file  nil})
+        action-result (-> (collet/run-action {:pipe-spec    (:pipe-spec options)
+                                              :pipe-config  (:config options)
+                                              :context-file (:context-file options)
+                                              :action-name  action-name})
                           (get-in [:state action-name]))]
     (println "Action result:")
     (puget/cprint action-result)
@@ -73,10 +75,10 @@
         (b/gum :choose (collet/list-tasks (:pipe-spec options))
                :header "Choose task")
         task-name   (-> result first (subs 1) keyword)
-        task-result (collet/run-task {:pipe-spec   (:pipe-spec options)
-                                      :pipe-config (:config options)
-                                      :task-name   task-name
-                                      :state-file  nil})]
+        task-result (collet/run-task {:pipe-spec    (:pipe-spec options)
+                                      :pipe-config  (:config options)
+                                      :context-file (:context-file options)
+                                      :task-name    task-name})]
     (println "Task result:")
     (puget/cprint task-result)
     (println)))
