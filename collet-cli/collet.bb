@@ -9,6 +9,8 @@
 
 
 ;; run collet pod
+;; download a pod jar file
+;; (pods/load-pod ["java" "-jar" "./collet.pod.jar"])
 (pods/load-pod ["lein" "run"])
 (require '[pod.collet.core :as collet])
 
@@ -35,7 +37,7 @@
 
 
 (defn message [text]
-  (->> (b/gum :style [text] :foreground 212)
+  (->> (b/gum :style [text] :foreground 212 :gum-path "resources/gum")
        :result
        first
        (println))
@@ -51,14 +53,16 @@
                         "show spec"
                         "open portal view"
                         "exit"]
-               :header "Choose an command")]
+               :header "Choose an command"
+               :gum-path "resources/gum")]
     (first result)))
 
 
 (defn run-action [options]
   (let [{:keys [status result]}
         (b/gum :choose (collet/list-actions (:pipe-spec options))
-               :header "Choose action")
+               :header "Choose action"
+               :gum-path "resources/gum")
         action-name   (-> result first (subs 1) keyword)
         action-result (-> (collet/run-action {:pipe-spec    (:pipe-spec options)
                                               :pipe-config  (:config options)
@@ -73,7 +77,8 @@
 (defn run-task [options]
   (let [{:keys [status result]}
         (b/gum :choose (collet/list-tasks (:pipe-spec options))
-               :header "Choose task")
+               :header "Choose task"
+               :gum-path "resources/gum")
         task-name   (-> result first (subs 1) keyword)
         task-result (collet/run-task {:pipe-spec    (:pipe-spec options)
                                       :pipe-config  (:config options)
