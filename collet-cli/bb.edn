@@ -1,0 +1,4 @@
+{:deps
+ {org.babashka/cli             {:mvn/version "0.8.60"}
+  io.github.lispyclouds/bblgum {:git/sha "1d4de3d49b84f64d1b71930fa1161f8d2622a4d9"}
+  mvxcvi/puget                 {:mvn/version "1.3.4"}}}
