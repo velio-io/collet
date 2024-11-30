@@ -456,7 +456,7 @@ JMX metrics are exposed on port `8080` by default.
 You can change this using the `JMX_PORT` environment variable.
 
 ## License
-sCopyright &copy; 2024 Velio
+Copyright &copy; 2024 Velio
 
 This project is licensed under the [Apache License 2.0][license].
 
