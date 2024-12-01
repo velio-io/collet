@@ -454,3 +454,10 @@ you can configure various publishers using environment variables:
 
 JMX metrics are exposed on port `8080` by default.
 You can change this using the `JMX_PORT` environment variable.
+
+## License
+Copyright &copy; 2024 Velio
+
+This project is licensed under the [Apache License 2.0][license].
+
+[license]: https://choosealicense.com/licenses/apache-2.0e
