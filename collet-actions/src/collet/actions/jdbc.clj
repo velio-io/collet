@@ -163,7 +163,8 @@
     :or   {options         {}
            prefix-table?   true
            preserve-types? false
-           fetch-size      4000
+           ;; TODO is it possible to adjust the fetch size based on the response size?
+           fetch-size      20000
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
@@ -191,7 +192,13 @@
                            :timeout (when (some? timeout)
                                       timeout))]
         (->> (jdbc/plan conn query-string options)
+             ;; TODO
+             ;; reduce on the result set
+             ;; add rows to the in memory batch (calculate the batch size based on the returning data)
+             ;; write/append batches into the arrow file
              (run! append-row))))
+    ;; TODO
+    ;; return mmaped dataset
     (let [reader         (io/reader result-file)
           lines          (line-seq reader)
           row-mapping-fn (if preserve-types?

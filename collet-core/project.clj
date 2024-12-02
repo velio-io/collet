@@ -15,10 +15,16 @@
    [weavejester/dependency "0.2.1"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
-   [techascent/tech.ml.dataset "7.032"]
    [clj-commons/pomegranate "1.2.24"]
    [com.brunobonacci/mulog "0.9.0"]
-   [org.slf4j/slf4j-nop "2.0.16"]]
+   [org.slf4j/slf4j-nop "2.0.16"]
+   [techascent/tech.ml.dataset "7.032"]
+   [org.apache.arrow/arrow-vector "6.0.0"]
+   [com.cnuernber/jarrow "1.000"]
+   [org.apache.commons/commons-compress "1.21"]
+   [org.lz4/lz4-java "1.8.0"]
+   [net.java.dev.jna/jna "5.10.0"]
+   [com.github.luben/zstd-jni "1.5.4-1"]]
 
   ;; required by Chronicle Queue to work with Java 11, Java 17 or Java 21
   :jvm-opts

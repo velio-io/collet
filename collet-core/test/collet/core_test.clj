@@ -3,7 +3,8 @@
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [malli.core :as m]
-   [collet.core :as sut]))
+   [collet.core :as sut]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.core))
@@ -440,3 +441,17 @@
       (is (= (-> @results :task22) 5))
       (is (= (-> @results :task31) 7))
       (is (= (-> @results :task4) 12)))))
+
+
+(comment
+ (require '[tech.v3.libs.arrow :as arrow])
+ (require '[tech.v3.dataset :as ds])
+
+ (arrow/dataset->stream!
+  (ds/->dataset (for [i (range 60 70)]
+                  {:num i}))
+  "tmp/test.arrow"
+  {:format :ipc})
+
+ (arrow/stream->dataset
+  "tmp/test.arrow"))
