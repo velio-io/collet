@@ -54,7 +54,7 @@
               :dependencies [[eftest "0.6.0"]
                              [clj-test-containers "0.7.4"]
                              [djblue/portal "0.58.2"]]}
-
+   :uberjar  {:aot :all}
    :provided {:dependencies [[org.postgresql/postgresql "42.7.4"]]}}
 
   :deploy-repositories

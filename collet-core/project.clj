@@ -39,11 +39,12 @@
    "--add-opens=java.base/java.util=ALL-UNNAMED"]
 
   :profiles
-  {:dev {:source-paths ["dev/src"]
-         :repl-options {:init-ns dev}
-         :dependencies [[eftest "0.6.0"]
-                        [clj-test-containers "0.7.4"]
-                        [djblue/portal "0.58.2"]]}}
+  {:dev     {:source-paths ["dev/src"]
+             :repl-options {:init-ns dev}
+             :dependencies [[eftest "0.6.0"]
+                            [clj-test-containers "0.7.4"]
+                            [djblue/portal "0.58.2"]]}
+   :uberjar {:aot :all}}
 
   :deploy-repositories
   [["clojars" {:sign-releases false

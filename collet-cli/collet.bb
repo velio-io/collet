@@ -8,9 +8,12 @@
  '[puget.printer :as puget])
 
 
+(def pod-jar-path
+  (string/replace *file* "collet.bb" "collet.pod.jar"))
+
 ;; run collet pod
-;; (pods/load-pod ["java" "-jar" "./collet.pod.jar"])
-(pods/load-pod ["lein" "run"])
+(pods/load-pod ["java" "-jar" pod-jar-path])
+;;(pods/load-pod ["lein" "run"])
 (require '[pod.collet.core :as collet])
 
 
@@ -35,8 +38,12 @@
    :error-fn print-error})
 
 
+(def gum-path
+  (string/replace *file* "collet.bb" "gum"))
+
+
 (defn message [text]
-  (->> (b/gum :style [text] :foreground 212 :gum-path "./gum")
+  (->> (b/gum :style [text] :foreground 212 :gum-path gum-path)
        :result
        first
        (println))
@@ -53,7 +60,7 @@
                         "open portal view"
                         "exit"]
                :header "Choose an command"
-               :gum-path "./gum")]
+               :gum-path gum-path)]
     (first result)))
 
 
@@ -61,7 +68,7 @@
   (let [{:keys [status result]}
         (b/gum :choose (collet/list-actions (:pipe-spec options))
                :header "Choose action"
-               :gum-path "./gum")
+               :gum-path gum-path)
         action-name   (-> result first (subs 1) keyword)
         action-result (-> (collet/run-action {:pipe-spec    (:pipe-spec options)
                                               :pipe-config  (:config options)
@@ -77,7 +84,7 @@
   (let [{:keys [status result]}
         (b/gum :choose (collet/list-tasks (:pipe-spec options))
                :header "Choose task"
-               :gum-path "./gum")
+               :gum-path gum-path)
         task-name   (-> result first (subs 1) keyword)
         task-result (collet/run-task {:pipe-spec    (:pipe-spec options)
                                       :pipe-config  (:config options)

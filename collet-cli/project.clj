@@ -12,6 +12,10 @@
 
   :main ^:skip-aot pod.collet.core
 
+  :profiles
+  {:uberjar {:uberjar-name "collet.pod.jar"
+             :aot          :all}}
+
   :dependencies
   [[org.clojure/clojure "1.12.0"]
    [io.velio/collet-app "0.1.0"]
