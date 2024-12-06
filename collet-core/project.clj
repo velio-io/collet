@@ -1,4 +1,4 @@
-(defproject io.velio/collet-core "0.1.0-SNAPSHOT"
+(defproject io.velio/collet-core "0.1.0"
   :description "Collet core library"
   :url "https://github.com/velio-io/collet"
 
