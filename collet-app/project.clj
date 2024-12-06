@@ -19,7 +19,7 @@
   [[org.clojure/clojure "1.12.0"]
    [org.clojure/java.jmx "1.1.0"]
    [org.clojure/tools.cli "1.1.230"]
-   [io.velio/collet-core "0.1.0-SNAPSHOT"]
+   [io.velio/collet-core "0.1.0"]
    [com.brunobonacci/mulog "0.9.0"]
    [com.brunobonacci/mulog-zipkin "0.9.0"]
    [com.brunobonacci/mulog-elasticsearch "0.9.0"]
@@ -34,5 +34,20 @@
   {:dev     {:dependencies [[clj-test-containers "0.7.4"]]}
 
    :uberjar {:uberjar-name "collet.jar"
-             :aot          :all}})
+             :aot          :all}}
+
+  :deploy-repositories
+  [["clojars" {:sign-releases false
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
+
+  :release-tasks
+  [["vcs" "assert-committed"]
+   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["vcs" "commit"]
+   ["deploy" "clojars"]
+   ["change" "version" "leiningen.release/bump-version"]
+   ["vcs" "commit"]
+   ["vcs" "push"]])
 

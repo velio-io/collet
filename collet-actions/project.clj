@@ -18,7 +18,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
-   [io.velio/collet-core "0.1.0-SNAPSHOT"]
+   [io.velio/collet-core "0.1.0"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [http-kit "2.8.0"]
@@ -55,4 +55,19 @@
                              [clj-test-containers "0.7.4"]
                              [djblue/portal "0.58.2"]]}
 
-   :provided {:dependencies [[org.postgresql/postgresql "42.7.4"]]}})
+   :provided {:dependencies [[org.postgresql/postgresql "42.7.4"]]}}
+
+  :deploy-repositories
+  [["clojars" {:sign-releases false
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
+
+  :release-tasks
+  [["vcs" "assert-committed"]
+   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["vcs" "commit"]
+   ["deploy" "clojars"]
+   ["change" "version" "leiningen.release/bump-version"]
+   ["vcs" "commit"]
+   ["vcs" "push"]])
