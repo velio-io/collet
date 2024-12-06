@@ -88,3 +88,10 @@
       (ds/dataset? data) data
       cat? (ds/->dataset (sequence cat data) options)
       :otherwise (ds/->dataset data options))))
+
+
+(defn parallel-concat
+  [& dss]
+  (let [cnt    (max 10 (int (Math/sqrt (count dss))))
+        subdss (pmap (partial apply ds/concat) (partition-all cnt dss))]
+    (apply ds/concat subdss)))

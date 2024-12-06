@@ -193,6 +193,7 @@
                                       timeout))]
         (->> (jdbc/plan conn query-string options)
              ;; TODO
+             ;; check https://github.com/techascent/tech.ml.dataset.sql
              ;; reduce on the result set
              ;; add rows to the in memory batch (calculate the batch size based on the returning data)
              ;; write/append batches into the arrow file

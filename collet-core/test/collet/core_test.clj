@@ -1,5 +1,6 @@
 (ns collet.core-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [malli.core :as m]
@@ -447,11 +448,15 @@
  (require '[tech.v3.libs.arrow :as arrow])
  (require '[tech.v3.dataset :as ds])
 
- (arrow/dataset->stream!
-  (ds/->dataset (for [i (range 60 70)]
-                  {:num i}))
-  "tmp/test.arrow"
-  {:format :ipc})
+ (def os (io/output-stream "tmp/test.arrow"))
 
- (arrow/stream->dataset
-  "tmp/test.arrow"))
+ (arrow/dataset->stream!
+  (ds/->dataset (for [i (range 40 60)]
+                  {:num i}))
+  os)
+
+ (.close os)
+
+ (-> (arrow/stream->dataset-seq
+      "tmp/test.arrow")
+     first))

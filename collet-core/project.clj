@@ -19,7 +19,8 @@
    [com.brunobonacci/mulog "0.9.0"]
    [org.slf4j/slf4j-nop "2.0.16"]
    [techascent/tech.ml.dataset "7.032"]
-   [org.apache.arrow/arrow-vector "6.0.0"]
+   [org.apache.arrow/arrow-vector "18.1.0"]
+   [org.apache.arrow/arrow-memory-netty "18.1.0"]
    [com.cnuernber/jarrow "1.000"]
    [org.apache.commons/commons-compress "1.21"]
    [org.lz4/lz4-java "1.8.0"]
@@ -36,7 +37,8 @@
    "--add-opens=java.base/java.lang=ALL-UNNAMED"
    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
    "--add-opens=java.base/java.io=ALL-UNNAMED"
-   "--add-opens=java.base/java.util=ALL-UNNAMED"]
+   "--add-opens=java.base/java.util=ALL-UNNAMED"
+   "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"]
 
   :profiles
   {:dev      {:source-paths ["dev/src"]
