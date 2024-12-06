@@ -1,6 +1,12 @@
 (defproject io.velio/collet-cli "0.1.0-SNAPSHOT"
   :description "CLI interface for Collet app"
   :url "https://github.com/velio-io/collet"
+  :license
+  {:name    "Apache-2.0"
+   :comment "Apache License 2.0"
+   :url     "https://choosealicense.com/licenses/apache-2.0"
+   :year    2024
+   :key     "apache-2.0"}
 
   :scm {:dir ".."}
 

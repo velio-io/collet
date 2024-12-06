@@ -1,6 +1,12 @@
 (defproject io.velio/collet-core "0.1.0"
   :description "Collet core library"
   :url "https://github.com/velio-io/collet"
+  :license
+  {:name    "Apache-2.0"
+   :comment "Apache License 2.0"
+   :url     "https://choosealicense.com/licenses/apache-2.0"
+   :year    2024
+   :key     "apache-2.0"}
 
   :scm {:dir ".."}
 
@@ -38,6 +44,12 @@
          :dependencies [[eftest "0.6.0"]
                         [clj-test-containers "0.7.4"]
                         [djblue/portal "0.58.2"]]}}
+
+  :deploy-repositories
+  [["clojars" {:sign-releases false
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
 
   :release-tasks
   [["vcs" "assert-committed"]
