@@ -1,4 +1,4 @@
-(defproject io.velio/collet-core "0.1.0-SNAPSHOT"
+(defproject io.velio/collet-core "0.1.0"
   :description "Collet core library"
   :url "https://github.com/velio-io/collet"
 
@@ -33,8 +33,18 @@
    "--add-opens=java.base/java.util=ALL-UNNAMED"]
 
   :profiles
-  {:dev      {:source-paths ["dev/src"]
-              :repl-options {:init-ns dev}
-              :dependencies [[eftest "0.6.0"]
-                             [clj-test-containers "0.7.4"]
-                             [djblue/portal "0.58.2"]]}})
+  {:dev {:source-paths ["dev/src"]
+         :repl-options {:init-ns dev}
+         :dependencies [[eftest "0.6.0"]
+                        [clj-test-containers "0.7.4"]
+                        [djblue/portal "0.58.2"]]}}
+
+  :release-tasks
+  [["vcs" "assert-committed"]
+   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["vcs" "commit"]
+   ["vcs" "tag" "--no-sign"]
+   ["deploy" "clojars"]
+   ["change" "version" "leiningen.release/bump-version"]
+   ["vcs" "commit"]
+   ["vcs" "push"]])
