@@ -95,6 +95,12 @@ docker run \
   collet
 ```
 
+### Collet CLI tool
+
+Docker environment is good for running pipelines in production, but for development purposes you can use the Collet CLI tool.
+It provides a more interactive way to build and run pipelines, in the step by step manner.
+Check the instructions [here](./collet-cli/README.md).
+
 ### Collet as a library
 
 Add the following dependency to your project:
