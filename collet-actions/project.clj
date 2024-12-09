@@ -1,6 +1,12 @@
-(defproject io.velio/collet-actions "0.1.0-SNAPSHOT"
+(defproject io.velio/collet-actions "0.1.1-SNAPSHOT"
   :description "Actions library for Collet workflows"
   :url "https://github.com/velio-io/collet"
+  :license
+  {:name    "Apache-2.0"
+   :comment "Apache License 2.0"
+   :url     "https://choosealicense.com/licenses/apache-2.0"
+   :year    2024
+   :key     "apache-2.0"}
 
   :scm {:dir ".."}
 
@@ -12,7 +18,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
-   [io.velio/collet-core "0.1.0-SNAPSHOT"]
+   [io.velio/collet-core "0.1.0"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [http-kit "2.8.0"]
@@ -48,5 +54,20 @@
               :dependencies [[eftest "0.6.0"]
                              [clj-test-containers "0.7.4"]
                              [djblue/portal "0.58.2"]]}
+   :uberjar  {:aot :all}
+   :provided {:dependencies [[org.postgresql/postgresql "42.7.4"]]}}
 
-   :provided {:dependencies [[org.postgresql/postgresql "42.7.4"]]}})
+  :deploy-repositories
+  [["clojars" {:sign-releases false
+               :url           "https://clojars.org/repo"
+               :username      :env/CLOJARS_USERNAME
+               :password      :env/CLOJARS_PASSWORD}]]
+
+  :release-tasks
+  [["vcs" "assert-committed"]
+   ["change" "version" "leiningen.release/bump-version" "release"]
+   ["vcs" "commit"]
+   ["deploy" "clojars"]
+   ["change" "version" "leiningen.release/bump-version"]
+   ["vcs" "commit"]
+   ["vcs" "push"]])

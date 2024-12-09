@@ -1,7 +1,7 @@
 {:name  :devs-productivity-pipeline
 
  ;; include collet actions library
- :deps  {:coordinates [[io.velio/collet-actions "0.1.0-SNAPSHOT"]]
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.0"]]
          ;; and helpers library to deal with datetime, then you can refer to the namespace alias in your code
          :requires    [[tech.v3.datatype.datetime :as dtype-dt]]
          ;; if you refer to some Java classes, you need to import them

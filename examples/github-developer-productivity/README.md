@@ -18,7 +18,7 @@ docker run \
   -e PIPELINE_CONFIG="/data/pipeline-config.edn" \
   -e GITHUB_TOKEN="<your-github-access-token>" \
   -e GITHUB_ORG_NAME="<your-github-organization>" \
-  collet
+  velioio/collet
 ```
 
 The pipeline then stores the results in a CSV file. 
