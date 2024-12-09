@@ -12,7 +12,7 @@ making it easier to manage complex data workflows.
 Pull the latest Collet image from DockerHub:
 
 ```shell
-docker pull velio-io/collet:latest
+docker pull velioio/collet:latest
 ```
 
 Create a pipeline spec file `demo-pipeline.edn` with the following content:
@@ -31,7 +31,7 @@ Run the pipeline using the following command:
 docker run \
   -v "$(pwd)"/demo-pipeline.edn:/config/demo-pipeline.edn \ 
   -e PIPELINE_SPEC="/config/demo-pipeline.edn" \
-  collet
+  velioio/collet
 ```
 
 Now you should see the output `Hello, world!` in the console.
@@ -43,7 +43,7 @@ Stay tuned, it will make more sense as we dive deeper into the Collet features.
 Pull the latest Collet image from DockerHub:
 
 ```shell
-docker pull velio-io/collet:latest
+docker pull velioio/collet:latest
 ```
 
 Or if you want to build Collet image from the source code, clone this repository:
@@ -58,9 +58,9 @@ Then build the image with the following command:
 cd collet-app
 
 # on Linux
-docker build -t collet .
+docker build -t velioio/collet .
 # on MacOS
-docker build --platform=linux/amd64 -t collet .
+docker build --platform=linux/amd64 -t velioio/collet .
 ```
 
 To run Collet, you need to provide a pipeline specification and optionally a pipeline config map.
@@ -73,7 +73,7 @@ docker run \
   -p 8080:8080 \
   -e PIPELINE_SPEC="{:name :my-pipeline ...}" \
   -e PIPELINE_CONFIG="{:my-secret #env SECRET_VALUE}" \
-  collet
+  velioio/collet
 ```
 
 2. Local file (mount the volume with the pipeline spec)
@@ -83,7 +83,7 @@ docker run \
   -p 8080:8080 \
   -v ./test/collet:/app/data \
   -e PIPELINE_SPEC="/app/data/sample-pipeline.edn" \
-  collet
+  velioio/collet
 ```
 
 3. S3 file:
@@ -92,7 +92,7 @@ docker run \
 docker run \
   -p 8080:8080  \
   -e PIPELINE_SPEC="s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1" \
-  collet
+  velioio/collet
 ```
 
 ### Collet CLI tool
