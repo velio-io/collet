@@ -94,4 +94,4 @@
   [& dss]
   (let [cnt    (max 10 (int (Math/sqrt (count dss))))
         subdss (pmap (partial apply ds/concat) (partition-all cnt dss))]
-    (apply ds/concat subdss)))
+    (apply ds/concat-inplace subdss)))
