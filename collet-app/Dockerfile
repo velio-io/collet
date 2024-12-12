@@ -11,7 +11,7 @@ COPY src /build/src
 RUN cd /build && lein uberjar
 
 
-FROM eclipse-temurin:21.0.4_7-jdk
+FROM eclipse-temurin:21.0.5_11-jre
 
 ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
@@ -29,7 +29,20 @@ RUN mkdir /app/jmx
 COPY resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
 COPY resources/jmx.yaml /app/jmx/jmx.yaml
 
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+
+ARG TARGETPLATFORM
+ARG TINI_ARCH
+
+RUN echo "Building for ${TARGETPLATFORM}" && \
+    case ${TARGETPLATFORM} in \
+         "linux/amd64")  TINI_ARCH=amd64  ;; \
+         "linux/arm64")  TINI_ARCH=arm64  ;; \
+         "linux/arm/v7") TINI_ARCH=armhf  ;; \
+         "linux/arm/v6") TINI_ARCH=armel  ;; \
+         "linux/386")    TINI_ARCH=i386   ;; \
+    esac && \
+    wget -O /tini https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TINI_ARCH}
+
 RUN chmod +x /tini
 
 WORKDIR /app
