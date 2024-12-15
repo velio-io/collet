@@ -285,74 +285,78 @@
       (is (every? #(string/starts-with? % "B")
                   (map #(get-in % ["AddressInfo" 0 "City" "Name"]) people))))))
 
+(comment
+ (sut/odata-request
+  {:service-url "http://services.odata.org/V4/TripPinService/"
+   :segment     [:Airports]}
+  ;;:order            [:AirlineCode]
+  ;;:filter           [:ne :AirlineCode nil]}
+  nil)
+ nil)
 
 (deftest odata-pipeline-test
   (let [total-count (:body (sut/odata-request
                             {:service-url     "http://services.odata.org/V4/TripPinService/"
-                             :segment         [:People]
+                             :segment         [:Airports]
                              :get-total-count true}
                             nil))]
     (testing "server side pagination"
-      (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name       :people
+      (let [pipeline-spec {:name  :airports-pipeline
+                           :tasks [{:name       :airports
                                     :keep-state true
                                     :actions    [{:type   :collet.actions.odata/request
-                                                  :name   :people-request
+                                                  :name   :airports-request
                                                   :params {:service-url      "http://services.odata.org/V4/TripPinService/"
-                                                           :segment          [:People]
-                                                           :select           [:UserName :LastName :AddressInfo]
-                                                           :expand           [[:Friends {:select [:UserName]}]]
-                                                           :order            [:FirstName]
+                                                           :segment          [:Airports]
+                                                           :order            [:IcaoCode]
                                                            :follow-next-link true}}]
-                                    :iterator   {:data [:state :people-request :body "value"]
-                                                 :next [:not-nil? [:state :people-request :body "@odata.nextLink"]]}}]}
+                                    :iterator   {:data [:state :airports-request :body "value"]
+                                                 :next [:not-nil? [:state :airports-request :body "@odata.nextLink"]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {})
-            {:keys [people]} pipeline]
+            {:keys [airports]} pipeline]
         (is (= (-> (/ total-count 8) (Math/ceil) int)
-               (count people)))
-        (is (= 8 (count (first people))))
-        (is (= total-count (count (flatten people))))))
+               (count airports)))
+        (is (= 8 (count (first airports))))
+        (is (= total-count (count (flatten airports))))))
 
     (testing "client side pagination"
-      (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name       :people
+      (let [pipeline-spec {:name  :airports-pipeline
+                           :tasks [{:name       :airports
                                     :keep-state true
                                     :actions    [{:type      :counter
                                                   :name      :skip
                                                   :selectors {'bs [:config :batch-size]}
                                                   :params    {:start 0 :step 'bs}}
                                                  {:type      :collet.actions.odata/request
-                                                  :name      :people-request
+                                                  :name      :airports-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}
                                                   :params    {:service-url "http://services.odata.org/V4/TripPinService/"
-                                                              :segment     [:People]
-                                                              :select      [:FirstName :LastName :AddressInfo]
-                                                              :expand      [[:Friends {:select [:UserName]}]]
-                                                              :order       [:FirstName]
+                                                              :segment     [:Airports]
+                                                              :order       [:IcaoCode]
                                                               :top         'bs
                                                               :skip        'skip}
                                                   :return    [:body "value"]}]
-                                    :iterator   {:data [:state :people-request]
-                                                 :next [:not-empty? [:state :people-request]]}}]}
+                                    :iterator   {:data [:state :airports-request]
+                                                 :next [:not-empty? [:state :airports-request]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
-            {:keys [people]} pipeline]
+            {:keys [airports]} pipeline]
         ;; will make one additional request to get to the state when (not (empty? [])) will return true
         (is (= (-> (/ total-count 4) (Math/ceil) int inc)
-               (count people)))
-        (is (= 4 (count (first people))))
-        (is (= total-count (count (flatten people))))))
+               (count airports)))
+        (is (= 4 (count (first airports))))
+        (is (= total-count (count (flatten airports))))))
 
     (testing "manual client side pagination"
-      (let [pipeline-spec {:name  :people-pipeline
-                           :tasks [{:name       :people
+      (let [pipeline-spec {:name  :airports-pipeline
+                           :tasks [{:name       :airports
                                     :keep-state true
                                     :setup      [{:type   :collet.actions.odata/request
-                                                  :name   :total-people-count
+                                                  :name   :total-airports-count
                                                   :params {:service-url     "http://services.odata.org/V4/TripPinService/"
-                                                           :segment         [:People]
+                                                           :segment         [:Airports]
                                                            :get-total-count true}
                                                   :return [:body]}]
                                     :actions    [{:type      :counter
@@ -360,31 +364,29 @@
                                                   :selectors {'bs [:config :batch-size]}
                                                   :params    {:start 0 :step 'bs}}
                                                  {:type      :collet.actions.odata/request
-                                                  :name      :people-request
+                                                  :name      :airports-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}
                                                   :params    {:service-url "http://services.odata.org/V4/TripPinService/"
-                                                              :segment     [:People]
-                                                              :select      [:FirstName :LastName :AddressInfo]
-                                                              :expand      [[:Friends {:select [:UserName]}]]
-                                                              :order       [:FirstName]
+                                                              :segment     [:Airports]
+                                                              :order       [:IcaoCode]
                                                               :top         'bs
                                                               :skip        'skip}
                                                   :return    [:body "value"]}
                                                  {:type      :custom
                                                   :name      :continue?
-                                                  :selectors {'batch-size         [:config :batch-size]
-                                                              'skip               [:state :skip]
-                                                              'total-people-count [:state :total-people-count]}
-                                                  :params    ['batch-size 'skip 'total-people-count]
-                                                  :fn        (fn [batch-size skip total-people-count]
-                                                               (< (+ skip batch-size) total-people-count))}]
-                                    :iterator   {:data [:state :people-request]
+                                                  :selectors {'batch-size           [:config :batch-size]
+                                                              'skip                 [:state :skip]
+                                                              'total-airports-count [:state :total-airports-count]}
+                                                  :params    ['batch-size 'skip 'total-airports-count]
+                                                  :fn        (fn [batch-size skip total-airports-count]
+                                                               (< (+ skip batch-size) total-airports-count))}]
+                                    :iterator   {:data [:state :airports-request]
                                                  :next [:true? [:state :continue?]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
-            {:keys [people]} pipeline]
+            {:keys [airports]} pipeline]
         (is (= (-> (/ total-count 4) (Math/ceil) int)
-               (count people)))
-        (is (= 4 (count (first people))))
-        (is (= total-count (count (flatten people))))))))
+               (count airports)))
+        (is (= 4 (count (first airports))))
+        (is (= total-count (count (flatten airports))))))))
