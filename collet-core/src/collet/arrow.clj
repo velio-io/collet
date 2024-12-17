@@ -1,82 +1,109 @@
 (ns collet.arrow
   (:require
-   [malli.core :as m]
    [tech.v3.dataset :as ds]
    [tech.v3.dataset.utils :as ml-utils]
+   [tech.v3.datatype :as dtype]
+   [tech.v3.datatype.packing :as packing]
    [tech.v3.libs.arrow :as arrow]
-   [malli.provider :as mp]
    [collet.utils :as utils])
   (:import
    [java.nio.charset StandardCharsets]
    [org.apache.arrow.memory RootAllocator]
    [org.apache.arrow.vector.complex ListVector]
    [org.apache.arrow.vector.complex.impl UnionListWriter]
-   [org.apache.arrow.vector.types FloatingPointPrecision]
+   [org.apache.arrow.vector.types TimeUnit DateUnit FloatingPointPrecision]
    [org.apache.arrow.vector Float4Vector IntVector VarCharVector VectorSchemaRoot]
-   [org.apache.arrow.vector.types.pojo ArrowType$List Field FieldType ArrowType ArrowType$FloatingPoint ArrowType$Int ArrowType$Utf8 Schema]
+   [org.apache.arrow.vector.types.pojo
+    ArrowType$Bool ArrowType$Date ArrowType$Duration ArrowType$List ArrowType$Time ArrowType$Timestamp
+    Field FieldType ArrowType ArrowType$FloatingPoint ArrowType$Int ArrowType$Utf8 Schema]
    [org.apache.arrow.vector.ipc ArrowFileWriter]
    [java.io Closeable FileOutputStream]))
 
 
-(def schema-provider
-  (mp/provider))
-
-
-(def list-types
-  #{:list :vector})           ;; TODO check other malli types
-
-
-(defn data->columns
-  [data]
-  (let [sample-size (min 200 (count data))
-        sample      (take sample-size (shuffle data))
-        schema      (schema-provider sample)]
-    (->> (m/children schema)
-         (mapv (fn [[column-key _ t]]
-                 (let [column-name (ml-utils/column-safe-name column-key)
-                       ;; TODO need a mapping between malli and TMD types
-                       column-type (cond
-                                     (and (m/schema? t) (contains? list-types (m/type t)))
-                                     [:list (-> t m/children first m/type)]
-                                     (= t :some)
-                                     :string
-                                     :otherwise
-                                     (m/type t))]
-                   [column-key column-name column-type]))))))
+(def zoned-types
+  #{:instant :epoch-milliseconds :epoch-microseconds :epoch-nanoseconds})
 
 
 (defn ds->columns
   [dataset]
-  (let [ds-sample (ds/sample dataset (min 200 (ds/row-count dataset)))]
-    (->> dataset
-         (mapv (fn [column]
-                 (let [{:keys [name datatype]} (-> column val meta)
-                       column-name (ml-utils/column-safe-name name)
-                       column-type (if (= datatype :persistent-vector)
-                                     (let [list-type (schema-provider (get ds-sample name))]
-                                       [:list (-> list-type m/children first m/type)])
-                                     datatype)]
-                   [name column-name column-type]))))))
+  (->> dataset
+       (mapv (fn [column]
+               (let [{:keys [name datatype timezone]} (-> column val meta)
+                     column-name (ml-utils/column-safe-name name)
+                     column-type (cond
+                                   ;; not supported types
+                                   (or (= datatype :persistent-map) (= datatype :persistent-set))
+                                   (throw (ex-info "Maps and sets currently not supported" {:column column}))
+                                   ;; list of items
+                                   (= datatype :persistent-vector)
+                                   (let [list-type (transduce (map dtype/elemwise-datatype) conj #{} (get dataset name))
+                                         list-type (if (> (count list-type) 1)
+                                                     :string
+                                                     (first list-type))]
+                                     [:list list-type])
+                                   ;; temporal types with timezone
+                                   (contains? zoned-types datatype)
+                                   [:zoned datatype timezone]
+                                   ;; other types
+                                   :otherwise
+                                   datatype)]
+                 [name column-name column-type])))))
 
 
 (defn get-columns
   [data]
-  ;; TODO add more constraints to the data
-  ;; only simple values and simple lists should infer columns
-  (cond
-    (empty? data) nil
-    (ds/dataset? data) (ds->columns data)
-    :otherwise (data->columns data)))
+  (if (empty? data)
+    nil
+    (try
+      (let [ds-sample (if (utils/dataset? data)
+                        (ds/sample data (min 200 (ds/row-count data)))
+                        (take 200 (shuffle data)))]
+        (-> (utils/make-dataset ds-sample {})
+            (ds->columns)))
+      (catch Exception _
+        nil))))
+
+
+(defn create-zoned-field
+  [column-name column-type ^String timezone]
+  (let [datatype   (packing/unpack-datatype column-type)
+        field-type ^ArrowType
+                   (case datatype
+                     :instant (ArrowType$Timestamp. TimeUnit/MICROSECOND timezone)
+                     :epoch-milliseconds (ArrowType$Timestamp. TimeUnit/MILLISECOND timezone)
+                     :epoch-microseconds (ArrowType$Timestamp. TimeUnit/MICROSECOND timezone)
+                     :epoch-nanoseconds (ArrowType$Timestamp. TimeUnit/NANOSECOND timezone))]
+    (Field. (name column-name) (FieldType/nullable field-type) nil)))
 
 
 (defn create-field
   [column-name column-type]
-  (let [field-type ^ArrowType
-                   (case column-type
-                     ;; TODO extend supported types
-                     :int (ArrowType$Int. 32 true)
-                     :float (ArrowType$FloatingPoint. FloatingPointPrecision/SINGLE)
-                     :string (ArrowType$Utf8.))]
+  (let [datatype   (packing/unpack-datatype column-type)
+        field-type ^ArrowType
+                   (case datatype
+                     :boolean (ArrowType$Bool.)
+                     :uint8 (ArrowType$Int. 8 false)
+                     :int8 (ArrowType$Int. 8 true)
+                     :uint16 (ArrowType$Int. 16 false)
+                     :int16 (ArrowType$Int. 16 true)
+                     :uint32 (ArrowType$Int. 32 false)
+                     :int32 (ArrowType$Int. 32 true)
+                     :uint64 (ArrowType$Int. 64 false)
+                     :int64 (ArrowType$Int. 64 true)
+                     :float32 (ArrowType$FloatingPoint. FloatingPointPrecision/SINGLE)
+                     :float64 (ArrowType$FloatingPoint. FloatingPointPrecision/DOUBLE)
+                     :epoch-days (ArrowType$Date. DateUnit/DAY)
+                     :local-date (ArrowType$Date. DateUnit/DAY)
+                     :local-time (ArrowType$Time. TimeUnit/MICROSECOND (int 64))
+                     :time-nanoseconds (ArrowType$Time. TimeUnit/NANOSECOND (int 64))
+                     :time-microseconds (ArrowType$Time. TimeUnit/MICROSECOND (int 64))
+                     :time-milliseconds (ArrowType$Time. TimeUnit/MILLISECOND (int 32))
+                     :time-seconds (ArrowType$Time. TimeUnit/SECOND (int 32))
+                     :duration (ArrowType$Duration. TimeUnit/MICROSECOND)
+                     :string (ArrowType$Utf8.)
+                     :uuid (ArrowType$Utf8.)
+                     :text (ArrowType$Utf8.)
+                     :encoded-text (ArrowType$Utf8.))]
     (Field. (name column-name) (FieldType/nullable field-type) nil)))
 
 
@@ -86,10 +113,17 @@
   (Schema. ^Iterable
            (->> columns
                 (map (fn [[_column-key column-name column-type]]
-                       (if (and (vector? column-type) (= :list (first column-type)))
+                       (cond
+                         ;; list of items
+                         (and (vector? column-type) (= :list (first column-type)))
                          (Field. column-name
                                  (FieldType/nullable ArrowType$List/INSTANCE)
                                  [(create-field (str column-name "_item") (second column-type))])
+                         ;; temporal types with timezone
+                         (and (vector? column-type) (= :zoned (first column-type)))
+                         (apply create-zoned-field column-name (rest column-type))
+                         ;; other types
+                         :otherwise
                          (create-field column-name column-type)))))))
 
 
@@ -107,6 +141,7 @@
             (.writeNull list-writer)
             (do (.startList list-writer)
                 (doseq [item list]
+                  ;; TODO: Handle other types
                   (.writeInt list-writer (int item)))
                 (.setValueCount list-writer (count list))
                 (.endList list-writer))))
