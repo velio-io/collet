@@ -498,12 +498,19 @@
                                    :keys  [inputs keep-state state-format]
                                    :as    task} (get tasks task-key)
                                   inputs-map (reduce (fn [is i]
+                                                       ;; TODO
+                                                       ;; if input it's a special type referring to arrow file
+                                                       ;; return a mmaped dataset
                                                        (assoc is i (get-in @state [:results i])))
                                                      {} inputs)
                                   context    (-> (->context config)
                                                  (assoc :inputs inputs-map))]
                               (let [exec-status (ml/trace :collet/starting-task [:task task-key]
                                                   (try
+                                                    ;; TODO
+                                                    ;; reduce on the task result sequence
+                                                    ;; taking state-format into account
+                                                    ;; if iteration result is a collection or dataset, write/append it into the arrow file
                                                     (let [task-result-seq (->> (task-fn context)
                                                                                (seq))
                                                           task-result     (case state-format
@@ -511,8 +518,13 @@
                                                                             :flatten (doall (flatten task-result-seq))
                                                                             (doall task-result-seq))
                                                           has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
+                                                      ;; TODO
+                                                      ;; if task-result was written into arrow file send to the tap a sample of it
                                                       (tap> {:task task-key :task-spec task :context context :result task-result})
                                                       (when (or keep-state has-dependents?)
+                                                        ;; TODO
+                                                        ;; if task-result was written into arrow file
+                                                        ;; assoc into results a special type which refers to the file
                                                         (swap! state assoc-in [:results task-key] task-result)))
                                                     ;; update tasks queue
                                                     (swap! state update :tasks-queue rest)
