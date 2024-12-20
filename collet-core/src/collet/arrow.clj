@@ -1,9 +1,11 @@
 (ns collet.arrow
   (:require
+   [clojure.core.protocols :as clj-proto]
    [tech.v3.dataset :as ds]
    [tech.v3.dataset.utils :as ds.utils]
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.packing :as packing]
+   [tech.v3.datatype.casting :as casting]
    [tech.v3.libs.arrow :as arrow]
    [collet.utils :as utils])
   (:import
@@ -28,24 +30,53 @@
   #{:instant :epoch-milliseconds :epoch-microseconds :epoch-nanoseconds})
 
 
+(casting/alias-datatype! :duration :int64)
+
+
+(extend-protocol clj-proto/Datafiable
+  ArrowType$Duration
+  (datafy [this]
+    {:datatype :duration}))
+
+
+(def column-name
+  [:or :string :keyword])
+
+(def column-safe-name
+  :string)
+
+(def column-type
+  [:or :keyword
+   [:tuple [:= :list] :keyword]
+   [:tuple [:= :zoned] :keyword [:maybe :string]]])
+
+(def columns-spec
+  [:vector [:tuple column-name column-safe-name column-type]])
+
+
 (defn ds->columns
+  "Infer a list of columns (simple representation of Arrow fields) from a dataset sample."
+  {:malli/schema [:=> [:cat utils/dataset?]
+                  columns-spec]}
   [dataset]
   (->> dataset
-       (mapv (fn [column]
-               (let [{:keys [name datatype timezone]} (-> column val meta)
+       (mapv (fn [[_ column]]
+               (let [{:keys [name datatype timezone]} (-> column meta)
+                     datatype    (packing/unpack-datatype datatype)
                      column-name (ds.utils/column-safe-name name)
                      column-type (cond
                                    ;; not supported types
                                    (or (= datatype :persistent-map) (= datatype :persistent-set))
-                                   (throw (ex-info "Maps and sets currently not supported" {:column column}))
+                                   (throw (ex-info "Maps and sets currently not supported" {:column name}))
                                    ;; list of items
                                    (= datatype :persistent-vector)
-                                   (let [list-type (->> (ds/column dataset name)
+                                   (let [list-type (->> column
                                                         (mapcat #(map dtype/elemwise-datatype %))
                                                         (set))
                                          list-type (if (> (count list-type) 1)
                                                      :string
-                                                     (first list-type))]
+                                                     (-> (first list-type)
+                                                         (packing/unpack-datatype)))]
                                      [:list list-type])
                                    ;; temporal types with timezone
                                    (contains? zoned-types datatype)
@@ -57,6 +88,7 @@
 
 
 (defn get-columns
+  "Get a list of columns from a dataset. If nil returned it means that dataset cannot be written as Arrow file."
   [data]
   (if (empty? data)
     nil
@@ -72,9 +104,9 @@
 
 (defn create-zoned-field
   [column-name column-type ^String timezone]
-  (let [datatype   (packing/unpack-datatype column-type)
+  (let [timezone   (or timezone "UTC")
         field-type ^ArrowType
-                   (case datatype
+                   (case column-type
                      :instant (ArrowType$Timestamp. TimeUnit/MICROSECOND timezone)
                      :epoch-milliseconds (ArrowType$Timestamp. TimeUnit/MILLISECOND timezone)
                      :epoch-microseconds (ArrowType$Timestamp. TimeUnit/MICROSECOND timezone)
@@ -84,9 +116,8 @@
 
 (defn create-field
   [column-name column-type]
-  (let [datatype   (packing/unpack-datatype column-type)
-        field-type ^ArrowType
-                   (case datatype
+  (let [field-type ^ArrowType
+                   (case column-type
                      :boolean (ArrowType$Bool.)
                      :uint8 (ArrowType$Int. 8 false)
                      :int8 (ArrowType$Int. 8 true)
@@ -201,12 +232,14 @@
     (= column-type :epoch-milliseconds) (.writeTimeStampMilli list-writer (.toEpochMilli ^Instant item))
     (= column-type :epoch-microseconds) (.writeTimeStampMicro list-writer (instant->micros item))
     (= column-type :epoch-nanoseconds) (.writeTimeStampNano list-writer (instant->nanos item))
-    :else (throw (ex-info "Unsupported column type" {:column-type column-type}))))
+    :otherwise (throw (ex-info "Unsupported column type" {:column-type column-type}))))
 
 
 (defn set-column-vector
+  "Write data to a single column vector of specified type."
   [{:keys [^VectorSchemaRoot schema-root ^String column-name column-type column batch-size]}]
-  (if (and (vector? column-type) (= :list (first column-type)))
+  (cond
+    (and (vector? column-type) (= :list (first column-type)))
     (let [vector      ^ListVector (.getVector schema-root column-name)
           list-writer ^UnionListWriter (.getWriter vector)]
       (doall
@@ -223,6 +256,24 @@
         column))
       (.setValueCount list-writer batch-size))
 
+    (and (vector? column-type) (= :zoned (first column-type)))
+    (let [vector (.getVector schema-root column-name)]
+      (.allocateNew ^BaseFixedWidthVector vector batch-size)
+      (doall
+       (map-indexed
+        (fn [^long idx value]
+          (case (second column-type)
+            (:instant :epoch-microseconds)
+            (.set ^TimeStampMicroVector vector idx (instant->micros value))
+            :epoch-milliseconds
+            (.set ^TimeStampMilliVector vector idx (.toEpochMilli ^Instant value))
+            :epoch-nanoseconds
+            (.set ^TimeStampNanoVector vector idx (instant->nanos value))
+            ;; default case if no match
+            (throw (ex-info "Unsupported column type" {:column-type column-type}))))
+        column)))
+
+    :otherwise
     (let [vector (.getVector schema-root column-name)]
       (if (contains? varchar-types column-type)
         (.allocateNew ^BaseVariableWidthVector vector batch-size)
@@ -248,18 +299,13 @@
             (:string :uuid :text :encoded-text)
             (let [bytes (.getBytes (str value) StandardCharsets/UTF_8)]
               (.set ^VarCharVector vector idx bytes 0 (count bytes)))
-            (:instant :epoch-microseconds)
-            (.set ^TimeStampMicroVector vector idx (instant->micros value))
-            :epoch-milliseconds
-            (.set ^TimeStampMilliVector vector idx (.toEpochMilli ^Instant value))
-            :epoch-nanoseconds
-            (.set ^TimeStampNanoVector vector idx (instant->nanos value))
             ;; default case if no match
             (throw (ex-info "Unsupported column type" {:column-type column-type}))))
         column)))))
 
 
 (defn set-vectors-data
+  "Write data to all columns of the schema."
   [^VectorSchemaRoot schema-root columns batch]
   (let [batch-size (count batch)
         ds?        (ds/dataset? batch)]
@@ -278,7 +324,9 @@
   (write [this batch]))
 
 
-(defn make-writer ^Closeable
+(defn ^Closeable make-writer
+  "Create an Arrow file writer. This function returns a writer object with `write` and `close` methods.
+   Write methods accepts a batch of data to write to the Arrow file."
   [^String file-or-path columns]
   (let [allocator     (RootAllocator.)
         schema        (create-schema columns)
@@ -310,42 +358,11 @@
 
 
 (defn read-dataset
+  "Read an Arrow file and return a dataset.
+   If the file contains multiple datasets, they will be concatenated."
   [file-or-path]
   (let [[dataset & rest]
         (arrow/stream->dataset-seq file-or-path {:open-type :mmap})]
     (if (seq rest)
       (apply utils/parallel-concat dataset rest)
       dataset)))
-
-
-
-(comment
- (let [columns (get-columns [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
-                             {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])]
-   (with-open [writer (make-writer "tmp/maps-example.arrow" columns)]
-     (write writer [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
-                    {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
-
-     (write writer [{:id 3 :name "Charlie" :score (float 77.3)}
-                    {:id 4 :name "Diana" :score (float 89.9) :obj [6 7 8]}])))
-
- (read-dataset "tmp/maps-example.arrow")
-
- (ds/columns tds)
-
- (get-columns [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
-               {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
-
- (-> (take 200 (shuffle [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
-                         {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}]))
-     (utils/make-dataset {})
-     (get :obj)
-     meta)
- ;;(ds->columns))
-
- (def dts
-   (ds/->dataset
-    [{:id 1 :name "Alice" :score 95.5 :features [1 2 3]}
-     {:id 2 :name "Bob" :score 85.0 :features [3 4 5]}]))
-
- nil)
