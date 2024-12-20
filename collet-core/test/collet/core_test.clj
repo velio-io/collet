@@ -1,9 +1,11 @@
 (ns collet.core-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [malli.core :as m]
-   [collet.core :as sut]))
+   [collet.core :as sut]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.core))
@@ -440,3 +442,21 @@
       (is (= (-> @results :task22) 5))
       (is (= (-> @results :task31) 7))
       (is (= (-> @results :task4) 12)))))
+
+
+(comment
+ (require '[tech.v3.libs.arrow :as arrow])
+ (require '[tech.v3.dataset :as ds])
+
+ (def os (io/output-stream "tmp/test.arrow"))
+
+ (arrow/dataset->stream!
+  (ds/->dataset (for [i (range 40 60)]
+                  {:num i}))
+  os)
+
+ (.close os)
+
+ (-> (arrow/stream->dataset-seq
+      "tmp/test.arrow")
+     first))
