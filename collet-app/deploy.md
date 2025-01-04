@@ -1,3 +1,20 @@
+### Local build
+
+```shell
+cp -r ~/.m2/repository/io/velio velio
+
+docker build -t collet .
+
+docker run \
+    -e PIPELINE_SPEC="/data/pipeline.edn" \
+    -e PIPELINE_CONFIG="/data/config.edn" \
+    -p 8080:8080 \
+    -m 500m \
+    collet
+```
+
+### Production build
+
 Create a builder for multi-arch builds
 
 ```shell

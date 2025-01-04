@@ -10,7 +10,7 @@
    [collet.utils :as utils])
   (:import
    [java.nio.charset StandardCharsets]
-   [java.time Duration Instant LocalDate LocalTime]
+   [java.time Duration Instant LocalDate LocalDateTime LocalTime ZoneOffset]
    [org.apache.arrow.memory RootAllocator]
    [org.apache.arrow.vector.complex ListVector]
    [org.apache.arrow.vector.complex.impl UnionListWriter]
@@ -23,7 +23,7 @@
     ArrowType$Bool ArrowType$Date ArrowType$Duration ArrowType$List ArrowType$Time ArrowType$Timestamp
     Field FieldType ArrowType ArrowType$FloatingPoint ArrowType$Int ArrowType$Utf8 Schema]
    [org.apache.arrow.vector.ipc ArrowFileWriter]
-   [java.io Closeable FileOutputStream]))
+   [java.io Closeable File FileOutputStream]))
 
 
 (def zoned-types
@@ -67,7 +67,7 @@
                      column-type (cond
                                    ;; not supported types
                                    (or (= datatype :persistent-map) (= datatype :persistent-set))
-                                   (throw (ex-info "Maps and sets currently not supported" {:column name}))
+                                   (throw (ex-info "Complex objects aren't supported" {:column name}))
                                    ;; list of items
                                    (= datatype :persistent-vector)
                                    (let [list-type (->> column
@@ -132,6 +132,7 @@
                      :epoch-days (ArrowType$Date. DateUnit/DAY)
                      :local-date (ArrowType$Date. DateUnit/DAY)
                      :local-time (ArrowType$Time. TimeUnit/MICROSECOND (int 64))
+                     :local-date-time (ArrowType$Timestamp. TimeUnit/MICROSECOND nil)
                      :time-nanoseconds (ArrowType$Time. TimeUnit/NANOSECOND (int 64))
                      :time-microseconds (ArrowType$Time. TimeUnit/MICROSECOND (int 64))
                      :time-milliseconds (ArrowType$Time. TimeUnit/MILLISECOND (int 32))
@@ -194,6 +195,13 @@
     (+ (* seconds 1000000) (quot nanos 1000))))
 
 
+(defn date-time->micros ^long
+  [^LocalDateTime date-time]
+  (let [seconds (.toEpochSecond date-time ZoneOffset/UTC)
+        nanos   (.getNano date-time)]
+    (+ (* seconds 1000000) (quot nanos 1000))))
+
+
 (defn instant->nanos ^long
   [^Instant inst]
   (let [seconds (.getEpochSecond inst)
@@ -222,6 +230,7 @@
     (= column-type :epoch-days) (.writeDateDay list-writer (.toEpochDay ^LocalDate item))
     (= column-type :local-date) (.writeDateDay list-writer (.toEpochDay ^LocalDate item))
     (= column-type :local-time) (.writeTimeMicro list-writer (local-time->micros item))
+    (= column-type :local-date-time) (.writeTimeMicro list-writer (date-time->micros item))
     (= column-type :time-nanoseconds) (.writeTimeNano list-writer (.toNanoOfDay ^LocalTime item))
     (= column-type :time-microseconds) (.writeTimeMicro list-writer (local-time->micros item))
     (= column-type :time-milliseconds) (.writeTimeMilli list-writer (local-time->millis item))
@@ -291,6 +300,7 @@
             :float64 (.set ^Float8Vector vector idx (double value))
             (:epoch-days :local-date) (.set ^DateDayVector vector idx (.toEpochDay ^LocalDate value))
             :local-time (.set ^TimeMicroVector vector idx (local-time->micros value))
+            :local-date-time (.set ^TimeStampMicroVector vector idx (date-time->micros value))
             :time-nanoseconds (.set ^TimeNanoVector vector idx (.toNanoOfDay ^LocalTime value))
             :time-microseconds (.set ^TimeMicroVector vector idx (local-time->micros value))
             :time-milliseconds (.set ^TimeMilliVector vector idx (local-time->millis value))
@@ -298,16 +308,23 @@
             :duration (.set ^DurationVector vector idx (duration->micros value))
             (:string :uuid :text :encoded-text)
             (let [bytes (.getBytes (str value) StandardCharsets/UTF_8)]
-              (.set ^VarCharVector vector idx bytes 0 (count bytes)))
+              (.set ^VarCharVector vector idx bytes))
             ;; default case if no match
             (throw (ex-info "Unsupported column type" {:column-type column-type}))))
         column)))))
 
 
+(defn get-batch-size
+  [batch]
+  (if (ds/dataset? batch)
+    (ds/row-count batch)
+    (count batch)))
+
+
 (defn set-vectors-data
   "Write data to all columns of the schema."
   [^VectorSchemaRoot schema-root columns batch]
-  (let [batch-size (count batch)
+  (let [batch-size (get-batch-size batch)
         ds?        (ds/dataset? batch)]
     (doseq [[column-key column-name column-type] columns]
       (set-column-vector
@@ -327,27 +344,31 @@
 (defn ^Closeable make-writer
   "Create an Arrow file writer. This function returns a writer object with `write` and `close` methods.
    Write methods accepts a batch of data to write to the Arrow file."
-  [^String file-or-path columns]
+  [file-or-path columns]
   (let [allocator     (RootAllocator.)
         schema        (create-schema columns)
         schema-root   (VectorSchemaRoot/create schema allocator)
-        output-stream (FileOutputStream. file-or-path)
+        output-stream (if (instance? File file-or-path)
+                        (FileOutputStream. ^File file-or-path)
+                        (FileOutputStream. ^String file-or-path))
         writer        (ArrowFileWriter. schema-root nil (.getChannel output-stream))]
     (.start writer)
 
     (reify
       PWriter
       (write [this batch]
-        (try
-          (set-vectors-data schema-root columns batch)
-          (.setRowCount schema-root (count batch))
-          (.writeBatch writer)
-          (catch Exception e
-            (throw (ex-info "Error writing Arrow file"
-                            {:file    file-or-path
-                             :columns columns
-                             :batch   batch}
-                            e)))))
+        (let [batch-size (get-batch-size batch)]
+          (when (> batch-size 0)
+            (try
+              (set-vectors-data schema-root columns batch)
+              (.setRowCount schema-root batch-size)
+              (.writeBatch writer)
+              (catch Exception e
+                (throw (ex-info "Error writing Arrow file"
+                                {:file    file-or-path
+                                 :columns columns
+                                 :batch   batch}
+                                e)))))))
       Closeable
       (close [this]
         (.end writer)
@@ -357,12 +378,43 @@
         (.close allocator)))))
 
 
+(defn vec-or-nil [x]
+  (when (some? x)
+    (vec x)))
+
+
+(defn instant->local-date-time
+  [^Instant x]
+  (LocalDateTime/ofInstant x ZoneOffset/UTC))
+
+
 (defn read-dataset
   "Read an Arrow file and return a dataset.
    If the file contains multiple datasets, they will be concatenated."
   [file-or-path]
-  (let [[dataset & rest]
-        (arrow/stream->dataset-seq file-or-path {:open-type :mmap})]
-    (if (seq rest)
-      (apply utils/parallel-concat dataset rest)
-      dataset)))
+  (let [path (if (instance? File file-or-path)
+               (.toPath ^File file-or-path)
+               file-or-path)]
+    (with-meta (arrow/stream->dataset-seq path {:open-type :mmap :key-fn keyword})
+               {:ds-seq true})))
+
+
+#_(reduce
+   (fn [d [column-key _ column-type]]
+     (let [column-key (keyword column-key)
+           column     (get d column-key)]
+       (cond (= column-type :string)
+             (->> (dtype/emap str :string column)
+                  (assoc d column-key))
+             (= column-type :local-date-time)
+             (->> (dtype/emap instant->local-date-time :local-date-time column)
+                  (assoc d column-key))
+             (= column-type :uuid)
+             (->> (dtype/emap (comp parse-uuid str) :uuid column)
+                  (assoc d column-key))
+             (and (vector? column-type) (= :list (first column-type)))
+             (->> (dtype/emap vec-or-nil :persistent-vector column)
+                  (assoc d column-key))
+             :otherwise d)))
+   dataset'
+   columns)

@@ -1,11 +1,12 @@
 (ns collet.arrow-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [tech.v3.dataset :as ds]
    [collet.arrow :as sut])
   (:import
-   [java.time LocalDate LocalTime Instant Duration]
+   [java.time LocalDate LocalDateTime LocalTime Instant Duration]
    [org.apache.arrow.vector.types.pojo ArrowType$Int ArrowType$Timestamp Schema]
    [org.apache.arrow.vector.types TimeUnit]
    [org.apache.arrow.vector VectorSchemaRoot]
@@ -17,13 +18,14 @@
 
 
 (deftest test-ds->columns
-  (let [dataset (ds/->dataset [{:name "Alice" :age 30 :scores [95 85 75]}
-                               {:name "Bob" :age 25 :scores [88 78 68]}])
+  (let [dataset (ds/->dataset [{:name "Alice" :age 30 :scores [95 85 75] :dob (LocalDateTime/of 2000 1 1 12 34 56)}
+                               {:name "Bob" :age 25 :scores [88 78 68] :dob (LocalDateTime/of 2001 2 2 12 34 56)}])
         columns (sut/ds->columns dataset)]
-    (is (= (count columns) 3))
+    (is (= (count columns) 4))
     (is (= (first columns) [:name "name" :string]))
     (is (= (second columns) [:age "age" :int64]))
-    (is (= (nth columns 2) [:scores "scores" [:list :int64]]))))
+    (is (= (nth columns 2) [:scores "scores" [:list :int64]]))
+    (is (= (nth columns 3) [:dob "dob" :local-date-time]))))
 
 
 (deftest test-get-columns
@@ -146,12 +148,17 @@
                          {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
       (sut/write writer [{:id 3 :name "Charlie" :score (float 77.3)}
                          {:id 4 :name "Diana" :score (float 89.9) :obj [6 7 8]}]))
-    (let [dataset (sut/read-dataset "tmp/test.arrow")]
+    (let [dataset (sut/read-dataset "tmp/test.arrow" columns)]
       (is (= (ds/row-count dataset) 4))
-      (is (= (ds/column-names dataset) ["id" "name" "score" "obj"]))
-      (is (= (ds/column dataset "name") ["Alice" "Bob" "Charlie" "Diana"]))
-      (is (= (vec (ds/column dataset "score")) [95.5 85.0 77.30000305175781 89.9000015258789]))
-      (is (= (ds/column dataset "obj") [[1 2 3] [3 4 5] nil [6 7 8]])))))
+      (is (= (ds/column-names dataset) [:id :name :score :obj]))
+      (is (= (ds/rows dataset)
+             [{:id 1 :name "Alice" :score 95.5 :obj [1 2 3]}
+              {:id 2 :name "Bob" :score 85.0 :obj [3 4 5]}
+              {:id 3 :name "Charlie" :score 77.30000305175781}
+              {:id 4 :name "Diana" :score 89.9000015258789 :obj [6 7 8]}]))
+      (is (= (ds/column dataset :name) ["Alice" "Bob" "Charlie" "Diana"]))
+      (is (= (ds/column dataset :score) [95.5 85.0 77.30000305175781 89.9000015258789]))
+      (is (= (ds/column dataset :obj) [[1 2 3] [3 4 5] nil [6 7 8]])))))
 
 
 (deftest test-read-dataset
@@ -162,85 +169,80 @@
                          {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
       (sut/write writer [{:id 3 :name "Charlie" :score (float 77.3)}
                          {:id 4 :name "Diana" :score (float 89.9) :obj [6 7 8]}]))
-    (let [dataset (sut/read-dataset "tmp/test.arrow")]
+    (let [dataset (sut/read-dataset "tmp/test.arrow" columns)]
       (is (= (ds/row-count dataset) 4))
-      (is (= (ds/column-names dataset) ["id" "name" "score" "obj"]))
-      (is (= (ds/column dataset "name") ["Alice" "Bob" "Charlie" "Diana"])))))
+      (is (= (ds/column-names dataset) [:id :name :score :obj]))
+      (is (= (ds/column dataset :name) ["Alice" "Bob" "Charlie" "Diana"])))
+    (io/delete-file "tmp/test.arrow")))
 
 
 (deftest test-read-dataset-all-types
-  (let [uuid    (random-uuid)
-        columns (sut/get-columns [{:instant            (Instant/now)
-                                   :epoch-milliseconds (Instant/now)
-                                   :epoch-microseconds (Instant/now)
-                                   :epoch-nanoseconds  (Instant/now)
-                                   :boolean            true
-                                   :uint8              255
-                                   :int8               -128
-                                   :uint16             65535
-                                   :int16              -32768
-                                   :uint32             4294967295
-                                   :int32              -2147483648
-                                   :uint64             184467440737095516
-                                   :int64              -922337203685477580
-                                   :float32            3.14
-                                   :float64            3.141592653589793
-                                   :epoch-days         (LocalDate/now)
-                                   :local-date         (LocalDate/now)
-                                   :local-time         (LocalTime/now)
-                                   :time-nanoseconds   (LocalTime/now)
-                                   :time-microseconds  (LocalTime/now)
-                                   :time-milliseconds  (LocalTime/now)
-                                   :time-seconds       (LocalTime/now)
-                                   :duration           (Duration/ofSeconds 123 456000000)
-                                   :string             "test"
-                                   :uuid               uuid
-                                   :text               "text"
-                                   :encoded-text       "encoded"}])]
+  (let [uuid       (random-uuid)
+        local-time (LocalTime/now)
+        instant    (Instant/now)
+        data       [{:instant            instant
+                     :epoch-milliseconds instant
+                     :epoch-microseconds instant
+                     :epoch-nanoseconds  instant
+                     :boolean            true
+                     :uint8              255
+                     :int8               -128
+                     :uint16             65535
+                     :int16              -32768
+                     :uint32             4294967295
+                     :int32              -2147483648
+                     :uint64             184467440737095516
+                     :int64              -922337203685477580
+                     :float32            3.14
+                     :float64            3.141592653589793
+                     :epoch-days         (LocalDate/now)
+                     :local-date         (LocalDate/now)
+                     :local-time         local-time
+                     :time-nanoseconds   local-time
+                     :time-microseconds  local-time
+                     :time-milliseconds  local-time
+                     :time-seconds       local-time
+                     :duration           (Duration/ofSeconds 123 456000000)
+                     :string             "test"
+                     :uuid               uuid
+                     :text               "text"
+                     :encoded-text       "encoded"}]
+        columns    (sut/get-columns data)]
     (with-open [writer (sut/make-writer "tmp/test-all-types.arrow" columns)]
-      (sut/write writer [{:instant            (Instant/now)
-                          :epoch-milliseconds (Instant/now)
-                          :epoch-microseconds (Instant/now)
-                          :epoch-nanoseconds  (Instant/now)
-                          :boolean            true
-                          :uint8              255
-                          :int8               -128
-                          :uint16             65535
-                          :int16              -32768
-                          :uint32             4294967295
-                          :int32              -2147483648
-                          :uint64             184467440737095516
-                          :int64              -922337203685477580
-                          :float32            3.14
-                          :float64            3.141592653589793
-                          :epoch-days         (LocalDate/now)
-                          :local-date         (LocalDate/now)
-                          :local-time         (LocalTime/now)
-                          :time-nanoseconds   (LocalTime/now)
-                          :time-microseconds  (LocalTime/now)
-                          :time-milliseconds  (LocalTime/now)
-                          :time-seconds       (LocalTime/now)
-                          :duration           (Duration/ofSeconds 123 456000000)
-                          :string             "test"
-                          :uuid               uuid
-                          :text               "text"
-                          :encoded-text       "encoded"}]))
-    (let [dataset (sut/read-dataset "tmp/test-all-types.arrow")]
+      (sut/write writer data))
+    (let [dataset (sut/read-dataset "tmp/test-all-types.arrow" columns)
+          record  (first (ds/rows dataset))]
       (is (= (ds/row-count dataset) 1))
-      (is (= #{"instant" "epoch-milliseconds" "epoch-microseconds" "epoch-nanoseconds" "boolean" "uint8" "int8" "uint16" "int16" "uint32" "int32" "uint64" "int64" "float32" "float64" "epoch-days" "local-date" "local-time" "time-nanoseconds" "time-microseconds" "time-milliseconds" "time-seconds" "duration" "string" "uuid" "text" "encoded-text"}
+      (is (= #{:instant :epoch-milliseconds :epoch-microseconds :epoch-nanoseconds :boolean
+               :uint8 :int8 :uint16 :int16 :uint32 :int32 :uint64 :int64 :float32 :float64
+               :epoch-days :local-date :local-time :time-nanoseconds :time-microseconds :time-milliseconds
+               :time-seconds :duration :string :uuid :text :encoded-text}
              (set (ds/column-names dataset))))
-      (is (= (ds/column dataset "boolean") [true]))
-      (is (= (ds/column dataset "uint8") [255]))
-      (is (= (ds/column dataset "int8") [-128]))
-      (is (= (ds/column dataset "uint16") [65535]))
-      (is (= (ds/column dataset "int16") [-32768]))
-      (is (= (ds/column dataset "uint32") [4294967295]))
-      (is (= (ds/column dataset "int32") [-2147483648]))
-      (is (= (ds/column dataset "uint64") [184467440737095516]))
-      (is (= (ds/column dataset "int64") [-922337203685477580]))
-      (is (= (ds/column dataset "float32") [3.14]))
-      (is (= (ds/column dataset "float64") [3.141592653589793]))
-      (is (= (ds/column dataset "string") ["test"]))
-      (is (= (ds/column dataset "uuid") [(str uuid)]))
-      (is (= (ds/column dataset "text") ["text"]))
-      (is (= (ds/column dataset "encoded-text") ["encoded"])))))
+      (is (= (record :boolean) true))
+      (is (= (record :uint8) 255))
+      (is (= (record :int8) -128))
+      (is (= (record :uint16) 65535))
+      (is (= (record :int16) -32768))
+      (is (= (record :uint32) 4294967295))
+      (is (= (record :int32) -2147483648))
+      (is (= (record :uint64) 184467440737095516))
+      (is (= (record :int64) -922337203685477580))
+      (is (= (record :float32) 3.14))
+      (is (= (record :float64) 3.141592653589793))
+      (is (= (record :string) "test"))
+      (is (= (record :uuid) uuid))
+      (is (= (record :text) "text"))
+      (is (= (record :encoded-text) "encoded"))
+      (is (= (record :epoch-days) (LocalDate/now)))
+      (is (= (record :local-date) (LocalDate/now)))
+      (is (= (record :local-time) local-time))
+      (is (= (record :time-nanoseconds) local-time))
+      (is (= (record :time-microseconds) local-time))
+      (is (= (record :time-milliseconds) local-time))
+      (is (= (record :time-seconds) local-time))
+      (is (= (record :duration) 123456000))
+      (is (= (record :instant) instant))
+      (is (= (record :epoch-milliseconds) instant))
+      (is (= (record :epoch-microseconds) instant))
+      (is (= (record :epoch-nanoseconds) instant))))
+  (io/delete-file "tmp/test-all-types.arrow"))

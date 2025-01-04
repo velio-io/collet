@@ -51,5 +51,16 @@ ENTRYPOINT ["/tini", "--"]
 
 CMD java \
 -XX:+UseContainerSupport -XX:InitialRAMPercentage=40.0 -XX:MaxRAMPercentage=80.0 \
+--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED \
+--add-exports=java.base/sun.nio.ch=ALL-UNNAMED \
+--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
+--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED \
+--add-opens=java.base/java.lang=ALL-UNNAMED \
+--add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+--add-opens=java.base/java.io=ALL-UNNAMED \
+--add-opens=java.base/java.util=ALL-UNNAMED \
+--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED \
+--enable-native-access=ALL-UNNAMED \
 -javaagent:/app/jmx/jmx_prometheus_javaagent-0.20.0.jar=$JMX_PORT:/app/jmx/jmx.yaml \
 -jar collet.jar -s "${PIPELINE_SPEC}" -c "${PIPELINE_CONFIG}"

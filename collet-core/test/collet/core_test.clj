@@ -1,11 +1,13 @@
 (ns collet.core-test
   (:require
-   [clojure.java.io :as io]
    [clojure.test :refer :all]
+   [collet.core :as sut]
    [collet.test-fixtures :as tf]
    [malli.core :as m]
-   [collet.core :as sut]
-   [tech.v3.dataset :as ds]))
+   [tech.v3.dataset :as ds])
+  (:import
+   [java.io File]
+   [java.time Duration LocalDate LocalDateTime]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.core))
@@ -444,19 +446,81 @@
       (is (= (-> @results :task4) 12)))))
 
 
-(comment
- (require '[tech.v3.libs.arrow :as arrow])
- (require '[tech.v3.dataset :as ds])
+(deftest pipeline-tasks-results-in-arrow
+  (testing "task result stored in arrow file"
+    (let [pipe-spec {:name  :test-arrow-pipeline
+                     :tasks [{:name       :users-collection
+                              :keep-state true
+                              :actions    [{:type   :clj/identity
+                                            :name   :users
+                                            :params [[{:id 1 :name "John"}
+                                                      {:id 2 :name "Jane"}
+                                                      {:id 3 :name "Doe"}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (is (sut/arrow-task-result? (:users-collection pipeline)))
+      (is (instance? File (.-file (:users-collection pipeline))))
+      (is (= [{:id 1 :name "John"}
+              {:id 2 :name "Jane"}
+              {:id 3 :name "Doe"}]
+             (-> (.-file (:users-collection pipeline))
+                 (collet.arrow/read-dataset (.-columns (:users-collection pipeline)))
+                 (ds/rows))))))
 
- (def os (io/output-stream "tmp/test.arrow"))
+  (testing "disable arrow storage for the pipeline"
+    (let [pipe-spec {:name      :test-arrow-pipeline
+                     :use-arrow false
+                     :tasks     [{:name       :users-collection
+                                  :keep-state true
+                                  :actions    [{:type   :clj/identity
+                                                :name   :users
+                                                :params [[{:id 1 :name "John"}
+                                                          {:id 2 :name "Jane"}
+                                                          {:id 3 :name "Doe"}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (is (not (sut/arrow-task-result? (:users-collection pipeline))))
+      (is (= [{:id 1 :name "John"}
+              {:id 2 :name "Jane"}
+              {:id 3 :name "Doe"}]
+             (-> pipeline :users-collection first)))))
 
- (arrow/dataset->stream!
-  (ds/->dataset (for [i (range 40 60)]
-                  {:num i}))
-  os)
-
- (.close os)
-
- (-> (arrow/stream->dataset-seq
-      "tmp/test.arrow")
-     first))
+  (testing "complex data stored in arrow file and parsed correctly"
+    (let [john-uuid (random-uuid)
+          jane-uuid (random-uuid)
+          pipe-spec {:name  :test-arrow-pipeline
+                     :tasks [{:name       :users-collection
+                              :keep-state true
+                              :actions    [{:type   :clj/identity
+                                            :name   :users
+                                            :params [[{:id         1
+                                                       :name       "John"
+                                                       :male       true
+                                                       :height     38.12
+                                                       :created_at (LocalDate/of 2020 1 1)
+                                                       :lifetime   (Duration/ofDays 9125)
+                                                       :uuid       john-uuid
+                                                       :dob        (LocalDateTime/of 2020 1 1 0 0)}
+                                                      {:id         2
+                                                       :name       "Jane"
+                                                       :male       false
+                                                       :height     45.12
+                                                       :created_at (LocalDate/of 2019 1 1)
+                                                       :lifetime   (Duration/ofDays 7125)
+                                                       :uuid       jane-uuid
+                                                       :dob        (LocalDateTime/of 2019 1 1 0 0)}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (let [{:keys [id name male height created_at lifetime uuid dob]}
+            (-> (.-file (:users-collection pipeline))
+                (collet.arrow/read-dataset (.-columns (:users-collection pipeline)))
+                (ds/rows)
+                first)]
+        (is (= 1 id))
+        (is (= "John" name))
+        (is (true? male))
+        (is (= 38.12 height))
+        (is (= (LocalDate/of 2020 1 1) created_at))
+        (is (= 788400000000000 lifetime))
+        (is (= john-uuid uuid))
+        (is (= (LocalDateTime/of 2020 1 1 0 0) dob))))))

@@ -22,7 +22,8 @@
    [collet.actions.switch]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
-   [collet.deps :as collet.deps])
+   [collet.deps :as collet.deps]
+   [collet.arrow :as collet.arrow])
   (:import
    [clojure.lang IFn ILookup]
    [java.io File]
@@ -397,6 +398,7 @@
 (def pipeline-spec
   [:map
    [:name :keyword]
+   [:use-arrow {:optional true} :boolean]
    [:deps {:optional true} collet.deps/deps-spec]
    [:tasks [:vector task-spec]]])
 
@@ -458,6 +460,50 @@
        (rest)))
 
 
+(deftype ArrowTaskResult
+  [task-name columns file])
+
+
+(defn arrow-task-result?
+  [x]
+  (instance? ArrowTaskResult x))
+
+
+(defn handle-task-result
+  [task-name data-seq {:keys [use-arrow keep-result]}]
+  (ml/log :collet/handle-task-result :task-name task-name :use-arrow use-arrow :keep-result keep-result)
+  (cond
+    (and keep-result use-arrow)
+    (let [seq-items?    (sequential? (first data-seq))
+          arrow-columns (if seq-items?
+                          (collet.arrow/get-columns (first data-seq))
+                          (collet.arrow/get-columns data-seq))]
+      (ml/log :collet/task-result-columns :arrow-columns arrow-columns)
+      (if (some? arrow-columns)
+        ;; write to arrow file
+        (let [file (File/createTempFile (name task-name) ".arrow")]
+          (ml/log :collet/writing-arrow-file :file file)
+          (.deleteOnExit file)
+          (with-open [writer (collet.arrow/make-writer file arrow-columns)]
+            (if seq-items?
+              (loop [batch     (first data-seq)
+                     remaining (rest data-seq)]
+                (when (some? batch)
+                  (collet.arrow/write writer batch)
+                  (recur (first remaining) (rest remaining))))
+              (collet.arrow/write writer data-seq)))
+          (ArrowTaskResult. task-name arrow-columns file))
+        ;; return as is
+        (doall data-seq)))
+
+    keep-result
+    (doall data-seq)
+
+    :otherwise
+    (do (doall data-seq)
+        nil)))
+
+
 (defprotocol IPipelineLifeCycle
   "Defines the lifecycle methods for a pipeline."
   (start [this config])
@@ -478,7 +524,7 @@
   (run-worker [this config]))
 
 
-(deftype Pipeline [id name tasks state]
+(deftype Pipeline [id name tasks state options]
   IPipeline
   (pipe-id [_] id)
   (pipe-name [_] name)
@@ -497,38 +543,43 @@
                             (let [{::keys [task-fn]
                                    :keys  [inputs keep-state state-format]
                                    :as    task} (get tasks task-key)
-                                  inputs-map (reduce (fn [is i]
-                                                       ;; TODO
-                                                       ;; if input it's a special type referring to arrow file
-                                                       ;; return a mmaped dataset
-                                                       (assoc is i (get-in @state [:results i])))
-                                                     {} inputs)
+                                  inputs-map (reduce
+                                              (fn [is i]
+                                                (let [input-data (get-in @state [:results i])
+                                                      input-data (if (arrow-task-result? input-data)
+                                                                   (collet.arrow/read-dataset
+                                                                    (.-file ^ArrowTaskResult input-data)
+                                                                    (.-columns ^ArrowTaskResult input-data))
+                                                                   input-data)]
+                                                  (assoc is i input-data)))
+                                              {} inputs)
                                   context    (-> (->context config)
                                                  (assoc :inputs inputs-map))]
                               (let [exec-status (ml/trace :collet/starting-task [:task task-key]
                                                   (try
-                                                    ;; TODO
-                                                    ;; reduce on the task result sequence
-                                                    ;; taking state-format into account
-                                                    ;; if iteration result is a collection or dataset, write/append it into the arrow file
-                                                    (let [task-result-seq (->> (task-fn context)
-                                                                               (seq))
-                                                          task-result     (case state-format
-                                                                            :latest (last task-result-seq)
-                                                                            :flatten (doall (flatten task-result-seq))
-                                                                            (doall task-result-seq))
-                                                          has-dependents? (seq (dep/immediate-dependents pipe-graph task-key))]
+                                                    (let [task-result-seq       (->> (task-fn context)
+                                                                                     (seq))
+                                                          formatted-task-result (case state-format
+                                                                                  :latest (last task-result-seq)
+                                                                                  :flatten (flatten task-result-seq)
+                                                                                  task-result-seq)
+                                                          has-dependents?       (seq (dep/immediate-dependents pipe-graph task-key))
+                                                          keep-result           (or keep-state has-dependents?)
+                                                          task-result           (handle-task-result
+                                                                                 task-key
+                                                                                 formatted-task-result
+                                                                                 {:use-arrow   (:use-arrow options)
+                                                                                  :keep-result keep-result})]
                                                       ;; TODO
                                                       ;; if task-result was written into arrow file send to the tap a sample of it
                                                       (tap> {:task task-key :task-spec task :context context :result task-result})
-                                                      (when (or keep-state has-dependents?)
-                                                        ;; TODO
-                                                        ;; if task-result was written into arrow file
-                                                        ;; assoc into results a special type which refers to the file
+                                                      (when keep-result
                                                         (swap! state assoc-in [:results task-key] task-result)))
-                                                    ;; update tasks queue
+
+                                                    ;; update tasks queue and return the status
                                                     (swap! state update :tasks-queue rest)
                                                     :continue
+
                                                     (catch Exception e
                                                       (let [root-cause (->> (iterate ex-cause e)
                                                                             (take-while identity)
@@ -551,10 +602,12 @@
                                                                    :status :failed
                                                                    :error {:message msg :task task :action action :exception e})
                                                             (throw e)))))))]
+
                                 (if (not= :continue exec-status)
                                   exec-status
                                   ;; continue with the next task
                                   (recur (rest tq)))))
+
                             ;; all tasks are done
                             (do
                               (ml/log :collet/pipeline-execution-finished)
@@ -662,7 +715,10 @@
    Tasks are then executed in the topological order."
   {:malli/schema [:=> [:cat pipeline-spec]
                   pipeline?]}
-  [{:keys [name tasks deps] :as pipeline}]
+  [{:keys [name use-arrow tasks deps]
+    :or   {use-arrow true}
+    :as   pipeline}]
+
   ;; validate pipeline spec first
   (when-not (m/validate pipeline-spec pipeline)
     (pretty/explain pipeline-spec pipeline)
@@ -683,4 +739,4 @@
                          (index-by :name))
         state       (atom {:status      :pending
                            :tasks-queue (->tasks-queue tasks-map)})]
-    (->Pipeline pipeline-id name tasks-map state)))
+    (->Pipeline pipeline-id name tasks-map state {:use-arrow use-arrow})))

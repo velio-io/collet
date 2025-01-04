@@ -57,10 +57,7 @@ Then build the image with the following command:
 ```shell
 cd collet-app
 
-# on Linux
 docker build -t velioio/collet .
-# on MacOS
-docker build --platform=linux/amd64 -t velioio/collet .
 ```
 
 To run Collet, you need to provide a pipeline specification and optionally a pipeline config map.
@@ -301,7 +298,7 @@ Each task map can contain the following keys:
     - `:data` - what part of the data should be treated as an task output
     - `:next` - responds to the question: should the iteration continue?
 
-The most interesting part here is the `:iterator` key. It allows you to iterate over the data and execute the actions
+The most interesting part here is the `:iterator` key. It allows you to iterate over the data and execute actions
 multiple times. The `:data` key is a path to the specific part of the task state that should be treated as an output.
 The value of the `:data` key should be a "path vector" (think of it as a vector for `get-in` Clojure function).
 It might look like this:
