@@ -81,11 +81,19 @@
     {:error/message "should be an instance of oftech.v3.dataset (Dataset)"}}))
 
 
+(defn ds-seq?
+  [data]
+  (or (-> data meta :ds-seq)
+      (and (sequential? data)
+           (ds/dataset? (first data)))))
+
+
 (defn make-dataset
   [data {:keys [cat? parse]}]
   (let [options (assoc-some {} :parser-fn parse)]
     (cond
       (ds/dataset? data) data
+      (ds-seq? data) data
       cat? (ds/->dataset (sequence cat data) options)
       :otherwise (ds/->dataset data options))))
 

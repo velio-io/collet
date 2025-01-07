@@ -6,8 +6,10 @@
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.bitmap :as dtype.bitmap]
    [tech.v3.datatype.protocols :as dtype.proto]
+   [tech.v3.dataset.reductions :as ds.reduce]
    [collet.action :as action]
    [collet.conditions :as collet.conds]
+   [collet.arrow :as collet.arrow]
    [collet.utils :as utils]
    [collet.select :as collet.select]))
 
@@ -40,26 +42,35 @@
 
 
 (defn prep-column
-  [{:keys [rollup rollup-except target-columns]} column]
-  (let [column-name (ds.col/column-name column)
-        length      (dtype/ecount column)
-        missing     (ds.col/missing column)
-        column'     (if (and (pos? length) (seq missing))
-                      (let [not-missing (-> (range length)
-                                            (dtype.bitmap/->bitmap)
-                                            (dtype.proto/set-and-not missing))]
-                        (ds.col/select column not-missing))
-                      ;; return the original column if there are no missing values
-                      column)
-        unique      (ds.col/unique column')]
-    (if (or (contains? target-columns column-name)
-            (and (= (count unique) 1)
-                 (or (= rollup :all)
-                     (and (set? rollup)
-                          (if rollup-except
-                            (not (contains? rollup column-name))
-                            (contains? rollup column-name))))))
+  [{:keys [rollup rollup-except column-name target-columns arrow-columns]} column]
+  (let [column-name  (or column-name (ds.col/column-name column))
+        length       (dtype/ecount column)
+        missing      (ds.col/missing column)
+        column'      (if (and (pos? length) (seq missing))
+                       (let [not-missing (-> (range length)
+                                             (dtype.bitmap/->bitmap)
+                                             (dtype.proto/set-and-not missing))]
+                         (ds.col/select column not-missing))
+                       ;; return the original column if there are no missing values
+                       column)
+        unique       (ds.col/unique column')
+        take-one?    (or (contains? target-columns column-name)
+                         (and (= (count unique) 1)
+                              (or (= rollup :all)
+                                  (and (set? rollup)
+                                       (if rollup-except
+                                         (not (contains? rollup column-name))
+                                         (contains? rollup column-name))))))
+        arrow-column (when (some? arrow-columns)
+                       (collet.arrow/find-column arrow-columns column-name))]
+    (cond
+      (and take-one? (some? arrow-column))
+      (collet.arrow/prep-value (first unique) arrow-column)
+      take-one?
       (first unique)
+      (some? arrow-columns)
+      (mapv #(collet.arrow/prep-value % arrow-column) column')
+      :otherwise
       (vec column'))))
 
 
@@ -73,41 +84,72 @@
 
 (defn do-fold-by
   "Fold dataset by the provided columns"
-  [dataset {:keys [by rollup rollup-except] :or {rollup false rollup-except false}}]
-  (let [multiple-columns? (sequential? by)
-        rollup'           (cond
+  [dataset {:keys [by rollup rollup-except keep-columns]
+            :or   {rollup false rollup-except false}}]
+  (let [rollup'           (cond
                             (true? rollup) :all
                             (vector? rollup) (set rollup)
                             :otherwise :none)
-        zip-options       {:rollup         rollup'
-                           :rollup-except  rollup-except
-                           :target-columns (if multiple-columns?
-                                             (set by)
-                                             #{by})}
-        options           {:group-by-finalizer (partial zip-columns zip-options)}
-        groups            (if multiple-columns?
-                            (ds/group-by dataset #(select-keys % by) options)
-                            (ds/group-by-column dataset by options))]
-    (-> groups vals ds/->dataset)))
+        multiple-columns? (sequential? by)
+        target-columns    (if multiple-columns?
+                            (set by)
+                            #{by})]
+    (if (utils/ds-seq? dataset)
+      (let [arrow-columns  (-> dataset meta :arrow-columns)
+            finalizer-opts {:rollup         rollup'
+                            :rollup-except  rollup-except
+                            :target-columns target-columns
+                            :arrow-columns  arrow-columns}
+            agg-columns    (into {}
+                                 (map (fn [[k v]]
+                                        (let [finalizer #(prep-column (assoc finalizer-opts :column-name k) %)]
+                                          ;; TODO add more reducer options
+                                          [k (ds.reduce/distinct k finalizer)])))
+                                 keep-columns)]
+        (ds.reduce/group-by-column-agg by agg-columns dataset))
+
+      (let [zip-options {:rollup         rollup'
+                         :rollup-except  rollup-except
+                         :target-columns target-columns}
+            options     {:group-by-finalizer (partial zip-columns zip-options)}
+            groups      (if multiple-columns?
+                          (ds/group-by dataset #(select-keys % by) options)
+                          (ds/group-by-column dataset by options))]
+        (-> groups vals ds/->dataset)))))
+
+
+(defn flatten-mapper
+  ([dataset f-key f-path]
+   (flatten-mapper dataset f-key f-path nil))
+
+  ([dataset f-key f-path arrow-columns]
+   (ds/row-mapcat
+    dataset
+    (fn [row]
+      (let [row   (if (some? arrow-columns)
+                    (collet.arrow/prep-record row arrow-columns)
+                    row)
+            value (collet.select/select f-path row)]
+        (cond
+          (and (sequential? value) (not-empty value))
+          (map #(hash-map f-key %) value)
+
+          (not-empty value)
+          [{f-key value}]
+
+          :otherwise
+          [{f-key nil}]))))))
 
 
 (defn do-flatten
   [dataset {:keys [by]}]
   ;; TODO allow for multiple flatten-by keys
   (let [[f-key f-path] (first by)]
-    (ds/row-mapcat
-     dataset
-     (fn [row]
-       (let [value (collet.select/select f-path row)]
-         (cond
-           (and (sequential? value) (not-empty value))
-           (map #(hash-map f-key %) value)
-
-           (not-empty value)
-           [{f-key value}]
-
-           :otherwise
-           [{f-key nil}]))))))
+    (if (utils/ds-seq? dataset)
+      (let [arrow-columns (-> dataset meta :arrow-columns)]
+        (-> (map #(flatten-mapper % f-key f-path arrow-columns) dataset)
+            (with-meta (meta dataset))))
+      (flatten-mapper dataset f-key f-path))))
 
 
 (defn do-group-by
@@ -141,20 +183,25 @@
 
 (defn do-select
   [dataset {:keys [columns rows drop-cols drop-rows]}]
-  (cond-> dataset
-    (some? columns) (ds/select-columns columns)
-    (some? drop-cols) (ds/drop-columns drop-cols)
-    (some? rows) (ds/select-rows columns rows)
-    (some? drop-rows) (ds/drop-rows drop-rows)))
+  (let [selecter (fn [dataset]
+                   (cond-> dataset
+                     (some? columns) (ds/select-columns columns)
+                     (some? drop-cols) (ds/drop-columns drop-cols)
+                     (some? rows) (ds/select-rows columns rows)
+                     (some? drop-rows) (ds/drop-rows drop-rows)))]
+    (if (utils/ds-seq? dataset)
+      (map selecter dataset)
+      (selecter dataset))))
 
 
 (defn do-map-with
   [dataset {:keys [with as-dataset?] :or {as-dataset? false}}]
   (let [map-fn (if (list? with) (eval with) with)]
-    (if (ds/dataset? dataset)
-      (ds/row-map dataset map-fn)
-      (cond-> (map map-fn dataset)
-        as-dataset? (ds/->dataset)))))
+    (cond
+      (utils/ds-seq? dataset) (map #(ds/row-map % map-fn) dataset)
+      (ds/dataset? dataset) (ds/row-map dataset map-fn)
+      :otherwise (cond-> (map map-fn dataset)
+                   as-dataset? (ds/->dataset)))))
 
 
 (def slicer-params-spec
@@ -200,10 +247,10 @@
                         [:with [:or fn? list?]]
                         [:as-dataset? {:optional true} :boolean]]]}}
    [:map
-    [:sequence [:or utils/dataset? [:sequential :any]]]
+    [:sequence [:or utils/dataset? [:sequential utils/dataset?] [:sequential :any]]]
     [:cat? {:optional true} :boolean]
     [:apply {:optional true}
-     [:+ [:or ::flatten ::group ::join ::fold ::filter ::order ::select]]]]])
+     [:+ [:or ::flatten ::group ::join ::fold ::filter ::order ::select ::map]]]]])
 
 
 (defn prep-dataset

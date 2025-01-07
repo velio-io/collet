@@ -1,9 +1,11 @@
 (ns collet.actions.slicer-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer :all]
    [tech.v3.dataset :as ds]
    [collet.test-fixtures :as tf]
    [collet.core :as collet]
+   [collet.arrow :as collet.arrow]
    [collet.actions.slicer :as sut]))
 
 
@@ -121,6 +123,30 @@
       (is (= 2 (ds/row-count northg-st))))))
 
 
+(deftest slicer-data-seq-test
+  (let [data-seq [[{:a 1 :b 2 :c "text"} {:a 3 :b 2 :c "text"} {:a 5 :b 6 :c "text"}]
+                  [{:a 7 :b 8 :c "text"} {:a 9 :b 2 :c "text"} {:a 11 :b 2 :c "text"}]
+                  [{:a 13 :b 6 :c "text"} {:a 15 :b 6 :c "text"} {:a 17 :b 2 :c "text"}
+                   {:a 19 :b 2 :c "last item"}]]
+        columns  (collet.arrow/get-columns (first data-seq))]
+    (with-open [writer (collet.arrow/make-writer "tmp/slicer-arrow-test.arrow" columns)]
+      (doseq [data data-seq]
+        (collet.arrow/write writer data)))
+
+    (let [sequence (collet.arrow/read-dataset "tmp/slicer-arrow-test.arrow" columns)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:fold {:by :b :keep-columns {:a :distinct :c :distinct}}]
+                                [:map {:with (fn [{:keys [a]}]
+                                               {:a-count (count a)})}]]})]
+      (is (ds/dataset? result))
+      (is (= 3 (ds/row-count result)))
+      (is (= #{2 6 8} (-> result (ds/column :b) set)))
+      (is (= #{6 3 1} (-> result (ds/column :a-count) set))))
+
+    (io/delete-file "tmp/slicer-arrow-test.arrow")))
+
+
 (def test-events-data
   [{:id "9a624d46-8cca-43bf-a58a-f8f21a2f98d8", :type "Concert", :score 100, :name "Alice Cooper at Grand Casino Hinckley Events & Convention Center", :life-span {:begin "2017-06-08", :end "2017-06-08"}, :time "20:00:00", :relations [{:type "support act", :type-id "492a850e-97eb-306a-a85e-4b6d98527796", :direction "backward", :artist {:id "bd6b6464-0cf5-48d9-8b7f-52d88d4e87f0", :name "Chris Hawkey", :sort-name "Chris Hawkey"}} {:type "main performer", :type-id "936c7c95-3156-3889-a062-8a0cd57f8946", :direction "backward", :artist {:id "ee58c59f-8e7f-4430-b8ca-236c4d3745ae", :name "Alice Cooper", :sort-name "Cooper, Alice", :disambiguation "the musician born Vincent Damon Furnier, changed his name legally to Alice Cooper in 1974"}} {:type "held at", :type-id "e2c6f697-07dc-38b1-be0b-83d740165532", :direction "backward", :place {:id "8cfeea3a-132e-47f0-aaf5-d7f908f02f86", :name "Grand Casino Hinckley Amphitheater"}}]}
    {:id "a824bfa5-ed32-4b2a-82c4-8c9045d311b1", :type "Concert", :score 100, :name "Lost In The Manor - Old Queen's Head, Angel, London", :life-span {:begin "2016-09-18", :end "2016-09-18"}, :time "18:30:00", :relations [{:type "held in", :type-id "542f8484-8bc7-3ce5-a022-747850b2b928", :direction "backward", :area {:id "f03d09b3-39dc-4083-afd6-159e3f0d462f", :name "London"}}]}
@@ -142,10 +168,10 @@
                                   :actions    [{:type      :slicer
                                                 :name      :city-events-list
                                                 :selectors {'events [:config :area-events]}
-                                                :params    {:sequence   'events
-                                                            :apply      [[:flatten {:by {:artist [:relations
-                                                                                                  [:$/cat [:$/cond [:not-nil? :artist]]
-                                                                                                   :artist]]}}]]}}]}]}
+                                                :params    {:sequence 'events
+                                                            :apply    [[:flatten {:by {:artist [:relations
+                                                                                                [:$/cat [:$/cond [:not-nil? :artist]]
+                                                                                                 :artist]]}}]]}}]}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 

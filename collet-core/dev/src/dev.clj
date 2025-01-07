@@ -12,9 +12,9 @@
 (defn start-publishers []
   (ml/start-publisher!
    {:type       :multi
-    :publishers [{:type :console :pretty? true}
-                 {:type :elasticsearch :url "http://localhost:9200/"}
-                 {:type :zipkin :url "http://localhost:9411"}]}))
+    :publishers [{:type :console :pretty? true}]}))
+                 ;;{:type :elasticsearch :url "http://localhost:9200/"}
+                 ;;{:type :zipkin :url "http://localhost:9411"}]}))
 
 
 (defn test []

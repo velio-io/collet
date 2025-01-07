@@ -23,7 +23,8 @@
     ArrowType$Bool ArrowType$Date ArrowType$Duration ArrowType$List ArrowType$Time ArrowType$Timestamp
     Field FieldType ArrowType ArrowType$FloatingPoint ArrowType$Int ArrowType$Utf8 Schema]
    [org.apache.arrow.vector.ipc ArrowFileWriter]
-   [java.io Closeable File FileOutputStream]))
+   [java.io Closeable File FileOutputStream]
+   [org.apache.arrow.vector.util Text]))
 
 
 (def zoned-types
@@ -86,7 +87,7 @@
                                    datatype)]
                  [name column-name column-type])))))
 
-
+;; TODO empty sequences brake the schema inference
 (defn get-columns
   "Get a list of columns from a dataset. If nil returned it means that dataset cannot be written as Arrow file."
   [data]
@@ -100,6 +101,15 @@
             (ds->columns)))
       (catch Exception _ex
         nil))))
+
+
+(defn find-column
+  [columns column-name]
+  (some
+   (fn [[key name _ :as column]]
+     (when (or (= key column-name) (= name column-name))
+       column))
+   columns))
 
 
 (defn create-zoned-field
@@ -308,7 +318,7 @@
             :duration (.set ^DurationVector vector idx (duration->micros value))
             (:string :uuid :text :encoded-text)
             (let [bytes (.getBytes (str value) StandardCharsets/UTF_8)]
-              (.set ^VarCharVector vector idx bytes))
+              (.setSafe ^VarCharVector vector idx (Text. (str value))))
             ;; default case if no match
             (throw (ex-info "Unsupported column type" {:column-type column-type}))))
         column)))))
@@ -391,30 +401,37 @@
 (defn read-dataset
   "Read an Arrow file and return a dataset.
    If the file contains multiple datasets, they will be concatenated."
-  [file-or-path]
+  [file-or-path columns]
   (let [path (if (instance? File file-or-path)
                (.toPath ^File file-or-path)
                file-or-path)]
     (with-meta (arrow/stream->dataset-seq path {:open-type :mmap :key-fn keyword})
-               {:ds-seq true})))
+               {:ds-seq        true
+                :arrow-columns columns})))
 
 
-#_(reduce
-   (fn [d [column-key _ column-type]]
-     (let [column-key (keyword column-key)
-           column     (get d column-key)]
-       (cond (= column-type :string)
-             (->> (dtype/emap str :string column)
-                  (assoc d column-key))
-             (= column-type :local-date-time)
-             (->> (dtype/emap instant->local-date-time :local-date-time column)
-                  (assoc d column-key))
-             (= column-type :uuid)
-             (->> (dtype/emap (comp parse-uuid str) :uuid column)
-                  (assoc d column-key))
-             (and (vector? column-type) (= :list (first column-type)))
-             (->> (dtype/emap vec-or-nil :persistent-vector column)
-                  (assoc d column-key))
-             :otherwise d)))
-   dataset'
-   columns)
+(defn prep-value
+  [value [_column-key _column-name column-type]]
+  (cond (= column-type :string)
+        (str value)
+
+        (= column-type :local-date-time)
+        (instant->local-date-time value)
+
+        (= column-type :uuid)
+        (-> value str parse-uuid)
+
+        (and (vector? column-type) (= :list (first column-type)))
+        (vec-or-nil value)
+
+        :otherwise value))
+
+
+(defn prep-record
+  [record columns]
+  (reduce
+   (fn [r [_column-key column-name _column-type :as column]]
+     (let [column-key (keyword column-name)]
+       (update r column-key prep-value column)))
+   record
+   columns))
