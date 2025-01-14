@@ -74,7 +74,7 @@
                                    (let [list-type (->> column
                                                         (mapcat #(map dtype/elemwise-datatype %))
                                                         (set))
-                                         list-type (if (> (count list-type) 1)
+                                         list-type (if (or (empty? list-type) (> (count list-type) 1))
                                                      :string
                                                      (-> (first list-type)
                                                          (packing/unpack-datatype)))]
@@ -87,7 +87,7 @@
                                    datatype)]
                  [name column-name column-type])))))
 
-;; TODO empty sequences brake the schema inference
+
 (defn get-columns
   "Get a list of columns from a dataset. If nil returned it means that dataset cannot be written as Arrow file."
   [data]
@@ -270,10 +270,9 @@
             (do (.startList list-writer)
                 (doseq [item list]
                   (write-list-item list-writer (second column-type) item))
-                (.setValueCount list-writer (count list))
                 (.endList list-writer))))
         column))
-      (.setValueCount list-writer batch-size))
+      (.setValueCount vector batch-size))
 
     (and (vector? column-type) (= :zoned (first column-type)))
     (let [vector (.getVector schema-root column-name)]
@@ -317,8 +316,7 @@
             :time-seconds (.set ^TimeSecVector vector idx (.toSecondOfDay ^LocalTime value))
             :duration (.set ^DurationVector vector idx (duration->micros value))
             (:string :uuid :text :encoded-text)
-            (let [bytes (.getBytes (str value) StandardCharsets/UTF_8)]
-              (.setSafe ^VarCharVector vector idx (Text. (str value))))
+            (.setSafe ^VarCharVector vector idx (Text. (str value)))
             ;; default case if no match
             (throw (ex-info "Unsupported column type" {:column-type column-type}))))
         column)))))

@@ -6,7 +6,7 @@ COPY src /build/src
 
 # for local builds
 #RUN mkdir -p /root/.m2/repository/io
-#ADD  velio /root/.m2/repository/io/velio
+#ADD velio /root/.m2/repository/io/velio
 
 RUN cd /build && lein uberjar
 
@@ -20,7 +20,7 @@ ENV TINI_VERSION=v0.19.0
 
 # for local builds
 #RUN mkdir -p /root/.m2/repository/io
-#ADD  velio /root/.m2/repository/io/velio
+#ADD velio /root/.m2/repository/io/velio
 
 RUN mkdir -p /app
 COPY --from=builder /build/target/collet.jar /app/collet.jar

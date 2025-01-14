@@ -22,6 +22,7 @@
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [clj-commons/pomegranate "1.2.24"]
+   [org.babashka/sci "0.9.44"]
    [com.brunobonacci/mulog "0.9.0"]
    [org.slf4j/slf4j-nop "2.0.16"]
    [techascent/tech.ml.dataset "7.032"]
@@ -51,6 +52,7 @@
   {:dev     {:source-paths ["dev/src"]
              :repl-options {:init-ns dev}
              :dependencies [[eftest "0.6.0"]
+                            [vvvvalvalval/scope-capture "0.3.3"]
                             [clj-test-containers "0.7.4"]
                             [djblue/portal "0.58.2"]]}
    :uberjar {:aot :all}}

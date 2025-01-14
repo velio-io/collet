@@ -3,7 +3,8 @@
    [clojure.test :refer :all]
    [collet.test-fixtures :as tf]
    [collet.actions.switch :as sut]
-   [collet.core :as collet]))
+   [collet.core :as collet]
+   [collet.utils :as utils]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.switch))
@@ -85,7 +86,7 @@
                                    {:condition :default
                                     :actions   [{:name :counter-3
                                                  :type :counter}]}]}
-          action      (collet/compile-action action-spec)
+          action      (collet/compile-action (utils/eval-ctx) action-spec)
           [cycle-1 cycle-2 cycle-3 cycle-4 cycle-5 cycle-6]
           (rest (iterate action {:config {} :state {}}))]
       (is (= 0 (get-in cycle-1 [:state :counter-1])))

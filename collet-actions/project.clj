@@ -46,7 +46,9 @@
    "--add-opens=java.base/java.lang=ALL-UNNAMED"
    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
    "--add-opens=java.base/java.io=ALL-UNNAMED"
-   "--add-opens=java.base/java.util=ALL-UNNAMED"]
+   "--add-opens=java.base/java.util=ALL-UNNAMED"
+   "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+   "--enable-native-access=ALL-UNNAMED"]
 
   :profiles
   {:dev      {:source-paths ["dev/src"]

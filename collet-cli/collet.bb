@@ -75,9 +75,12 @@
                                               :context-file (:context-file options)
                                               :action-name  action-name})
                           (get-in [:state action-name]))]
-    (println "Action result:")
-    (puget/cprint action-result)
-    (println)))
+    (if (:portal-opened options)
+      (println "Action finished")
+      (do
+        (println "Action result:")
+        (puget/cprint action-result)
+        (println)))))
 
 
 (defn run-task [options]
@@ -90,22 +93,29 @@
                                       :pipe-config  (:config options)
                                       :context-file (:context-file options)
                                       :task-name    task-name})]
-    (println "Task result:")
-    (puget/cprint task-result)
-    (println)))
+    (if (:portal-opened options)
+      (println "Task finished")
+      (do
+        (println "Task result:")
+        (puget/cprint task-result)
+        (println)))))
 
 
 (defn run-pipeline [options]
   (let [result (collet/run-pipeline {:pipe-spec   (:pipe-spec options)
                                      :pipe-config (:config options)})]
-    (println "Pipeline result:")
-    (puget/cprint result)
-    (println)))
+    (if (:portal-opened options)
+      (println "Pipeline finished")
+      (do
+        (println "Pipeline result:")
+        (puget/cprint result)
+        (println)))))
 
 
 (defn main [& args]
-  (let [options  (cli/parse-opts args collet-cli-spec)
-        *command (atom nil)]
+  (let [options        (cli/parse-opts args collet-cli-spec)
+        *command       (atom nil)
+        *portal-opened (atom false)]
     ;; show header
     (message "Welcome to Collet CLI")
 
@@ -114,19 +124,21 @@
       (when-not (= cmd "repeat action")
         (reset! *command cmd))
 
-      (try (case cmd
-             "run action" (run-action options)
-             "run task" (run-task options)
-             "run pipeline" (run-pipeline options)
-             "show spec" (do (puget/cprint (collet/compile :spec (:pipe-spec options)))
-                             (println))
-             "open portal view" (collet/open-portal)
-             "exit" (do (message "Bye!")
-                        (System/exit 0))
-             nil)
-           (catch Exception ex
-             (message (format "Error executing command %s" cmd))
-             (message (ex-message ex))))
+      (let [options (assoc options :portal-opened @*portal-opened)]
+        (try (case cmd
+               "run action" (run-action options)
+               "run task" (run-task options)
+               "run pipeline" (run-pipeline options)
+               "show spec" (do (puget/cprint (collet/compile :spec (:pipe-spec options)))
+                               (println))
+               "open portal view" (do (collet/open-portal)
+                                      (reset! *portal-opened true))
+               "exit" (do (message "Bye!")
+                          (System/exit 0))
+               nil)
+             (catch Exception ex
+               (message (format "Error executing command %s" cmd))
+               (message (ex-message ex)))))
 
       ;; ask again
       (if (= cmd "repeat action")

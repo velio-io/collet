@@ -148,31 +148,38 @@
                          {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
       (sut/write writer [{:id 3 :name "Charlie" :score (float 77.3)}
                          {:id 4 :name "Diana" :score (float 89.9) :obj [6 7 8]}]))
-    (let [dataset (sut/read-dataset "tmp/test.arrow" columns)]
-      (is (= (ds/row-count dataset) 4))
-      (is (= (ds/column-names dataset) [:id :name :score :obj]))
-      (is (= (ds/rows dataset)
-             [{:id 1 :name "Alice" :score 95.5 :obj [1 2 3]}
-              {:id 2 :name "Bob" :score 85.0 :obj [3 4 5]}
-              {:id 3 :name "Charlie" :score 77.30000305175781}
-              {:id 4 :name "Diana" :score 89.9000015258789 :obj [6 7 8]}]))
-      (is (= (ds/column dataset :name) ["Alice" "Bob" "Charlie" "Diana"]))
-      (is (= (ds/column dataset :score) [95.5 85.0 77.30000305175781 89.9000015258789]))
-      (is (= (ds/column dataset :obj) [[1 2 3] [3 4 5] nil [6 7 8]])))))
+    (let [dataset-seq (sut/read-dataset "tmp/test.arrow" columns)]
+      (is (= 2 (ds/row-count (first dataset-seq))))
+      (is (= [:id :name :score :obj] (ds/column-names (first dataset-seq))))
+      (is (= [{:id 1 :name "Alice" :score 95.5 :obj [1 2 3]}
+              {:id 2 :name "Bob" :score 85.0 :obj [3 4 5]}]
+             (mapv (fn [{:keys [id name score obj]}]
+                     {:id id :name (str name) :score score :obj (vec obj)})
+                   (ds/rows (first dataset-seq)))))
+      (is (= [{:id 3 :name "Charlie" :score 77.30000305175781 :obj nil}
+              {:id 4 :name "Diana" :score 89.9000015258789 :obj [6 7 8]}]
+             (mapv (fn [{:keys [id name score obj]}]
+                     {:id id :name (str name) :score score :obj (when obj (vec obj))})
+                   (ds/rows (second dataset-seq)))))
+      (io/delete-file "tmp/test.arrow"))))
 
 
 (deftest test-read-dataset
-  (let [columns (sut/get-columns [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
+  (let [columns (sut/get-columns [{:id 1 :name "Alice" :score (float 95.5) :obj ["1" "2" "3"]}
                                   {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])]
     (with-open [writer (sut/make-writer "tmp/test.arrow" columns)]
-      (sut/write writer [{:id 1 :name "Alice" :score (float 95.5) :obj [1 2 3]}
-                         {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])
+      (sut/write writer [{:id 1 :name "Alice" :score (float 95.5) :obj ["item1" "item2" "item3"]}
+                         {:id 2 :name "Bob" :score (float 85.0) :obj ["item3" "item4" "item5"]}])
       (sut/write writer [{:id 3 :name "Charlie" :score (float 77.3)}
-                         {:id 4 :name "Diana" :score (float 89.9) :obj [6 7 8]}]))
-    (let [dataset (sut/read-dataset "tmp/test.arrow" columns)]
-      (is (= (ds/row-count dataset) 4))
-      (is (= (ds/column-names dataset) [:id :name :score :obj]))
-      (is (= (ds/column dataset :name) ["Alice" "Bob" "Charlie" "Diana"])))
+                         {:id 4 :name "Diana" :score (float 89.9) :obj ["item6" "item7" "item8"]}]))
+    (let [dataset-seq (sut/read-dataset "tmp/test.arrow" columns)]
+      (is (= 2 (ds/row-count (first dataset-seq))))
+      (is (= 2 (ds/row-count (second dataset-seq))))
+      (is (= [:id :name :score :obj] (ds/column-names (first dataset-seq))))
+      (is (= ["Alice" "Bob"]
+             (map str (ds/column (first dataset-seq) :name))))
+      (is (= [["item1" "item2" "item3"] ["item3" "item4" "item5"]]
+             (map vec (ds/column (first dataset-seq) :obj)))))
     (io/delete-file "tmp/test.arrow")))
 
 
@@ -210,7 +217,8 @@
         columns    (sut/get-columns data)]
     (with-open [writer (sut/make-writer "tmp/test-all-types.arrow" columns)]
       (sut/write writer data))
-    (let [dataset (sut/read-dataset "tmp/test-all-types.arrow" columns)
+    (let [dataset-seq (sut/read-dataset "tmp/test-all-types.arrow" columns)
+          dataset (first dataset-seq)
           record  (first (ds/rows dataset))]
       (is (= (ds/row-count dataset) 1))
       (is (= #{:instant :epoch-milliseconds :epoch-microseconds :epoch-nanoseconds :boolean
@@ -230,7 +238,7 @@
       (is (= (record :float32) 3.14))
       (is (= (record :float64) 3.141592653589793))
       (is (= (record :string) "test"))
-      (is (= (record :uuid) uuid))
+      (is (= (record :uuid) (str uuid)))
       (is (= (record :text) "text"))
       (is (= (record :encoded-text) "encoded"))
       (is (= (record :epoch-days) (LocalDate/now)))

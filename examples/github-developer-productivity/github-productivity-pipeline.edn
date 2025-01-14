@@ -1,281 +1,127 @@
 {:name  :devs-productivity-pipeline
-
- ;; include collet actions library
- :deps  {:coordinates [[io.velio/collet-actions "0.1.0"]]
-         ;; and helpers library to deal with datetime, then you can refer to the namespace alias in your code
-         :requires    [[tech.v3.datatype.datetime :as dtype-dt]]
-         ;; if you refer to some Java classes, you need to import them
-         :imports     [java.time.LocalDateTime]}
-
- :tasks [{:name     :repositories
-          ;;:state-format :flatten
-          ;; we will collect all repositories names and then paginate through the list
+ ;; add extra dependencies
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.1-SNAPSHOT"]]
+         :imports     [java.time.LocalDate java.time.format.DateTimeFormatter]}
+ ;; specify the list of tasks
+ :tasks [;; get the list of repositories for the organization
+         {:name     :repositories
           :actions  [{:name :paginate-or-request
                       :type :switch
                       :case [{:condition [:not-nil? [:state :next-page-link]]
+                              ;; request the next page
                               :actions   [{:name      :repositories-request
                                            :type      :collet.actions.http/request
                                            :selectors {next-page [:state :next-page-link]
                                                        gh-token  [:config :gh-token]}
-                                           :params    {:url         next-page ;; link returned from the previous action
-                                                       :headers     {"Accept"               "application/vnd.github+json"
-                                                                     "X-GitHub-Api-Version" "2022-11-28"}
-                                                       :oauth-token gh-token
-                                                       :as          :json}
-                                           ;; collecting the repositories names from the next page again
+                                           :params    #include ["/data/gh-request.edn"
+                                                                {:url next-page}]
                                            :return    [{:repos [:body]
                                                         :link  [:headers :link]}]}]}
-
                              {:condition :default
+                              ;; do initial request
                               :actions   [{:name      :repositories-request
                                            :type      :collet.actions.http/request
                                            :selectors {gh-token [:config :gh-token]
                                                        org-name [:config :org-name]}
-                                           :params    {:url          ["https://api.github.com/orgs/%s/repos" org-name]
-                                                       :headers      {"Accept"               "application/vnd.github+json"
-                                                                      "X-GitHub-Api-Version" "2022-11-28"}
-                                                       :oauth-token  gh-token
-                                                       :query-params {:per_page 100}
-                                                       :as           :json}
-                                           ;; the returned data will be a map with :repos and :link keys
-                                           ;; the :repos key will contain the list of repositories names
+                                           :params    #include ["/data/gh-request.edn"
+                                                                {:url          ["https://api.github.com/orgs/%s/repos" org-name]
+                                                                 :query-params {:per_page 100}}]
                                            :return    [{:repos [:body]
                                                         :link  [:headers :link]}]}]}]}
-
-                     ;; GitHub returns a set of links in the response headers so we have to unpack the next link
+                     ;; parse the next page link from previous request
                      {:name      :next-page-link
                       :type      :clj/re-find
                       :when      [:not-nil? [:state :repositories-request :link]]
                       :selectors {next-link [:state :repositories-request :link]}
                       :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
                       :return    [[:$/op :first]]}]
-
-          :iterator {:data [:state :repositories-request :repos [:$/cat {:html_url                    :html_url,
-                                                                         :description                 :description,
-                                                                         :archived                    :archived,
-                                                                         :open_issues_count           :open_issues_count,
-                                                                         :watchers                    :watchers,
-                                                                         :ssh_url                     :ssh_url,
-                                                                         :hooks_url                   :hooks_url,
-                                                                         :archive_url                 :archive_url,
-                                                                         :has_discussions             :has_discussions,
-                                                                         :keys_url                    :keys_url,
-                                                                         :forks_count                 :forks_count,
-                                                                         :languages_url               :languages_url,
-                                                                         :git_url                     :git_url,
-                                                                         :issue_comment_url           :issue_comment_url,
-                                                                         :git_refs_url                :git_refs_url,
-                                                                         :clone_url                   :clone_url,
-                                                                         :contents_url                :contents_url,
-                                                                         :has_downloads               :has_downloads,
-                                                                         :teams_url                   :teams_url,
-                                                                         :has_issues                  :has_issues,
-                                                                         :disabled                    :disabled,
-                                                                         :issue_events_url            :issue_events_url,
-                                                                         :private                     :private,
-                                                                         :watchers_count              :watchers_count,
-                                                                         :collaborators_url           :collaborators_url,
-                                                                         :homepage                    :homepage,
-                                                                         :git_commits_url             :git_commits_url,
-                                                                         :name                        :name,
-                                                                         :releases_url                :releases_url,
-                                                                         :milestones_url              :milestones_url,
-                                                                         :svn_url                     :svn_url,
-                                                                         :node_id                     :node_id,
-                                                                         :merges_url                  :merges_url,
-                                                                         :compare_url                 :compare_url,
-                                                                         :web_commit_signoff_required :web_commit_signoff_required,
-                                                                         :stargazers_count            :stargazers_count,
-                                                                         :tags_url                    :tags_url,
-                                                                         :statuses_url                :statuses_url,
-                                                                         :notifications_url           :notifications_url,
-                                                                         :open_issues                 :open_issues,
-                                                                         :has_wiki                    :has_wiki,
-                                                                         :size                        :size,
-                                                                         :assignees_url               :assignees_url,
-                                                                         :commits_url                 :commits_url,
-                                                                         :labels_url                  :labels_url,
-                                                                         :forks_url                   :forks_url,
-                                                                         :contributors_url            :contributors_url,
-                                                                         :updated_at                  :updated_at,
-                                                                         :pulls_url                   :pulls_url,
-                                                                         :has_pages                   :has_pages,
-                                                                         :default_branch              :default_branch,
-                                                                         :language                    :language,
-                                                                         :comments_url                :comments_url,
-                                                                         :id                          :id,
-                                                                         :stargazers_url              :stargazers_url,
-                                                                         :is_template                 :is_template,
-                                                                         :issues_url                  :issues_url,
-                                                                         :trees_url                   :trees_url,
-                                                                         :events_url                  :events_url,
-                                                                         :branches_url                :branches_url,
-                                                                         :url                         :url,
-                                                                         :downloads_url               :downloads_url,
-                                                                         :forks                       :forks,
-                                                                         :subscribers_url             :subscribers_url,
-                                                                         :full_name                   :full_name,
-                                                                         :blobs_url                   :blobs_url,
-                                                                         :subscription_url            :subscription_url,
-                                                                         :fork                        :fork,
-                                                                         :deployments_url             :deployments_url,
-                                                                         :has_projects                :has_projects,
-                                                                         :allow_forking               :allow_forking,
-                                                                         :pushed_at                   :pushed_at,
-                                                                         :visibility                  :visibility,
-                                                                         :git_tags_url                :git_tags_url,
-                                                                         :created_at                  :created_at,
-                                                                         :mirror_url                  :mirror_url}]] ;; all collected repositories names
-                     ;; we will iterate until there is no next page link
+          :iterator {:data [:state :repositories-request :repos [:$/cat #include "/data/repo-keys.edn"]]
+                     ;; proceed while there is a next page link
                      :next [:not-nil? [:state :next-page-link]]}}
 
+         ;; get the list of pull requests for each repository
          {:name     :pull-requests
           :inputs   [:repositories]
-          ;; now for each repository we will get all closed pull requests, maximum amount for single request is 100
-          ;; so we have to paginate through the list
           :actions  [{:name :paginate-or-request
                       :type :switch
-                      ;; first condition checks if we don't have a next pagination link then we need to map over remaining repositories
                       :case [{:condition [:nil? [:state :repository-prs :link]]
+                              ;; take the repo from list and make initial request for PRs
                               :actions   [{:name      :repository
                                            :type      :mapper
                                            :selectors {repos [:inputs :repositories]}
                                            :params    {:sequence repos}}
-                                          ;; this will be an initial request for the repository pull requests
                                           {:name      :repository-prs
                                            :type      :collet.actions.http/request
                                            :selectors {gh-token [:config :gh-token]
                                                        org-name [:config :org-name]
-                                                       repo     [:$mapper/item :name]} ;; :$mapper/item refers to the current repository name
-                                           :params    {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
-                                                       :headers      {"Accept"               "application/vnd.github+json"
-                                                                      "X-GitHub-Api-Version" "2022-11-28"}
-                                                       :oauth-token  gh-token
-                                                       :query-params {:per_page 100 :state "closed"}
-                                                       :as           :json}
-                                           ;; the returned data will be a map with :prs and :link keys
-                                           ;; individual PR is represented as a map with :title, :closed_at and :user-id keys
+                                                       repo     [:$mapper/item :name]}
+                                           :params    #include ["/data/gh-request.edn"
+                                                                {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
+                                                                 :query-params {:per_page 100 :state "closed"}}]
                                            :return    [{:prs  [:body]
                                                         :link [:headers :link]}]}]}
-
-                             ;; if we didn't fall into the first condition, then we have a next pagination link
-                             ;; this condition will check if we have a next pagination link in the links header
                              {:condition [:regex [:state :repository-prs :link] ".*rel=\"next\".*"]
+                              ;; get the next page of PRs
                               :actions   [{:name      :next-page-link
                                            :type      :clj/re-find
                                            :selectors {next-link [:state :repository-prs :link]}
                                            :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
                                            :return    [[:$/op :first]]}
-                                          ;; this is a request for the next page of pull requests
                                           {:name      :repository-prs
                                            :type      :collet.actions.http/request
                                            :selectors {next-page [:state :next-page-link]
                                                        gh-token  [:config :gh-token]}
-                                           :params    {:url         next-page
-                                                       :headers     {"Accept"               "application/vnd.github+json"
-                                                                     "X-GitHub-Api-Version" "2022-11-28"}
-                                                       :oauth-token gh-token
-                                                       :as          :json}
-                                           ;; resulting data will be the same as from initial request
+                                           :params    #include ["/data/gh-request.edn"
+                                                                {:url next-page}]
                                            :return    [{:prs  [:body]
                                                         :link [:headers :link]}]}]}
-
-                             ;; :default condition means that we have a links header but there is no next link
-                             ;; so we need to stop the pagination and move to the next repository
                              {:condition :default
+                              ;; no more PRs for the particular repo, clear the state and proceed to the next repo
                               :actions   [{:name   :repository-prs
                                            :type   :clj/identity
                                            :params {:prs [] :link nil}}]}]}]
-
-          :iterator {:data [:state :repository-prs :prs [:$/cat {
-                                                                 ;;:html_url            :html_url,
-                                                                 ;;:merge_commit_sha    :merge_commit_sha,
-                                                                 ;;:patch_url           :patch_url,
-                                                                 ;;:labels              :labels,
-                                                                 ;;:assignees           :assignees,
-                                                                 :closed_at           :closed_at,
-                                                                 ;;:review_comment_url  :review_comment_url,
-                                                                 ;;:active_lock_reason  :active_lock_reason,
-                                                                 ;;:author_association  :author_association,
-                                                                 ;;:number              :number,
-                                                                 ;;:milestone           :milestone,
-                                                                 ;;:requested_reviewers :requested_reviewers,
-                                                                 ;;:node_id             :node_id,
-                                                                 ;;:merged_at           :merged_at,
-                                                                 ;;:statuses_url        :statuses_url,
-                                                                 ;;:state               :state,
-                                                                 ;;:issue_url           :issue_url,
-                                                                 :title               :title,
-                                                                 ;;:commits_url         :commits_url,
-                                                                 ;;:updated_at          :updated_at,
-                                                                 ;;:diff_url            :diff_url,
-                                                                 ;;:draft               :draft,
-                                                                 ;;:comments_url        :comments_url,
-                                                                 ;;:locked              :locked,
-                                                                 :id                  :id,
-                                                                 ;;:url                 :url,
-                                                                 ;;:body                :body,
-                                                                 ;;:review_comments_url :review_comments_url,
-                                                                 ;;:requested_teams     :requested_teams,
-                                                                 :assignee            :assignee,
-                                                                 :created_at          :created_at
-                                                                 :user-id             [:user :login]}]]
-                     ;; we will iterate until there is no next page link and we have more repositories to map over
+          :iterator {:data [:state :repository-prs :prs [:$/cat #include "/data/pr-keys.edn"]]
+                     ;; proceed while there is a next page link or there are more repositories
                      :next [:or [:not-nil? [:state :repository-prs :link]]
                             [:true? [:$mapper/has-next-item]]]}}
 
+         ;; generate productivity reports
          {:name    :productivity-reports
           :inputs  [:pull-requests]
-          ;; to work with the resulting data efficiently we will wrap pull requests collection into a dataset
-          :setup   [{:name      :prs-dataset
+          :actions [;; calculate the total number of PRs for each member across all repositories
+                    {:name      :total-prs-by-member
                      :type      :slicer
                      :selectors {pulls [:inputs :pull-requests]}
                      :params    {:sequence pulls
-                                 ;;:apply    [[:map {:with (fn [{:keys [user]}]
-                                 ;;                          {:user-id (get user :login)})}]]
-                                 :parse    {:closed_at :instant}}}]
-
-          ;; preparing dataset for the first report
-          :actions [{:name      :total-prs-by-member
-                     :type      :slicer
-                     :selectors {pulls [:state :prs-dataset]}
-                     :params    {:sequence pulls
-                                 :apply    [[:fold {:by :user-id}] ;; collapsing all rows with the same user-id
-                                            ;; title column will become a vector of all PRs for the same user
-                                            ;; pulls-count will be a new column with the count of PRs
+                                 :apply    [[:fold {:by :user-id :keep-columns {:title :distinct}}]
                                             [:map {:with (fn [{:keys [title]}]
                                                            {:pulls-count (count title)})}]
                                             [:select {:columns [:user-id :pulls-count]}]]}}
-
-                    ;; storin report into a local file
                     {:name      :save-total-report
                      :type      :collet.actions.file/sink
                      :selectors {data [:state :total-prs-by-member]}
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "/data/report/total-prs-by-member.csv"}}
+                                 :file-name   "/data/reports/total-prs-by-member.csv"}}
 
+                    ;; calculate the number of PRs for each member per month
                     {:name      :monthly-prs-by-member
                      :type      :slicer
-                     :selectors {pulls [:state :prs-dataset]}
+                     :selectors {pulls [:inputs :pull-requests]}
                      :params    {:sequence pulls
-                                 ;; we need a monthly activity report so we need to extract year and month parts from the date
-                                 :apply    [[:map {:with (fn [{:keys [closed_at]}]
-                                                           (let [dt ^LocalDateTime (dtype-dt/instant->local-date-time closed_at)]
+                                 :apply    [[:map {:with (fn [{:keys [^String closed_at]}]
+                                                           (let [dt ^LocalDate (LocalDate/parse closed_at (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'"))]
                                                              {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
-                                            ;; collapsing all rows with the same user-id and year-month
-                                            [:fold {:by [:user-id :year-month]}]
-                                            ;; title column will become a vector of all PRs for the same user and year-month
+                                            [:fold {:by           [:user-id :year-month]
+                                                    :keep-columns {:title :distinct}}]
                                             [:map {:with (fn [{:keys [title]}]
                                                            {:pulls-count (count title)})}]
                                             [:select {:columns [:user-id :pulls-count :year-month]}]]}}
-
-                    ;; storing report into a local file
                     {:name      :save-monthly-report
                      :type      :collet.actions.file/sink
                      :selectors {data [:state :monthly-prs-by-member]}
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "/data/report/monthly-prs-by-member.csv"}}]}]}
+                                 :file-name   "/data/reports/monthly-prs-by-member.csv"}}]}]}

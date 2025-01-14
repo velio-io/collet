@@ -151,7 +151,7 @@
         ext            (case format
                          :csv ".csv"
                          :json ".json")
-        file           (File/createTempFile file-name ext)
+        file           ^File (File/createTempFile file-name ext)
         temp-file-path (.getAbsolutePath file)
         s3-client      (make-client :s3 aws-creds)]
     (.deleteOnExit file)
