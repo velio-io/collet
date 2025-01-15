@@ -1,12 +1,18 @@
 (ns collet.actions.queue
   (:require
+   [tech.v3.dataset :as ds]
+   [cues.queue :as q]
    [collet.action :as action]
-   [cues.queue :as q]))
+   [collet.utils :as utils]))
 
 
 (def queue-action-spec
   [:map
-   [:input [:or map? [:sequential map?]]]
+   [:input
+    [:or map?
+     utils/dataset?
+     [:sequential map?]
+     [:sequential utils/dataset?]]]
    [:queue-name :keyword]
    [:queue-path {:optional true} :string]
    [:roll-cycle {:optional true}
@@ -22,9 +28,20 @@
   {:malli/schema [:=> [:cat queue-action-spec]
                   :any]}
   [{::keys [appender] :keys [input]}]
-  (if (sequential? input)
+  (cond
+    (ds/dataset? input)
+    (doseq [message (ds/rows input)]
+      (q/write appender message))
+
+    (utils/ds-seq? input)
+    (doseq [message (mapcat ds/rows input)]
+      (q/write appender message))
+
+    (sequential? input)
     (doseq [message input]
       (q/write appender message))
+
+    :otherwise
     (q/write appender input)))
 
 

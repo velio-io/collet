@@ -1,11 +1,11 @@
 (ns collet.actions.s3
   (:require
    [clojure.java.io :as io]
-   [tech.v3.dataset :as ds]
    [cognitect.aws.client.api :as aws]
    [cognitect.aws.credentials :as credentials]
    [diehard.core :as dh]
    [collet.utils :as utils]
+   [collet.actions.file :as actions.file]
    [collet.action :as action])
   (:import
    [java.io ByteArrayInputStream File InputStream]
@@ -50,8 +50,8 @@
   "Initiates the multipart upload process."
   [s3-client bucket key]
   (let [response (invoke! s3-client :CreateMultipartUpload
-                          {:Bucket bucket
-                           :Key    key})]
+                   {:Bucket bucket
+                    :Key    key})]
     (:UploadId response)))
 
 
@@ -59,11 +59,11 @@
   "Uploads a part of a file to S3."
   [s3-client bucket key upload-id part-number part-content]
   (let [response (invoke! s3-client :UploadPart
-                          {:Bucket     bucket
-                           :Key        key
-                           :UploadId   upload-id
-                           :PartNumber part-number
-                           :Body       part-content})]
+                   {:Bucket     bucket
+                    :Key        key
+                    :UploadId   upload-id
+                    :PartNumber part-number
+                    :Body       part-content})]
     {:ETag       (:ETag response)
      :PartNumber part-number}))
 
@@ -72,10 +72,10 @@
   "Completes the multipart upload process."
   [s3-client bucket key upload-id parts]
   (invoke! s3-client :CompleteMultipartUpload
-           {:Bucket          bucket
-            :Key             key
-            :UploadId        upload-id
-            :MultipartUpload {:Parts parts}}))
+    {:Bucket          bucket
+     :Key             key
+     :UploadId        upload-id
+     :MultipartUpload {:Parts parts}}))
 
 
 (defn multipart-upload
@@ -103,9 +103,9 @@
         (complete-multipart-upload s3-client bucket key upload-id parts))
       (catch Exception e
         (invoke! s3-client :AbortMultipartUpload
-                 {:Bucket   bucket
-                  :Key      key
-                  :UploadId upload-id})
+          {:Bucket   bucket
+           :Key      key
+           :UploadId upload-id})
         (throw e)))))
 
 
@@ -125,7 +125,9 @@
    [:format [:enum :json :csv]]
    [:file-name :string]
    [:input
-    [:sequential [:or map? [:sequential :any]]]]
+    [:or utils/dataset?
+     [:sequential utils/dataset?]
+     [:sequential [:or map? [:sequential map?]]]]]
    [:cat? {:optional true :default false}
     :boolean]
    [:csv-header? {:optional true :default false}
@@ -147,8 +149,7 @@
                    [:key :string]]]}
   [{:keys [aws-creds bucket format file-name input cat? csv-header?]
     :or   {cat? false}}]
-  (let [dataset        (utils/make-dataset input {:cat? cat?})
-        ext            (case format
+  (let [ext            (case format
                          :csv ".csv"
                          :json ".json")
         file           ^File (File/createTempFile file-name ext)
@@ -156,9 +157,12 @@
         s3-client      (make-client :s3 aws-creds)]
     (.deleteOnExit file)
 
-    (case format
-      :json (ds/write! dataset temp-file-path)
-      :csv (ds/write! dataset temp-file-path {:headers? csv-header?}))
+    (actions.file/write-into-file
+     {:input       input
+      :format      format
+      :cat?        cat?
+      :file-name   temp-file-path
+      :csv-header? csv-header?})
 
     (dh/with-retry
       {:retry-on        Exception
@@ -170,9 +174,9 @@
           (multipart-upload s3-client bucket file-name is)
           ;; regular upload
           (invoke! s3-client :PutObject
-                   {:Bucket bucket
-                    :Key    file-name
-                    :Body   is}))))
+            {:Bucket bucket
+             :Key    file-name
+             :Body   is}))))
     ;; cleanup
     (io/delete-file file)
     ;; return the S3 coordinates
