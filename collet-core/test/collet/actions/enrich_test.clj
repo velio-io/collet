@@ -3,7 +3,8 @@
    [clojure.test :refer :all]
    [collet.core :as collet]
    [collet.actions.enrich :as sut]
-   [collet.test-fixtures :as tf]))
+   [collet.test-fixtures :as tf]
+   [collet.utils :as utils]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.enrich))
@@ -51,7 +52,7 @@
                                               (get data id))}]
                      :iterator {:data [:state :enrich-collection]
                                 :next [:true? [:$enrich/has-next-item]]}}
-          task-fn   (collet/compile-task task-spec)
+          task-fn   (collet/compile-task (utils/eval-ctx) task-spec)
           result    (-> (task-fn {:config {:collection [{:id 1} {:id 2} {:id 3}]
                                            :data       {1 {:name "one"}
                                                         2 {:name "two"}

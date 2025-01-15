@@ -1,13 +1,25 @@
 (ns collet.actions.slicer-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer :all]
+   [collet.utils :as utils]
    [tech.v3.dataset :as ds]
    [collet.test-fixtures :as tf]
    [collet.core :as collet]
+   [collet.arrow :as collet.arrow]
    [collet.actions.slicer :as sut]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.slicer))
+
+
+(defn data->dataset-seq
+  [file data-seq]
+  (let [columns (collet.arrow/get-columns (first data-seq))]
+    (with-open [writer (collet.arrow/make-writer file columns)]
+      (doseq [data data-seq]
+        (collet.arrow/write writer data)))
+    (collet.arrow/read-dataset file columns)))
 
 
 (deftest prep-dataset-test
@@ -17,13 +29,34 @@
                                                               {:street "NorthG St." :city "Springfield"}]}
                               {:id 2 :name "Jane" :addresses [{:street "Elm St." :city "Springfield"}]}
                               {:id 3 :name "James" :addresses []}]
-                   :apply    [[:flatten {:by {:address [:addresses [:$/cat :street]]}}]]})]
+                   :apply    [[:flatten {:by {:street [:addresses [:$/cat :street]]}}]]})]
       (is (= 4 (ds/row-count result)))
       (is (= 4 (ds/column-count result)))
-      (is (= [:id :name :addresses :address]
+      (is (= [:id :name :addresses :street]
              (ds/column-names result)))
       (is (= ["Main St." "NorthG St." "Elm St." nil]
-             (-> result (ds/column :address) vec)))))
+             (-> result (ds/column :street) vec))))
+
+    (let [data-seq [[{:id 1 :name "John" :addresses ["Main St." "NorthG St."]}
+                     {:id 2 :name "Jane" :addresses ["Elm St."]}]
+                    [{:id 3 :name "James" :addresses []}
+                     {:id 4 :name "Jacob" :addresses ["NorthG St." "Elm St."]}]]
+          sequence (data->dataset-seq "tmp/slicer-flattening-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:flatten {:by {:street [:addresses]}}]]})]
+      (is (utils/ds-seq? result))
+      (is (= 3 (ds/row-count (first result))))
+      (is (= 3 (ds/row-count (second result))))
+      (is (= 4 (ds/column-count (first result))))
+      (is (= [:id :name :addresses :street]
+             (ds/column-names (first result))))
+      (is (= ["Main St." "NorthG St." "Elm St."]
+             (-> result first (ds/column :street) vec)))
+      (is (= [nil "NorthG St." "Elm St."]
+             (-> result second (ds/column :street) vec)))
+
+      (io/delete-file "tmp/slicer-flattening-arrow-test.arrow")))
 
   (testing "folding a sequence by :street"
     (let [result (sut/prep-dataset
@@ -38,7 +71,26 @@
       (is (= [{:street "Main St." :id [1 5] :name ["John" "Jason"]}
               {:street "NorthG St." :id 2 :name "Jane"}
               {:street "Elm St." :id [3 4] :name ["James" "Jacob"]}]
-             (ds/rows result)))))
+             (ds/rows result))))
+
+    (let [data-seq [[{:id 1 :name "John" :street "Main St."}
+                     {:id 2 :name "Jane" :street "NorthG St."}
+                     {:id 3 :name "James" :street "Elm St."}]
+                    [{:id 4 :name "Jacob" :street "Elm St."}
+                     {:id 5 :name "Jason" :street "Main St."}]]
+          sequence (data->dataset-seq "tmp/slicer-folding-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:fold {:by           :street
+                                        :keep-columns {:id :distinct :name :distinct}
+                                        :rollup       true}]]})]
+      (is (= 3 (ds/row-count result)))
+      (is (= #{{:street "Main St." :id [1 5] :name ["John" "Jason"]}
+               {:street "NorthG St." :id 2 :name "Jane"}
+               {:street "Elm St." :id [3 4] :name ["James" "Jacob"]}}
+             (set (ds/rows result))))
+
+      (io/delete-file "tmp/slicer-folding-arrow-test.arrow")))
 
   (testing "grouping a sequence by :city"
     (let [result (sut/prep-dataset
@@ -65,9 +117,34 @@
                               {:id 3 :name "Jack" :city "Springfield"}
                               {:id 5 :name "Joe" :city "Lakeside"}]
                    :apply    [[:group {:by :city}]]})]
-      (ds/dataset? result)
+      (is (ds/dataset? result))
       (is (= 7 (ds/row-count result)))
-      (is (= [:id :name :city :_group_by_key] (ds/column-names result)))))
+      (is (= [:id :name :city :_group_by_key] (ds/column-names result))))
+
+    (let [data-seq [[{:id 1 :name "John" :city "Springfield"}
+                     {:id 3 :name "Jack" :city "Springfield"}
+                     {:id 2 :name "Jane" :city "Lakeside"}
+                     {:id 4 :name "Jill" :city "Lakeside"}]
+                    [{:id 5 :name "Joe" :city "Lakeside"}
+                     {:id 3 :name "Jack" :city "Springfield"}
+                     {:id 5 :name "Joe" :city "Lakeside"}]]
+          sequence (data->dataset-seq "tmp/slicer-grouping-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:group {:by          :city
+                                         :join-groups false}]]})
+          joined   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:group {:by :city}]]})]
+      (is (= ["Springfield" "Lakeside"] (keys result)))
+      (is (every? ds/dataset? (vals result)))
+      (is (= 3 (ds/row-count (get result "Springfield"))))
+      (is (= 4 (ds/row-count (get result "Lakeside"))))
+      (is (ds/dataset? joined))
+      (is (= 7 (ds/row-count joined)))
+      (is (= [:id :name :city :_group_by_key] (ds/column-names joined)))
+
+      (io/delete-file "tmp/slicer-grouping-arrow-test.arrow")))
 
   (testing "joining a sequence with another sequence"
     (let [result (sut/prep-dataset
@@ -94,7 +171,191 @@
       (is (= [:id :name :user :city]
              (ds/column-names result)))
       (is (= 2 (ds/row-count result))
-          "joining works as a left join")))
+          "joining works as a left join"))
+
+    (let [data-seq [[{:id 1 :name "John"}
+                     {:id 2 :name "Jane"}]
+                    [{:id 3 :name "Jack"}
+                     {:id 4 :name "Jill"}]]
+          sequence (data->dataset-seq "tmp/slicer-joining-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:join {:with   [{:user {:id 1} :city "Springfield"}
+                                                 {:user {:id 2} :city "Lakeside"}
+                                                 {:user {:id 3} :city "Springfield"}]
+                                        :source :id
+                                        :target [:user :id]}]]})]
+      (is (= [{:id 1 :name "John" :user {:id 1} :city "Springfield"}
+              {:id 2 :name "Jane" :user {:id 2} :city "Lakeside"}
+              {:id 3 :name "Jack" :user {:id 3} :city "Springfield"}
+              {:id 4 :name "Jill"}]
+             (ds/rows result)))
+      (is (= [:id :name :user :city]
+             (ds/column-names result)))
+      (is (= 4 (ds/row-count result)))
+
+      (io/delete-file "tmp/slicer-joining-arrow-test.arrow")))
+
+  (testing "mapping over a sequence"
+    (let [result (sut/prep-dataset
+                  {:sequence [{:id 1 :name "John"}
+                              {:id 2 :name "Jane"}
+                              {:id 3 :name "Jack"}]
+                   :apply    [[:map {:with (fn [{:keys [id]}]
+                                             {:id-squared (* id id)})}]]})]
+      (is (= [:id :name :id-squared]
+             (ds/column-names result)))
+      (is (= 3 (ds/row-count result)))
+      (is (= [1 4 9]
+             (-> result (ds/column :id-squared) vec))))
+
+    (let [data-seq [[{:id 1 :name "John"}
+                     {:id 2 :name "Jane"}]
+                    [{:id 3 :name "Jack"}
+                     {:id 4 :name "Jill"}]]
+          sequence (data->dataset-seq "tmp/slicer-mapping-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:map {:with (fn [{:keys [id]}]
+                                               {:id-squared (* id id)})}]]})]
+      (is (= 2 (ds/row-count (first result))))
+      (is (= 2 (ds/row-count (second result))))
+      (is (= [:id :name :id-squared]
+             (ds/column-names (first result)))
+          "first dataset")
+      (is (= [:id :name :id-squared]
+             (ds/column-names (second result))))
+      (is (= [1 4]
+             (-> result first (ds/column :id-squared) vec))
+          "first dataset")
+      (is (= [9 16]
+             (-> result second (ds/column :id-squared) vec)))
+      (io/delete-file "tmp/slicer-mapping-arrow-test.arrow")))
+
+  (testing "filtering a sequence"
+    (let [result (sut/prep-dataset
+                  {:sequence [{:id 1 :name "John" :city "Springfield"}
+                              {:id 2 :name "Jane" :city "Lakeside"}
+                              {:id 3 :name "Jack" :city "Springfield"}
+                              {:id 4 :name "Jill" :city "Lakeside"}
+                              {:id 5 :name "Joe" :city "Lakeside"}]
+                   :apply    [[:filter {:by        :city
+                                        :predicate (fn [city]
+                                                     (= city "Lakeside"))}]]})]
+      (is (= 3 (ds/row-count result)))
+      (is (= [:id :name :city]
+             (ds/column-names result)))
+      (is (= ["Jane" "Jill" "Joe"]
+             (-> result (ds/column :name) vec))))
+
+    (let [data-seq [[{:id 1 :name "John" :city "Springfield"}
+                     {:id 2 :name "Jane" :city "Lakeside"}
+                     {:id 3 :name "Jack" :city "Springfield"}]
+                    [{:id 4 :name "Jill" :city "Lakeside"}
+                     {:id 5 :name "Joe" :city "Lakeside"}]]
+          sequence (data->dataset-seq "tmp/slicer-filtering-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:filter {:by        :city
+                                          :predicate (fn [city]
+                                                       (= city "Lakeside"))}]]})]
+      (is (= 1 (ds/row-count (first result))))
+      (is (= 2 (ds/row-count (second result))))
+      (is (= [:id :name :city]
+             (ds/column-names (first result)))
+          "first dataset")
+      (is (= [:id :name :city]
+             (ds/column-names (second result))))
+      (is (= ["Jane"]
+             (-> result first (ds/column :name) vec)))
+      (is (= ["Jill" "Joe"]
+             (-> result second (ds/column :name) vec)))
+      (io/delete-file "tmp/slicer-filtering-arrow-test.arrow")))
+
+  (testing "ordering a sequence"
+    (let [result (sut/prep-dataset
+                  {:sequence [{:id 1 :name "John" :city "Springfield"}
+                              {:id 2 :name "Jane" :city "Lakeside"}
+                              {:id 3 :name "Jack" :city "Roanoke"}
+                              {:id 4 :name "Jill" :city "Iberia"}
+                              {:id 5 :name "Joe" :city "Istanbul"}
+                              {:id 6 :name "Jim" :city "Athens"}
+                              {:id 7 :name "Jill" :city "Florence"}]
+                   :apply    [[:order {:by :city :comp compare}]]})]
+      (is (= 7 (ds/row-count result)))
+      (is (= [:id :name :city]
+             (ds/column-names result)))
+      (is (= ["Athens" "Florence" "Iberia" "Istanbul" "Lakeside" "Roanoke" "Springfield"]
+             (-> result (ds/column :city) vec))))
+
+    (let [data-seq [[{:id 1 :name "John" :city "Springfield"}
+                     {:id 2 :name "Jane" :city "Lakeside"}
+                     {:id 3 :name "Jack" :city "Roanoke"}
+                     {:id 4 :name "Jill" :city "Iberia"}
+                     {:id 5 :name "Joe" :city "Istanbul"}
+                     {:id 6 :name "Jim" :city "Athens"}
+                     {:id 7 :name "Jill" :city "Florence"}]
+                    [{:id 8 :name "Jill" :city "Florence"}
+                     {:id 9 :name "Jill" :city "Florence"}
+                     {:id 10 :name "Jill" :city "Florence"}]]
+          sequence (data->dataset-seq "tmp/slicer-ordering-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:order {:by :city :comp compare}]]})]
+      (is (= 10 (ds/row-count result)))
+      (is (= [:id :name :city]
+             (ds/column-names result)))
+      (is (= ["Athens" "Florence" "Florence" "Florence" "Florence"
+              "Iberia" "Istanbul" "Lakeside" "Roanoke" "Springfield"]
+             (-> result (ds/column :city) vec)))
+      (io/delete-file "tmp/slicer-ordering-arrow-test.arrow")))
+
+  (testing "select from sequence"
+    (let [result (sut/prep-dataset
+                  {:sequence [{:id 1 :name "John" :city "Springfield"}
+                              {:id 2 :name "Jane" :city "Lakeside"}
+                              {:id 3 :name "Jack" :city "Roanoke"}
+                              {:id 4 :name "Jill" :city "Iberia"}
+                              {:id 5 :name "Joe" :city "Istanbul"}
+                              {:id 6 :name "Jim" :city "Athens"}
+                              {:id 7 :name "Jill" :city "Florence"}]
+                   :apply    [[:select {:columns [:id :city]
+                                        :rows    [2 3 6]}]]})]
+      (is (= 3 (ds/row-count result)))
+      (is (= [:id :city]
+             (ds/column-names result)))
+      (is (= [{:id 3 :city "Roanoke"}
+              {:id 4 :city "Iberia"}
+              {:id 7 :city "Florence"}]
+             (ds/rows result))))
+
+    (let [data-seq [[{:id 1 :name "John" :city "Springfield"}
+                     {:id 2 :name "Jane" :city "Lakeside"}
+                     {:id 3 :name "Jack" :city "Roanoke"}
+                     {:id 4 :name "Jill" :city "Iberia"}
+                     {:id 5 :name "Joe" :city "Istanbul"}
+                     {:id 6 :name "Jim" :city "Athens"}
+                     {:id 7 :name "Jill" :city "Florence"}]
+                    [{:id 8 :name "Jill" :city "Florence"}
+                     {:id 9 :name "Jill" :city "Florence"}
+                     {:id 10 :name "Jill" :city "Florence"}]]
+          sequence (data->dataset-seq "tmp/slicer-selecting-arrow-test.arrow" data-seq)
+          result   (sut/prep-dataset
+                    {:sequence sequence
+                     :apply    [[:select {:columns [:id :city]
+                                          :rows    [1 2]}]]})]
+      (is (= 2 (ds/row-count (first result))))
+      (is (= [:id :city]
+             (ds/column-names (first result))))
+      (is (= [{:id 2 :city "Lakeside"}
+              {:id 3 :city "Roanoke"}]
+             (->> (ds/rows (first result)) (map #(update % :city str))))
+          "first dataset")
+      (is (= [{:id 9 :city "Florence"}
+              {:id 10 :city "Florence"}]
+             (->> (ds/rows (second result)) (map #(update % :city str))))
+          "second dataset")
+      (io/delete-file "tmp/slicer-selecting-arrow-test.arrow")))
 
   (testing "multiple transformations"
     (let [result    (sut/prep-dataset
@@ -118,7 +379,59 @@
       (is (= [:id :name :addresses :address :user :phone]
              (ds/column-names main-st)))
       (is (= 1 (ds/row-count main-st)))
-      (is (= 2 (ds/row-count northg-st))))))
+      (is (= 2 (ds/row-count northg-st))))
+
+    (let [data-seq       [[{:id 1 :name "John" :addresses ["Main St." "NorthG St."]}
+                           {:id 2 :name "Jane" :addresses ["Elm St."]}
+                           {:id 3 :name "Joshua" :addresses ["NorthG St."]}]
+                          [{:id 4 :name "Jack" :addresses ["Springfield St."]}
+                           {:id 5 :name "Jill" :addresses ["Springfield St." "NorthG St."]}]]
+          sequence       (data->dataset-seq "tmp/slicer-multi-arrow-test.arrow" data-seq)
+          result         (sut/prep-dataset
+                          {:sequence sequence
+                           :apply    [[:flatten {:by {:street [:addresses]}}]
+                                      [:join {:with   [{:user {:id 1} :phone 1234567}
+                                                       {:user {:id 2} :phone 7654321}
+                                                       {:user {:id 3} :phone 4561237}
+                                                       {:user {:id 5} :phone 7654321}]
+                                              :source :id
+                                              :target [:user :id]}]
+                                      [:group {:by          :street
+                                               :join-groups false}]]})
+          main-st        (get result "Main St.")
+          northg-st      (get result "NorthG St.")
+          elm-st         (get result "Elm St.")
+          springfield-st (get result "Springfield St.")]
+      (is (= ["Main St." "NorthG St." "Elm St." "Springfield St."]
+             (keys result)))
+      (is (every? ds/dataset? (vals result)))
+      (is (= [:id :name :addresses :street :user :phone]
+             (ds/column-names main-st)))
+      (is (= 1 (ds/row-count main-st)))
+      (is (= 3 (ds/row-count northg-st)))
+      (is (= 1 (ds/row-count elm-st)))
+      (is (= 2 (ds/row-count springfield-st)))
+
+      (io/delete-file "tmp/slicer-multi-arrow-test.arrow"))))
+
+
+(deftest slicer-data-seq-test
+  (let [data-seq [[{:a 1 :b 2 :c "text"} {:a 3 :b 2 :c "text"} {:a 5 :b 6 :c "text"}]
+                  [{:a 7 :b 8 :c "text"} {:a 9 :b 2 :c "text"} {:a 11 :b 2 :c "text"}]
+                  [{:a 13 :b 6 :c "text"} {:a 15 :b 6 :c "text"} {:a 17 :b 2 :c "text"}
+                   {:a 19 :b 2 :c "last item"}]]
+        sequence (data->dataset-seq "tmp/slicer-arrow-test.arrow" data-seq)
+        result   (sut/prep-dataset
+                  {:sequence sequence
+                   :apply    [[:fold {:by :b :keep-columns {:a :distinct :c :distinct}}]
+                              [:map {:with (fn [{:keys [a]}]
+                                             {:a-count (count a)})}]]})]
+    (is (ds/dataset? result))
+    (is (= 3 (ds/row-count result)))
+    (is (= #{2 6 8} (-> result (ds/column :b) set)))
+    (is (= #{6 3 1} (-> result (ds/column :a-count) set)))
+
+    (io/delete-file "tmp/slicer-arrow-test.arrow")))
 
 
 (def test-events-data
@@ -142,10 +455,10 @@
                                   :actions    [{:type      :slicer
                                                 :name      :city-events-list
                                                 :selectors {'events [:config :area-events]}
-                                                :params    {:sequence   'events
-                                                            :apply      [[:flatten {:by {:artist [:relations
-                                                                                                  [:$/cat [:$/cond [:not-nil? :artist]]
-                                                                                                   :artist]]}}]]}}]}]}
+                                                :params    {:sequence 'events
+                                                            :apply    [[:flatten {:by {:artist [:relations
+                                                                                                [:$/cat [:$/cond [:not-nil? :artist]]
+                                                                                                 :artist]]}}]]}}]}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 

@@ -30,7 +30,7 @@
     [:vector [:or [:catn [:library :symbol]]
               [:catn [:library :symbol] [:alias-key [:= :as]] [:alias :symbol]]]]]
    [:imports {:optional true}
-    [:catn [:class :symbol]]]])
+    [:+ :symbol]]])
 
 
 (defn add-dependencies

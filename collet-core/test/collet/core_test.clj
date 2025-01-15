@@ -1,9 +1,14 @@
 (ns collet.core-test
   (:require
    [clojure.test :refer :all]
+   [collet.core :as sut]
    [collet.test-fixtures :as tf]
+   [collet.utils :as utils]
    [malli.core :as m]
-   [collet.core :as sut]))
+   [tech.v3.dataset :as ds])
+  (:import
+   [java.io File]
+   [java.time Duration LocalDate LocalDateTime ZoneOffset]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.core))
@@ -18,7 +23,8 @@
                                          state1 [:state :some-action :state1]}}
                            {:config {:param1 "value1"
                                      :param2 "value2"}
-                            :state  {:some-action {:state1 "state-value"}}})]
+                            :state  {:some-action {:state1 "state-value"}}}
+                           (utils/eval-ctx))]
       (is (= compiled-params
              ["value1" {:p2 "value2"} [1 2 "state-value"]])))
 
@@ -32,7 +38,8 @@
                                            state1 [:state :some-action :state1]}}
                              {:config {:param1 "value1"
                                        :param2 "value2"}
-                              :state  {:some-action {:state1 "state-value"}}})]
+                              :state  {:some-action {:state1 "state-value"}}}
+                             (utils/eval-ctx))]
         (is (= compiled-params
                {:p1 "value1"
                 :p2 "value2"
@@ -43,7 +50,7 @@
   (testing "Compiles an action spec into a function"
     (let [action-spec {:type :clj/select-keys
                        :name :test}
-          action      (sut/compile-action action-spec)]
+          action      (sut/compile-action (utils/eval-ctx) action-spec)]
       (is (fn? action))))
 
   (testing "Action type prefixed with 'clj' is resolved as a Clojure core function"
@@ -51,7 +58,7 @@
                        :name   :keys-selector
                        :params [{:a 1 :b 2 :c 3 :d 4 :e 5}
                                 [:a :b :e]]}
-          action      (sut/compile-action action-spec)
+          action      (sut/compile-action (utils/eval-ctx) action-spec)
           actual      (-> (action {:config {} :state {}})
                           (get-in [:state :keys-selector]))]
       (is (= actual {:a 1 :b 2 :e 5}))))
@@ -62,7 +69,7 @@
                        :params ["My name is %s"]
                        :fn     (fn [format-str]
                                  (format format-str "John"))}
-          action      (sut/compile-action action-spec)
+          action      (sut/compile-action (utils/eval-ctx) action-spec)
           actual      (-> (action {:config {} :state {}})
                           (get-in [:state :format-string]))]
       (is (= actual "My name is John")))
@@ -73,7 +80,7 @@
                                 :value    "John"}
                        :fn     (fn [{:keys [template value]}]
                                  (format template value))}
-          action      (sut/compile-action action-spec)
+          action      (sut/compile-action (utils/eval-ctx) action-spec)
           actual      (-> (action {:config {} :state {}})
                           (get-in [:state :format-string]))]
       (is (= actual "My name is John"))))
@@ -81,7 +88,7 @@
   (testing "Unknown action type raises an error"
     (let [action-spec {:type :random
                        :name :random-test}]
-      (is (thrown? Exception (sut/compile-action action-spec)))))
+      (is (thrown? Exception (sut/compile-action (utils/eval-ctx) action-spec)))))
 
   (testing "Action with selectors"
     (let [action-spec {:type      :custom
@@ -92,14 +99,14 @@
                        :params    '[param1 {:p2 param2} [1 2 state1]]
                        :fn        (fn [p1 {:keys [p2]} [_ _ s1]]
                                     (format "param1: %s, param2: %s, state1: %s" p1 p2 s1))}
-          action      (sut/compile-action action-spec)
+          action      (sut/compile-action (utils/eval-ctx) action-spec)
           actual      (-> (action {:config {:param1 "value1" :param2 "value2"}
                                    :state  {:some-action {:state1 "state-value"}}})
                           (get-in [:state :params-test]))]
       (is (= actual "param1: value1, param2: value2, state1: state-value"))))
 
   (testing "Predefined actions"
-    (let [counter-action (sut/compile-action {:type :counter :name :counter-test})]
+    (let [counter-action (sut/compile-action (utils/eval-ctx) {:type :counter :name :counter-test})]
       (is (fn? counter-action)))))
 
 
@@ -113,7 +120,7 @@
                        :params    '[a b]
                        :fn        (fn [a b]
                                     (/ a b))}
-          action      (sut/compile-action action-spec)
+          action      (sut/compile-action (utils/eval-ctx) action-spec)
           match       (-> (action {:config {:a 20 :b 5}
                                    :state  {}})
                           (get-in [:state :condition-test]))
@@ -145,7 +152,7 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task task-spec)
+          task      (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task {:config {} :state {}})
           actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))
@@ -167,7 +174,7 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task task-spec)
+          task      (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task {:config {} :state {}})
           actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
@@ -180,7 +187,7 @@
                                  :fn   (fn []
                                          {:count (swap! counter inc)})}]
                      :iterator {:data [:state :count-action :count]}}
-          task      (sut/compile-task task-spec)
+          task      (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
@@ -194,7 +201,7 @@
                      ;; name of the action is overridden by the external action
                      :iterator {:data [:state :my-external-action]
                                 :next false}}
-          task      (sut/compile-task task-spec)
+          task      (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task {:config {} :state {}})]
       (is (= 1 (first result))))))
 
@@ -206,7 +213,7 @@
                                 :name :bad-action
                                 :fn   (fn []
                                         (throw (ex-info "Bad action" {})))}]}
-          task      (sut/compile-task task-spec)]
+          task      (sut/compile-task (utils/eval-ctx) task-spec)]
       (is (thrown? Exception (first (task {:config {} :state {}}))))))
 
   (testing "Tasks retried on failure"
@@ -218,7 +225,7 @@
                                  :fn   (fn []
                                          (swap! runs-count inc)
                                          (throw (ex-info "Bad action" {})))}]}
-          task       (sut/compile-task task-spec)]
+          task       (sut/compile-task (utils/eval-ctx) task-spec)]
       (is (thrown? Exception (seq (task {:config {} :state {}}))))
       ;; function will be called 4 times: 1 initial run + 3 retries
       (is (= @runs-count 4))))
@@ -235,7 +242,7 @@
                                                  (throw (ex-info "Bad action" {}))
                                                  @runs-count))}]
                       :iterator      {:data [:state :bad-action]}}
-          task       (sut/compile-task task-spec)]
+          task       (sut/compile-task (utils/eval-ctx) task-spec)]
       (is (= (->> (task {:config {} :state {}})
                   (take 5))
              ;; we will see a number 2 two times
@@ -440,3 +447,88 @@
       (is (= (-> @results :task22) 5))
       (is (= (-> @results :task31) 7))
       (is (= (-> @results :task4) 12)))))
+
+
+(deftest pipeline-tasks-results-in-arrow
+  (testing "task result stored in arrow file"
+    (let [pipe-spec {:name  :test-arrow-pipeline
+                     :tasks [{:name       :users-collection
+                              :keep-state true
+                              :actions    [{:type   :clj/identity
+                                            :name   :users
+                                            :params [[{:id 1 :name "John"}
+                                                      {:id 2 :name "Jane"}
+                                                      {:id 3 :name "Doe"}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (is (sut/arrow-task-result? (:users-collection pipeline)))
+      (is (instance? File (.-file (:users-collection pipeline))))
+      (is (= [{:id 1 :name "John"}
+              {:id 2 :name "Jane"}
+              {:id 3 :name "Doe"}]
+             (-> (.-file (:users-collection pipeline))
+                 (collet.arrow/read-dataset (.-columns (:users-collection pipeline)))
+                 first
+                 (ds/rows)
+                 (as-> $
+                       (map #(update % :name str) $)))))))
+
+  (testing "disable arrow storage for the pipeline"
+    (let [pipe-spec {:name      :test-arrow-pipeline
+                     :use-arrow false
+                     :tasks     [{:name       :users-collection
+                                  :keep-state true
+                                  :actions    [{:type   :clj/identity
+                                                :name   :users
+                                                :params [[{:id 1 :name "John"}
+                                                          {:id 2 :name "Jane"}
+                                                          {:id 3 :name "Doe"}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (is (not (sut/arrow-task-result? (:users-collection pipeline))))
+      (is (= [{:id 1 :name "John"}
+              {:id 2 :name "Jane"}
+              {:id 3 :name "Doe"}]
+             (-> pipeline :users-collection first)))))
+
+  (testing "complex data stored in arrow file and parsed correctly"
+    (let [john-uuid (random-uuid)
+          jane-uuid (random-uuid)
+          pipe-spec {:name  :test-arrow-pipeline
+                     :tasks [{:name       :users-collection
+                              :keep-state true
+                              :actions    [{:type   :clj/identity
+                                            :name   :users
+                                            :params [[{:id         1
+                                                       :name       "John"
+                                                       :male       true
+                                                       :height     38.12
+                                                       :created_at (LocalDate/of 2020 1 1)
+                                                       :lifetime   (Duration/ofDays 9125)
+                                                       :uuid       john-uuid
+                                                       :dob        (LocalDateTime/of 2020 1 1 0 0)}
+                                                      {:id         2
+                                                       :name       "Jane"
+                                                       :male       false
+                                                       :height     45.12
+                                                       :created_at (LocalDate/of 2019 1 1)
+                                                       :lifetime   (Duration/ofDays 7125)
+                                                       :uuid       jane-uuid
+                                                       :dob        (LocalDateTime/of 2019 1 1 0 0)}]]}]}]}
+          pipeline  (sut/compile-pipeline pipe-spec)]
+      @(pipeline {})
+      (let [{:keys [id name male height created_at lifetime uuid dob]}
+            (-> (.-file (:users-collection pipeline))
+                (collet.arrow/read-dataset (.-columns (:users-collection pipeline)))
+                first
+                (ds/rows)
+                first)]
+        (is (= 1 id))
+        (is (= "John" (str name)))
+        (is (true? male))
+        (is (= 38.12 height))
+        (is (= (LocalDate/of 2020 1 1) created_at))
+        (is (= 788400000000000 lifetime))
+        (is (= john-uuid (parse-uuid (str uuid))))
+        (is (= (LocalDateTime/of 2020 1 1 0 0)
+               (LocalDateTime/ofInstant dob ZoneOffset/UTC)))))))

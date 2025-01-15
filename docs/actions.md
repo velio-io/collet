@@ -1,10 +1,10 @@
-## Collet actions
+# Collet actions
 
 - [Types of actions](#types-of-actions)
 - [Built-in actions](#built-in-actions)
 - [Actions to work with external datasource's](#actions-to-work-with-external-datasources)
 
-### Types of actions
+## Types of actions
 
 Actions are functions defined by the `:type` key.
 Collet has three major types of actions: Clojure core functions, named external functions and inline (custom) functions.
@@ -58,6 +58,8 @@ The `:params` key in the pipeline file will take precedence over the `:params` k
 
 Finally, you can define your own functions and use them as actions.
 You can use `:custom` key as a action type in this case.
+When pipeline spec is read from EDN file custom functions will be evaluated and executed in the separate environment (
+via [SCI](https://github.com/babashka/sci)) so they wouldn't have access to the global scope.
 
 ```clojure
 {:name   :greeting
@@ -67,12 +69,14 @@ You can use `:custom` key as a action type in this case.
            (str "Hello, " name))}
 ```
 
-### Built-in actions
+## Built-in actions
 
 Collet has a set of prebuilt actions that you can use to solve common tasks.
 
-- `:counter` action. Increments the counter on every iteration. Accepts `:start`, `:end` and `:step` keys. Useful for
-  inferring parameters for pagination or limiting the number of iterations.
+### Counter
+
+Increments the counter on every iteration. Accepts `:start`, `:end` and `:step` keys. Useful for
+inferring parameters for pagination or limiting the number of iterations.
 
 ```clojure
 {:name  :current-page
@@ -83,12 +87,14 @@ Collet has a set of prebuilt actions that you can use to solve common tasks.
 
 Action above will increment the counter by 10 on every iteration starting from 0.
 
-- `:mapper` action. The most common task in the ETL world is iteration over sequences and transforming (or using its
-  data to fetch another peace of information) each element. The `:mapper` action requires a `:sequence` parameter which
-  should be some kind of sequence (list, vector, set, dataset etc.). You can also provide a `:cat?` boolean key to
-  flatten items if your sequence has nested sequences. `:mapper` action will hold a pointer to currently mapped item and
-  a boolean value representing if there's more items left in the sequence. Those values can be accessed by using
-  `:$mapper/item` and `:$mapper/has-next-item` keywords in the surrounding actions (in the same task).
+### Mapper
+
+The most common task in the ETL world is iteration over sequences and transforming (or using its
+data to fetch another peace of information) each element. The `:mapper` action requires a `:sequence` parameter which
+should be some kind of sequence (list, vector, set, dataset, dataset-seq etc.). You can also provide a `:cat?` boolean
+key to flatten items if your sequence has nested sequences. `:mapper` action will hold a pointer to currently mapped
+item and a boolean value representing if there's more items left in the sequence. Those values can be accessed by
+using `:$mapper/item` and `:$mapper/has-next-item` keywords in the surrounding actions (in the same task).
 
 ```clojure
 {:actions  [{:name   :city
@@ -101,8 +107,10 @@ Action above will increment the counter by 10 on every iteration starting from 0
  :iterator {:next [:true? :$mapper/has-next-item]}}
 ``` 
 
-- `:fold` action can be used to collect a set of discrete values into a single sequence. You must provide an `:item` key
-  with a value you want to collect. A simple example could look like this:
+### Fold
+
+Can be used to collect a set of discrete values into a single sequence. You must provide an `:item` key
+with a value you want to collect. A simple example could look like this:
 
 ```clojure
 {:actions  [{:name   :city
@@ -118,10 +126,11 @@ Action above will increment the counter by 10 on every iteration starting from 0
  :iterator {:next [:true? :$mapper/has-next-item]}}
 ```
 
+In this case `:item` key refers to the value under the `:body` key in the response of the `:city-weather-request`
+action.
 Also, `:fold` action allows you to provide some additional keys: `:into`, `:op`, `:in` and `:with`. Using these
-parameters you can
-modify the way the items are collected. For example, in the example above, you can merge the weather response with
-mapped item under the `:city-name` key before collecting it.
+parameters you can modify the way the items are collected. For example, in the example below, you can merge the weather
+response with mapped item under the `:city-name` key before collecting it.
 With `:into` parameter you can provide an initial value for the collection.
 If item is a sequence of values you can use `:op` parameter with value `:concat` to concatenate them.
 
@@ -141,9 +150,11 @@ If item is a sequence of values you can use `:op` parameter with value `:concat`
  :iterator {:next [:true? :$mapper/has-next-item]}}
 ```
 
-- Both previous actions leads us to the next one - `:enrich`. It basically works as a combination of `:mapper` and
-  `:fold` actions. It allows you to iterate over a sequence, perform some action on each item and then collect the
-  results into a single sequence. Previous example can be rewritten using `:enrich` action:
+### Enrich
+
+Both previous actions leads us to the next one - `:enrich`. It basically works as a combination of `:mapper` and
+`:fold` actions. It allows you to iterate over a sequence, perform some action on each item and then collect the
+results into a single sequence. Previous example can be rewritten using `:enrich` action:
 
 ```clojure
 {:actions  [{:name      :weather-by-city
@@ -160,12 +171,14 @@ If item is a sequence of values you can use `:op` parameter with value `:concat`
 Notice that `:enrich` action has its own `:$enrich/item` and `:$enrich/has-next-item` keys.
 `:target` key should point to some sequence available in the pipeline state to iterate on top of it.
 
-- `:slicer` action is designed to modify (reshape) a collections of data. It uses a tech.ml.dataset library under the
-  hood. You can think of it as a dataframes. You must provide a `:sequence` key which should point to the collection and
-  `:slicer` action will create a dataset from it as a result. Additionally, you can define a set of transformation on
-  the resulting dataset. Available transformations are: `:flatten` `:group` `:join` `:fold` `:filter` `:order` `:select`
-  `:map`. If you need to format some columns while creating a dataset you can provide a `:parse` key with a map of
-  column names and their types (e.g. `{:column-name-1 :instant :column-name-2 int32}`).
+### Slicer
+
+This action designed to modify (reshape) a collections of data. It uses a tech.ml.dataset library under the
+hood. You can think of it as a dataframes. You must provide a `:sequence` key which should point to the collection and
+`:slicer` action will create a dataset from it as a result. Additionally, you can define a set of transformation on
+the resulting dataset. Available transformations are: `:flatten` `:group` `:join` `:fold` `:filter` `:order` `:select`
+`:map`. If you need to format some columns while creating a dataset you can provide a `:parse` key with a map of
+column names and their types (e.g. `{:column-name-1 :instant :column-name-2 int32}`).
 
 ```clojure
 ;; let's say you have a dataset like this:
@@ -229,7 +242,7 @@ Reverse operation is `:fold`.
 ```
 
 You can group values with `:group` transformation. There's two options available: preserve a single dataset but add a
-new column with grouped value
+new column with grouped value.
 
 ```clojure
 {:actions [{:name   :users
@@ -303,13 +316,15 @@ Use `:map` function to iterate on over every row in the dataset
 ```clojure
 {:actions [{:name   :users
             :type   :slicer
-            :params {:sequence [{:id 1 :name "John" :city "Springfield"}
-                                {:id 2 :name "Jane" :city "Lakeside"}
-                                {:id 3 :name "Jack" :city "Springfield"}]
-                     :apply    [[:map {:fn (fn [row] (assoc row :city "New York"))}]]}}]}
+            :params {:sequence [{:id 1 :name "John" :second-name "Doe"}
+                                {:id 2 :name "Jane" :second-name "Lane"}
+                                {:id 3 :name "Jack" :second-name "Black"}]
+                     ;; this will add a new column to every row with a full name
+                     :apply    [[:map {:fn (fn [{:keys [name second-name]}]
+                                             {:full-name (str name " " second-name)})}]]}}]}
 ```
 
-Of course you can combine multiple transformations together.
+Of course, you can combine multiple transformations together.
 
 ```clojure
 {:actions [{:name   :users
@@ -359,7 +374,9 @@ Of course you can combine multiple transformations together.
   :_group_by_key "Elm St."}]
 ```
 
-- with `:switch` action you can create multiple branches which will be invoked if conditions met
+### Switch
+
+With `:switch` action you can create multiple branches which will be invoked if conditions met
 
 ```clojure
 {:name :insert-or-update
@@ -371,24 +388,27 @@ Of course you can combine multiple transformations together.
          :actions   [{:name :update-user}]}]}
 ```
 
-### Actions to work with external datasource's
+## Actions to work with external datasource's
 
 Collet has a separate package with actions to work with external datasource's like third-party APIs, databases, etc.
 You'll have to include that package as a dependency `[io.velio/collet-actions "0.1.0"]`
 Available actions are:
 
-- `:collet.actions.http/request` performs an arbitrary HTTP request.
-  The request map can contain the following keys:
-  `:url` - the URL to request
-  `:method` - the HTTP method to use (default - :get)
-  `:body` - the request body
-  `:keywordize` - keywordize the keys in the response (default - true)
-  `:as` - the response format
-  `:content-type` - the content type of the request
-  `:accept` - the accept header of the request
-  `:unexceptional-status` - a set of unexceptional statuses
-  `:rate` - the rate limit for the request. How many requests per second are allowed.
-  `:basic-auth` - a vector of username and password for basic authentication.
+### HTTP request
+
+`:collet.actions.http/request` performs an arbitrary HTTP request.
+The request map can contain the following keys:
+
+- `:url` - the URL to request
+- `:method` - the HTTP method to use (default - :get)
+- `:body` - the request body
+- `:keywordize` - keywordize the keys in the response (default - true)
+- `:as` - the response format
+- `:content-type` - the content type of the request
+- `:accept` - the accept header of the request
+- `:unexceptional-status` - a set of unexceptional statuses
+- `:rate` - the rate limit for the request. How many requests per second are allowed.
+- `:basic-auth` - a vector of username and password for basic authentication.
 
 ```clojure
 {:type   :collet.actions.http/request
@@ -403,19 +423,22 @@ Available actions are:
  :return [:body :events]}
 ```
 
-- `:collet.actions.http/oauth2` performs an OAuth2 request, usually to get the auth token.
-  The request map can contain the following keys:
-  `:url` - the URL to request
-  `:method` - the HTTP method to use (default - :post)
-  `:client-id` - the client ID
-  `:client-secret` - the client secret
-  `:scope` - the requested scope
-  `:grant-type` - the grant type (e.g. "client_credentials")
-  `:auth-data` - additional data to include in the request
-  `:as` - the response format
-  `:keywordize` - keywordize the keys in the response (default - true)
-  `:headers` - additional headers to include in the request
-  `:basic-auth` - a vector of username and password for basic authentication
+### OAuth2 request
+
+`:collet.actions.http/oauth2` performs an OAuth2 request, usually to get the auth token.
+The request map can contain the following keys:
+
+- `:url` - the URL to request
+- `:method` - the HTTP method to use (default - :post)
+- `:client-id` - the client ID
+- `:client-secret` - the client secret
+- `:scope` - the requested scope
+- `:grant-type` - the grant type (e.g. "client_credentials")
+- `:auth-data` - additional data to include in the request
+- `:as` - the response format
+- `:keywordize` - keywordize the keys in the response (default - true)
+- `:headers` - additional headers to include in the request
+- `:basic-auth` - a vector of username and password for basic authentication
 
 ```clojure
 {:type          :collet.actions.http/oauth2
@@ -426,21 +449,24 @@ Available actions are:
  :return        [:body :token]}
 ```
 
-- `:collet.actions.odata/request` Makes an OData request (HTTP request in OData format)
-  Accepts all HTTP options and the following OData specific options:
-  `:service-url` - the URL of the OData service
-  `:segment` - the OData segment (entity) to request
-  `:filter` - filter expression
-  `:select` - specify which fields to include in the response
-  `:expand` - indicates the related entities and stream values that MUST be represented inline
-  `:order` - specifies the order in which items are returned from the service
-  `:top` - specifies a non-negative integer n that limits the number of items returned from a collection
-  `:skip` - specifies a non-negative integer n that excludes the first n items of the queried collection from the result
-  `:count ` - with a value of true specifies that the total count of items within a collection matching the request be
+### OData request
+
+`:collet.actions.odata/request` Makes an OData request (HTTP request in OData format)
+Accepts all HTTP options and the following OData specific options:
+
+- `:service-url` - the URL of the OData service
+- `:segment` - the OData segment (entity) to request
+- `:filter` - filter expression
+- `:select` - specify which fields to include in the response
+- `:expand` - indicates the related entities and stream values that MUST be represented inline
+- `:order` - specifies the order in which items are returned from the service
+- `:top` - specifies a non-negative integer n that limits the number of items returned from a collection
+- `:skip` - specifies a non-negative integer n that excludes the first n items of the queried collection from the result
+- `:count ` - with a value of true specifies that the total count of items within a collection matching the request be
   returned along with the result
-  `:follow-next-link` - if service supports a server side pagination you can set this parameter to true to automatically
+- `:follow-next-link` - if service supports a server side pagination you can set this parameter to true to automatically
   fetch all pages from the collection
-  `:get-total-count` - return just a count of items instead the actuall collection
+- `:get-total-count` - return just a count of items instead the actuall collection
 
 ```clojure
 {:type   :collet.actions.odata/request
@@ -454,21 +480,24 @@ Available actions are:
  :return [:body "value"]}
 ```
 
-- `:collet.actions.jdbc/query` performs a JDBC query. Database drivers aren't included so you have to make sure that
-  driver for a specific database is available in the classpath.
-  The request map can contain the following keys:
-  `:connection` - the JDBC connection properties map
-  `:query` - the SQL query. Could be either a vector with string query as first element and dynamic parameters as a rest
-  elements or a HoneySQL map format
-  `:options` - HoneySQL format query options
-  `:prefix-table?` - keys in the result set will be namespaced with the table name (default - true)
-  `:preserve-types?` - should a resulting data contain values in the same format as in the database (default - false)
-  `:fetch-size` - the number of rows to fetch from the database in a single batch (default - 4000)
-  `:timeout` - the query timeout in seconds
-  `:concurrency` - a keyword that specifies the concurrency level: `:read-only`, `:updatable`
-  `:result-type` - a keyword that affects how the ResultSet can be traversed: `:forward-only`, `:scroll-insensitive`,
-  `:scroll-sensitive`
-  `:cursors` - a keyword that specifies whether cursors should be closed or held over a commit: `:close`, `:hold`
+### JDBC query
+
+`:collet.actions.jdbc/query` performs a JDBC query. Database drivers aren't included so you have to make sure that
+driver for a specific database is available in the classpath.
+The request map can contain the following keys:
+
+- `:connection` - the JDBC connection properties map
+- `:query` - the SQL query. Could be either a vector with string query as first element and dynamic parameters as a rest
+- elements or a HoneySQL map format
+- `:options` - HoneySQL format query options
+- `:prefix-table?` - keys in the result set will be namespaced with the table name (default - true)
+- `:preserve-types?` - should a resulting data contain values in the same format as in the database (default - false)
+- `:fetch-size` - the number of rows to fetch from the database in a single batch (default - 4000)
+- `:timeout` - the query timeout in seconds
+- `:concurrency` - a keyword that specifies the concurrency level: `:read-only`, `:updatable`
+- `:result-type` - a keyword that affects how the ResultSet can be traversed: `:forward-only`, `:scroll-insensitive`,
+- `:scroll-sensitive`
+- `:cursors` - a keyword that specifies whether cursors should be closed or held over a commit: `:close`, `:hold`
 
 ```clojure
 {:name  :products-bought-by-users
@@ -497,13 +526,17 @@ Available actions are:
                                            :quoted  false}}}]}]}
 ```
 
-- `:collet.actions.s3/sink` Write data to an S3 bucket. The request map can contain the following
-  `:aws-creds` - the AWS credentials (region, key, secret)
-  `:bucket` - the S3 bucket name
-  `:format` - the format of the file (:json or :csv)
-  `:file-name` - the name of the file
-  `:input` - the data to write
-  `:csv-header?` - if true, the CSV file will have a header row
+### S3 file sink
+
+`:collet.actions.s3/sink` Write data to an S3 bucket.
+The request map can contain the following:
+
+- `:aws-creds` - the AWS credentials (region, key, secret)
+- `:bucket` - the S3 bucket name
+- `:format` - the format of the file (:json or :csv)
+- `:file-name` - the name of the file
+- `:input` - the data to write
+- `:csv-header?` - if true, the CSV file will have a header row
 
 ```clojure
 {:name  :s3-sink-test
@@ -521,14 +554,17 @@ Available actions are:
                               :csv-header? true}}]}]}
 ```
 
-- `:collet.actions.file/sink` Writes the input to a local file.
-  The input data should be a collection of maps or a collection of sequential items.
-  Options:
-  `:input` - the data to write
-  `:format` - the format of the file (:json or :csv)
-  `:file-name` - the name of the file
-  `:override?` - if true, the file will be overwritten if it exists
-  `:csv-header?` - if true, the CSV file will have a header row
+### Local file sink
+
+`:collet.actions.file/sink` Writes the input to a local file.
+The input data should be a collection of maps or a collection of sequential items.
+Options:
+
+- `:input` - the data to write
+- `:format` - the format of the file (:json or :csv)
+- `:file-name` - the name of the file
+- `:override?` - if true, the file will be overwritten if it exists
+- `:csv-header?` - if true, the CSV file will have a header row
 
 ```clojure
 {:name   :sink-action
@@ -539,16 +575,18 @@ Available actions are:
           :csv-header? true}}
 ```
 
-- `:collet.actions.queue/enqueue` Writes the input (message) into
-  the [Chronicle queue](https://github.com/OpenHFT/Chronicle-Queue).
-  Input can be a single message or a sequence of messages. Message should be a Clojure map.
-  Options:
-  `:input` - the message to write
-  `:queue-name` - the name of the queue
-  `:queue-path` - path on the file system where the queue is stored
-  `:roll-cycle` - How frequently the queue data file on disk is rolled over. Default is `:fast-daily`. Can be:
-  `:twenty-minutely`, `:six-hourly`, `:four-hourly`, `:fast-daily`, `:ten-minutely`, `:weekly`, `:five-minutely`,
-  `:two-hourly`, `:half-hourly`, `:fast-hourly`
+### Chronicle queue sink
+
+`:collet.actions.queue/enqueue` Writes the input (message) into
+the [Chronicle queue](https://github.com/OpenHFT/Chronicle-Queue).
+Input can be a single message or a sequence of messages. Message should be a Clojure map.
+Options:
+- `:input` - the message to write
+- `:queue-name` - the name of the queue
+- `:queue-path` - path on the file system where the queue is stored
+- `:roll-cycle` - How frequently the queue data file on disk is rolled over. Default is `:fast-daily`. Can be:
+- `:twenty-minutely`, `:six-hourly`, `:four-hourly`, `:fast-daily`, `:ten-minutely`, `:weekly`, `:five-minutely`,
+- `:two-hourly`, `:half-hourly`, `:fast-hourly`
 
 ```clojure
 {:name  :queue-sink-test

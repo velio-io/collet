@@ -163,11 +163,10 @@
     :or   {options         {}
            prefix-table?   true
            preserve-types? false
-           fetch-size      4000
+           fetch-size      10000
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
-  ;; TODO figure out the response size. If it's small enough, don't use temp file pathway
   (let [result-file ^File (File/createTempFile "jdbc-query-data" ".json")
         rs-types    (atom {})]
     (.deleteOnExit result-file)

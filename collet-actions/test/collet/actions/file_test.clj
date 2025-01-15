@@ -8,7 +8,8 @@
    [collet.test-fixtures :as tf]
    [collet.actions.jdbc-test :as jdbc-test]
    [collet.core :as collet]
-   [collet.actions.file :as sut]))
+   [collet.actions.file :as sut]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.file))
@@ -35,6 +36,18 @@
           (sut/write-into-file options)
 
           (is (= new-input
+                 (-> (slurp file-name)
+                     (charred/read-json :key-fn keyword))))))
+
+      (testing "writing a dataset sequence"
+        (let [dataset-seq (seq [(ds/->dataset [{:a 1 :b 2} {:a 3 :b 4}])
+                                (ds/->dataset [{:a 5 :b 6} {:a 7 :b 8}])])
+              options     {:input     dataset-seq
+                           :format    :json
+                           :file-name file-name}]
+          (sut/write-into-file options)
+
+          (is (= [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6} {:a 7 :b 8}]
                  (-> (slurp file-name)
                      (charred/read-json :key-fn keyword))))))
 
@@ -65,6 +78,19 @@
 
             (with-open [rdr (io/reader file-name)]
               (is (= [["a" "b"] ["5" "6"] ["7" "8"]]
+                     (doall (charred/read-csv rdr)))))))
+
+        (testing "writing a dataset sequence"
+          (let [dataset-seq (seq [(ds/->dataset [{:a 1 :b 2} {:a 3 :b 4}])
+                                  (ds/->dataset [{:a 5 :b 6} {:a 7 :b 8}])])
+                options     {:input       dataset-seq
+                             :format      :csv
+                             :file-name   file-name
+                             :csv-header? true}]
+            (sut/write-into-file options)
+
+            (with-open [rdr (io/reader file-name)]
+              (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"] ["7" "8"]]
                      (doall (charred/read-csv rdr)))))))
 
         (io/delete-file (io/file file-name))))))

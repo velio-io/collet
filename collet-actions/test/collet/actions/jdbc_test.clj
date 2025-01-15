@@ -6,6 +6,7 @@
    [collet.test-fixtures :as tf]
    [collet.core :as collet]
    [collet.deps :as collet.deps]
+   [collet.utils :as utils]
    [collet.actions.jdbc :as sut])
   (:import
    [clojure.lang LazySeq]
@@ -91,6 +92,7 @@
 
       (testing "compile and execute action"
         (let [action  (collet/compile-action
+                       (utils/eval-ctx)
                        {:name      :query-action
                         :type      :collet.actions.jdbc/query
                         :selectors {'connection [:config :connection]}
@@ -107,6 +109,7 @@
 
       (testing "pass parameters to query action"
         (let [action  (collet/compile-action
+                       (utils/eval-ctx)
                        {:name      :query-action
                         :type      :collet.actions.jdbc/query
                         :selectors {'connection [:config :connection]
