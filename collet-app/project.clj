@@ -1,4 +1,4 @@
-(defproject io.velio/collet-app "0.1.2-SNAPSHOT"
+(defproject io.velio/collet-app "0.1.2"
   :description "Standalone Collet application"
   :url "https://github.com/velio-io/collet"
   :license
