@@ -1,6 +1,6 @@
 {:name  :devs-productivity-pipeline
  ;; add extra dependencies
- :deps  {:coordinates [[io.velio/collet-actions "0.1.1-SNAPSHOT"]]
+ :deps  {:coordinates [[io.velio/collet-actions "0.1.2"]]
          :imports     [java.time.LocalDate java.time.format.DateTimeFormatter]}
  ;; specify the list of tasks
  :tasks [;; get the list of repositories for the organization
