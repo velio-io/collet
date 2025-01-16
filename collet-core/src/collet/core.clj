@@ -69,20 +69,20 @@
                   [:maybe (mu/get action-spec :params)]]}
   [{:keys [params selectors]} context eval-context]
   (when (some? params)
-    (->> params
-         ;; x could be a function definition, try to evaluate the form
-         (walk/prewalk
-          (fn [x]
-            (if (and (list? x) (= (first x) 'fn))
-              (try (utils/eval-form eval-context x) (catch Exception _ x))
-              x)))
-         ;; replace value with the corresponding value from the context
-         (walk/postwalk
-          (fn [x]
-            (if (and (symbol? x) (contains? selectors x))
-              (let [selector-path (get selectors x)]
-                (collet.select/select selector-path context))
-              x))))))
+    (let [selectors-values (update-vals selectors #(collet.select/select % context))]
+      (->> params
+           ;; x could be a function definition, try to evaluate the form
+           (walk/prewalk
+            (fn [x]
+              (if (and (list? x) (symbol (first x)))
+                (utils/eval-form eval-context x selectors-values)
+                x)))
+           ;; replace value with the corresponding value from the context
+           (walk/postwalk
+            (fn [x]
+              (if (and (symbol? x) (contains? selectors x))
+                (get selectors-values x)
+                x)))))))
 
 
 (defn compile-action
@@ -473,6 +473,13 @@
   (instance? ArrowTaskResult x))
 
 
+(defn arrow->dataset
+  [arrow-task-result]
+  (collet.arrow/read-dataset
+   (.-file ^ArrowTaskResult arrow-task-result)
+   (.-columns ^ArrowTaskResult arrow-task-result)))
+
+
 (defn handle-task-result
   [task-name data-seq {:keys [use-arrow keep-result]}]
   (cond
@@ -548,9 +555,7 @@
                                               (fn [is i]
                                                 (let [input-data (get-in @state [:results i])
                                                       input-data (if (arrow-task-result? input-data)
-                                                                   (collet.arrow/read-dataset
-                                                                    (.-file ^ArrowTaskResult input-data)
-                                                                    (.-columns ^ArrowTaskResult input-data))
+                                                                   (arrow->dataset input-data)
                                                                    input-data)]
                                                   (assoc is i input-data)))
                                               {} inputs)

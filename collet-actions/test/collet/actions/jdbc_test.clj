@@ -373,26 +373,27 @@
 
     (testing "query with join tables"
       (let [pipeline (collet/compile-pipeline
-                      {:name  :products-bought-by-users
-                       :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
-                       :tasks [{:name       :query
-                                :keep-state true
-                                :actions    [{:name      :query-action
-                                              :type      :collet.actions.jdbc/query
-                                              :selectors {'connection [:config :connection]}
-                                              :params    {:connection 'connection
-                                                          :query      {:select   [:u/username
-                                                                                  :p/product_name
-                                                                                  [[:sum :oi/quantity] :total-quantity]
-                                                                                  [[:sum [:* :oi/price :oi/quantity]] :total-amount]]
-                                                                       :from     [[:Users :u]]
-                                                                       :join     [[:Orders :o] [:= :u.user_id :o.user_id]
-                                                                                  [:OrderItems :oi] [:= :o.order_id :oi.order_id]
-                                                                                  [:Products :p] [:= :oi.product_id :p.product_id]]
-                                                                       :group-by [:u.username :p/product_name]
-                                                                       :order-by [:u.username :p.product_name]}
-                                                          :options    {:dialect :mysql
-                                                                       :quoted  false}}}]}]})
+                      {:name      :products-bought-by-users
+                       :deps      {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
+                       :use-arrow false
+                       :tasks     [{:name       :query
+                                    :keep-state true
+                                    :actions    [{:name      :query-action
+                                                  :type      :collet.actions.jdbc/query
+                                                  :selectors {'connection [:config :connection]}
+                                                  :params    {:connection 'connection
+                                                              :query      {:select   [:u/username
+                                                                                      :p/product_name
+                                                                                      [[:sum :oi/quantity] :total-quantity]
+                                                                                      [[:sum [:* :oi/price :oi/quantity]] :total-amount]]
+                                                                           :from     [[:Users :u]]
+                                                                           :join     [[:Orders :o] [:= :u.user_id :o.user_id]
+                                                                                      [:OrderItems :oi] [:= :o.order_id :oi.order_id]
+                                                                                      [:Products :p] [:= :oi.product_id :p.product_id]]
+                                                                           :group-by [:u.username :p/product_name]
+                                                                           :order-by [:u.username :p.product_name]}
+                                                              :options    {:dialect :mysql
+                                                                           :quoted  false}}}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (create-tables conn)
                        (populate-orders-data conn))

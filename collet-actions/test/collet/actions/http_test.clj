@@ -3,7 +3,8 @@
    [clojure.test :refer :all]
    [collet.core :as collet]
    [collet.actions.http :as sut]
-   [collet.test-fixtures :as tf]))
+   [collet.test-fixtures :as tf]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.http))
@@ -92,79 +93,81 @@
         (reset! events area-events)))
 
     (testing "extracting all artists from events"
-      (let [pipeline-spec {:name  :city-events-artists
-                           :tasks [{:name       :event-artists-rating
-                                    :keep-state true
-                                    :setup      [{:type      :slicer
-                                                  :name      :event-artists
-                                                  :selectors {'events [:config :events]}
-                                                  :params    {:sequence 'events
-                                                              :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
-                                    :actions    [{:type      :mapper
-                                                  :name      :event-artist-item
-                                                  :selectors {'event-artists [:state :event-artists]}
-                                                  :params    {:sequence 'event-artists}}
-                                                 {:type      :collet.actions.http/request
-                                                  :name      :artist-details
-                                                  :when      [:not-nil? [:$mapper/item :artist]]
-                                                  :selectors {'artist-id [:$mapper/item :artist :id]}
-                                                  :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
-                                                              :accept       :json
-                                                              :as           :json
-                                                              :rate         1
-                                                              :query-params {:inc "ratings"}}
-                                                  :return    [:body]}]
-                                    :iterator   {:data [{:artist-rate [:state :artist-details :rating :value]
-                                                         :event-id    [:$mapper/item :id]}]
-                                                 :next [:true? [:$mapper/has-next-item]]}}]}
-            pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {:events @events})
-            {:keys [event-artists-rating]} pipeline]
-        (let [events-with-artists-num (->> (mapcat :relations @events)
-                                           (filter (comp identity :artist))
-                                           (count))
-              events-no-artists-num   (->> @events
-                                           (filter (fn [{:keys [relations]}]
-                                                     (not (some (comp identity :artist) relations))))
-                                           (count))]
-          (is (= (+ events-with-artists-num events-no-artists-num)
-                 (count event-artists-rating)))
-          (reset! artists event-artists-rating))))
+      (let [pipeline-spec           {:name  :city-events-artists
+                                     :tasks [{:name       :event-artists-rating
+                                              :keep-state true
+                                              :setup      [{:type      :slicer
+                                                            :name      :event-artists
+                                                            :selectors {'events [:config :events]}
+                                                            :params    {:sequence 'events
+                                                                        :apply    [[:flatten {:by {:artist [:relations [:$/cat [:$/cond [:not-nil? :artist]] :artist]]}}]]}}]
+                                              :actions    [{:type      :mapper
+                                                            :name      :event-artist-item
+                                                            :selectors {'event-artists [:state :event-artists]}
+                                                            :params    {:sequence 'event-artists}}
+                                                           {:type      :collet.actions.http/request
+                                                            :name      :artist-details
+                                                            :when      [:not-nil? [:$mapper/item :artist]]
+                                                            :selectors {'artist-id [:$mapper/item :artist :id]}
+                                                            :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
+                                                                        :accept       :json
+                                                                        :as           :json
+                                                                        :rate         1
+                                                                        :query-params {:inc "ratings"}}
+                                                            :return    [:body]}]
+                                              :iterator   {:data [{:artist-rate [:state :artist-details :rating :value]
+                                                                   :event-id    [:$mapper/item :id]}]
+                                                           :next [:true? [:$mapper/has-next-item]]}}]}
+            pipeline                (collet/compile-pipeline pipeline-spec)
+            _                       @(pipeline {:events @events})
+            {:keys [event-artists-rating]} pipeline
+            event-artists-rating-ds (first (collet/arrow->dataset event-artists-rating))
+            events-with-artists-num (->> (mapcat :relations @events)
+                                         (filter (comp identity :artist))
+                                         (count))
+            events-no-artists-num   (->> @events
+                                         (filter (fn [{:keys [relations]}]
+                                                   (not (some (comp identity :artist) relations))))
+                                         (count))]
+        (is (= (+ events-with-artists-num events-no-artists-num)
+               (ds/row-count event-artists-rating-ds)))
+        (reset! artists (ds/rows event-artists-rating-ds))))
 
     (testing "combining artists ratings with events"
-      (let [pipeline-spec {:name  :city-events-artists
-                           :tasks [{:name       :best-events
-                                    :keep-state true
-                                    :setup      [{:type      :slicer
-                                                  :name      :events-ratings
-                                                  :selectors {'artists [:config :artists]}
-                                                  :params    {:sequence 'artists
-                                                              :apply    [[:fold {:by [:event-id]}]]}}]
-                                    :actions    [{:type      :mapper
-                                                  :name      :event-rating
-                                                  :selectors {'ratings [:state :events-ratings]}
-                                                  :params    {:sequence 'ratings}}
-                                                 {:type      :custom
-                                                  :name      :calculated-rating
-                                                  :selectors {'event-ratings [:$mapper/item]}
-                                                  :params    ['event-ratings]
-                                                  :fn        (fn [{:keys [event-id artist-rate]}]
-                                                               (let [rating (if (seq artist-rate)
-                                                                              (double (/ (apply + artist-rate)
-                                                                                         (count artist-rate)))
-                                                                              0)]
-                                                                 {:event-id event-id
-                                                                  :rating   rating}))}]
-                                    :iterator   {:data [:state :calculated-rating]
-                                                 :next [:true? [:$mapper/has-next-item]]}}]}
-            pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {:artists @artists})
-            {:keys [best-events]} pipeline]
-        (is (every? #(contains? % :rating) best-events)
+      (let [pipeline-spec  {:name  :city-events-artists
+                            :tasks [{:name       :best-events
+                                     :keep-state true
+                                     :setup      [{:type      :slicer
+                                                   :name      :events-ratings
+                                                   :selectors {'artists [:config :artists]}
+                                                   :params    {:sequence 'artists
+                                                               :apply    [[:fold {:by [:event-id]}]]}}]
+                                     :actions    [{:type      :mapper
+                                                   :name      :event-rating
+                                                   :selectors {'ratings [:state :events-ratings]}
+                                                   :params    {:sequence 'ratings}}
+                                                  {:type      :custom
+                                                   :name      :calculated-rating
+                                                   :selectors {'event-ratings [:$mapper/item]}
+                                                   :params    ['event-ratings]
+                                                   :fn        (fn [{:keys [event-id artist-rate]}]
+                                                                (let [rating (if (seq artist-rate)
+                                                                               (double (/ (apply + artist-rate)
+                                                                                          (count artist-rate)))
+                                                                               0)]
+                                                                  {:event-id event-id
+                                                                   :rating   rating}))}]
+                                     :iterator   {:data [:state :calculated-rating]
+                                                  :next [:true? [:$mapper/has-next-item]]}}]}
+            pipeline       (collet/compile-pipeline pipeline-spec)
+            _              @(pipeline {:artists @artists})
+            {:keys [best-events]} pipeline
+            best-events-ds (first (collet/arrow->dataset best-events))]
+        (is (every? #(contains? % :rating) (ds/rows best-events-ds))
             "All events should have a rating")
 
         (is (= (count @events)
-               (count best-events))
+               (ds/row-count best-events-ds))
             "Number of events should be the same as number of rated events")))))
 
 

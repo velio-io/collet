@@ -227,7 +227,8 @@
           (println "Pipeline completed.")
           (catch Exception ex
             (println "Pipeline failed with an exception:")
-            (println (.getMessage ex)))
+            (println (ex-message ex))
+            (println (ex-cause ex)))
           (finally
             (stop-fn)
             (System/exit 0)))))))

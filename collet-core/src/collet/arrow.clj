@@ -299,26 +299,28 @@
       (doall
        (map-indexed
         (fn [^long idx value]
-          (case column-type
-            :boolean (.set ^BitVector vector idx (if value 1 0))
-            (:uint8 :int8) (.setSafe ^IntVector vector idx (int value))
-            (:uint16 :int16) (.setSafe ^IntVector vector idx (int value))
-            (:uint32 :int32) (.setSafe ^IntVector vector idx (int value))
-            (:uint64 :int64) (.set ^BigIntVector vector idx (long value))
-            :float32 (.set ^Float4Vector vector idx (float value))
-            :float64 (.set ^Float8Vector vector idx (double value))
-            (:epoch-days :local-date) (.set ^DateDayVector vector idx (.toEpochDay ^LocalDate value))
-            :local-time (.set ^TimeMicroVector vector idx (local-time->micros value))
-            :local-date-time (.set ^TimeStampMicroVector vector idx (date-time->micros value))
-            :time-nanoseconds (.set ^TimeNanoVector vector idx (.toNanoOfDay ^LocalTime value))
-            :time-microseconds (.set ^TimeMicroVector vector idx (local-time->micros value))
-            :time-milliseconds (.set ^TimeMilliVector vector idx (local-time->millis value))
-            :time-seconds (.set ^TimeSecVector vector idx (.toSecondOfDay ^LocalTime value))
-            :duration (.set ^DurationVector vector idx (duration->micros value))
-            (:string :uuid :text :encoded-text)
-            (.setSafe ^VarCharVector vector idx (Text. (str value)))
-            ;; default case if no match
-            (throw (ex-info "Unsupported column type" {:column-type column-type}))))
+          (if (nil? value)
+            (.setNull vector idx)
+            (case column-type
+              :boolean (.setSafe ^BitVector vector idx (if value 1 0))
+              (:uint8 :int8) (.setSafe ^IntVector vector idx (int value))
+              (:uint16 :int16) (.setSafe ^IntVector vector idx (int value))
+              (:uint32 :int32) (.setSafe ^IntVector vector idx (int value))
+              (:uint64 :int64) (.setSafe ^BigIntVector vector idx (long value))
+              :float32 (.setSafe ^Float4Vector vector idx (float value))
+              :float64 (.setSafe ^Float8Vector vector idx (double value))
+              (:epoch-days :local-date) (.setSafe ^DateDayVector vector idx (.toEpochDay ^LocalDate value))
+              :local-time (.setSafe ^TimeMicroVector vector idx (local-time->micros value))
+              :local-date-time (.setSafe ^TimeStampMicroVector vector idx (date-time->micros value))
+              :time-nanoseconds (.setSafe ^TimeNanoVector vector idx (.toNanoOfDay ^LocalTime value))
+              :time-microseconds (.setSafe ^TimeMicroVector vector idx (local-time->micros value))
+              :time-milliseconds (.setSafe ^TimeMilliVector vector idx (local-time->millis value))
+              :time-seconds (.setSafe ^TimeSecVector vector idx (.toSecondOfDay ^LocalTime value))
+              :duration (.setSafe ^DurationVector vector idx (duration->micros value))
+              (:string :uuid :text :encoded-text)
+              (.setSafe ^VarCharVector vector idx (Text. (str value)))
+              ;; default case if no match
+              (throw (ex-info "Unsupported column type" {:column-type column-type})))))
         column)))))
 
 

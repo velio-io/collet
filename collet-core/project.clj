@@ -1,4 +1,4 @@
-(defproject io.velio/collet-core "0.1.2-SNAPSHOT"
+(defproject io.velio/collet-core "0.1.1-SNAPSHOT"
   :description "Collet core library"
   :url "https://github.com/velio-io/collet"
   :license
@@ -65,6 +65,7 @@
 
   :release-tasks
   [["vcs" "assert-committed"]
+   ["test"]
    ["change" "version" "leiningen.release/bump-version" "release"]
    ["vcs" "commit"]
    ["deploy" "clojars"]

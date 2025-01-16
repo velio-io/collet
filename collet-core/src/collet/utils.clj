@@ -161,17 +161,29 @@
     {:error/message "should be an instance of sci.impl.opts.Ctx"}}))
 
 
+(def default-opts
+  {:namespaces {'clojure.core {'println println}}})
+
+
 (defn eval-ctx
   ([]
    (eval-ctx nil nil))
 
   ([namespaces classes]
-   (let [opts (cond-> {}
-                (seq namespaces) (merge (->namespaces-map namespaces))
-                (seq classes) (assoc :classes (->classes-map classes)))]
+   (let [opts (if (seq namespaces)
+                (merge-with merge default-opts (->namespaces-map namespaces))
+                default-opts)
+         opts (if (seq classes)
+                (assoc opts :classes (->classes-map classes))
+                opts)]
      (sci/init opts))))
 
 
 (defn eval-form
-  [ctx form]
-  (sci/eval-form ctx form))
+  ([ctx form]
+   (sci/eval-form ctx form))
+
+  ([ctx form vars]
+   (let [ctx-fork (sci/fork ctx)
+         new-ctx  (sci/merge-opts ctx-fork {:namespaces {'user vars}})]
+     (sci/eval-form new-ctx form))))

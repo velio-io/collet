@@ -57,6 +57,7 @@
 
   :release-tasks
   [["vcs" "assert-committed"]
+   ["test"]
    ["change" "version" "leiningen.release/bump-version" "release"]
    ["vcs" "commit"]
    ["deploy" "clojars"]
