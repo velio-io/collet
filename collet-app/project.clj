@@ -1,4 +1,4 @@
-(defproject io.velio/collet-app "0.1.1-SNAPSHOT"
+(defproject io.velio/collet-app "0.1.2-SNAPSHOT"
   :description "Standalone Collet application"
   :url "https://github.com/velio-io/collet"
   :license
@@ -19,7 +19,7 @@
   [[org.clojure/clojure "1.12.0"]
    [org.clojure/java.jmx "1.1.0"]
    [org.clojure/tools.cli "1.1.230"]
-   [io.velio/collet-core "0.1.1"]
+   [io.velio/collet-core "0.1.2"]
    [com.brunobonacci/mulog "0.9.0"]
    [com.brunobonacci/mulog-zipkin "0.9.0"]
    [com.brunobonacci/mulog-elasticsearch "0.9.0"]
