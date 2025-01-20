@@ -44,15 +44,15 @@
 
 (defn make-release []
   (ensure-creds)
-  (let [next-version (get-project-version "collet-core")]
-    (release-to-clojars "collet-core")
-    (bump-version "collet-actions/project.clj" "collet-core" next-version)
-    (bump-version "collet-app/project.clj" "collet-core" next-version)
-    (commit-changes)
-    (release-to-clojars "collet-actions")
-    (bump-version "README.md" "collet-core" next-version)
-    (bump-version "docs/actions.md" "collet-actions" next-version)
-    (bump-version "collet-core/test/collet/actions/enrich_test.clj" "collet-actions" next-version)
+  (let [next-version "0.1.4"] ;(get-project-version "collet-core")]
+    ;;(release-to-clojars "collet-core")
+    ;;(bump-version "collet-actions/project.clj" "collet-core" next-version)
+    ;;(bump-version "collet-app/project.clj" "collet-core" next-version)
+    ;;(commit-changes)
+    ;;(release-to-clojars "collet-actions")
+    ;;(bump-version "README.md" "collet-core" next-version)
+    ;;(bump-version "docs/actions.md" "collet-actions" next-version)
+    ;;(bump-version "collet-core/test/collet/actions/enrich_test.clj" "collet-actions" next-version)
     (commit-changes)
     (release-to-clojars "collet-app")
     (ps/shell {:dir "collet-app"} "docker" "buildx" "use" "collet-builder")
