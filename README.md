@@ -90,7 +90,7 @@ Don't worry if you don't understand everything at once, we will explain it step 
  ;; include postgres jdbc driver as a runtime dependency
  :deps  {:coordinates [[org.postgresql/postgresql "42.7.3"]
                        ;; also you can include a library with some prebuilt actions
-                       [io.velio/collet-actions "0.1.2"]]
+                       [io.velio/collet-actions "0.1.4"]]
          ;; you'll need to require namespaces with actions we're going to use
          :requires    [[collet.actions.jdbc-pg]]} ;; postgres specific bindings
  ;; define the pipeline tasks
@@ -447,7 +447,7 @@ For Leiningen:
 For deps.edn:
 
 ```clojure
-io.velio/collet-core {:mvn/version "0.1.0"}
+io.velio/collet-core {:mvn/version "0.1.4"}
 ```
 
 After adding Collet to your project dependencies, you can use it as follows:
