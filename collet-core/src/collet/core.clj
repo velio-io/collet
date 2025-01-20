@@ -499,6 +499,7 @@
                 (when (some? batch)
                   (collet.arrow/write writer batch)
                   (recur (first remaining) (rest remaining))))
+              ;; TODO add batching for flat sequences
               (collet.arrow/write writer data-seq)))
           (ArrowTaskResult. task-name arrow-columns file))
         ;; return as is
@@ -616,6 +617,7 @@
                             (do
                               (ml/log :collet/pipeline-execution-finished)
                               (swap! state assoc :status :done)
+                              ;; TODO clean uo all Arrow temp files
                               :done)))))))]
       (swap! state assoc :worker worker)
       worker))
