@@ -12,7 +12,7 @@
   (:import
    [java.io File Writer]
    [java.util Locale]
-   [java.sql Array Clob ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
+   [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
    [java.time LocalDate LocalDateTime LocalTime]))
 
 
@@ -171,7 +171,7 @@
         rs-types    (atom {})]
     (.deleteOnExit result-file)
     (with-open [writer ^Writer (io/writer result-file :append true)
-                conn   (prep-connection connection)]
+                conn   ^Connection (prep-connection connection)]
       (let [append-row   (fn [row]
                            (append-row-to-file writer row)
                            (when (and preserve-types? (empty? @rs-types))
