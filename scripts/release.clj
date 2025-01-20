@@ -45,10 +45,10 @@
 (defn make-release []
   (ensure-creds)
   (let [next-version (get-project-version "collet-core")]
-    ;;(release-to-clojars "collet-core")
-    ;;(bump-version "collet-actions/project.clj" "collet-core" next-version)
-    ;;(bump-version "collet-app/project.clj" "collet-core" next-version)
-    ;;(commit-changes)
+    (release-to-clojars "collet-core")
+    (bump-version "collet-actions/project.clj" "collet-core" next-version)
+    (bump-version "collet-app/project.clj" "collet-core" next-version)
+    (commit-changes)
     (release-to-clojars "collet-actions")
     (bump-version "README.md" "collet-core" next-version)
     (bump-version "docs/actions.md" "collet-actions" next-version)
