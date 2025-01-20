@@ -441,7 +441,7 @@ Add the following dependency to your project:
 For Leiningen:
 
 ```clojure
-[io.velio/collet-core "0.1.0"]
+[io.velio/collet-core "0.1.4"]
 ```
 
 For deps.edn:
