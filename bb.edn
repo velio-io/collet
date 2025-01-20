@@ -1,9 +1,14 @@
-{:deps
- {babashka/fs {:mvn/version "0.5.22"}}
+{:paths
+ ["scripts"]
+
+ :deps
+ {babashka/fs      {:mvn/version "0.5.22"}
+  babashka/process {:mvn/version "0.5.22"}}
 
  :tasks
  {:requires
-  ([babashka.fs :as fs])
+  ([babashka.fs :as fs]
+   [release :as release])
 
   dev-setup
   {:doc  "Create a checkouts folders and symlinks for sub projects"
@@ -12,7 +17,13 @@
              (fs/create-dir "collet-app/checkouts")
              (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/"))}
 
+
   dev-cleanup
   {:doc  "Cleanup dev resources"
    :task (do (fs/delete-tree "collet-actions/checkouts")
-             (fs/delete-tree "collet-app/checkouts"))}}}
+             (fs/delete-tree "collet-app/checkouts"))}
+
+
+  release
+  {:doc  "Make a new Collet release"
+   :task (release/make-release)}}}
