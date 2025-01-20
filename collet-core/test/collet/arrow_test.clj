@@ -218,8 +218,8 @@
     (with-open [writer (sut/make-writer "tmp/test-all-types.arrow" columns)]
       (sut/write writer data))
     (let [dataset-seq (sut/read-dataset "tmp/test-all-types.arrow" columns)
-          dataset (first dataset-seq)
-          record  (first (ds/rows dataset))]
+          dataset     (first dataset-seq)
+          record      (first (ds/rows dataset))]
       (is (= (ds/row-count dataset) 1))
       (is (= #{:instant :epoch-milliseconds :epoch-microseconds :epoch-nanoseconds :boolean
                :uint8 :int8 :uint16 :int16 :uint32 :int32 :uint64 :int64 :float32 :float64

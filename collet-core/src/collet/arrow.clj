@@ -67,18 +67,24 @@
                      column-name (ds.utils/column-safe-name name)
                      column-type (cond
                                    ;; not supported types
-                                   (or (= datatype :persistent-map) (= datatype :persistent-set))
+                                   (or (= datatype :persistent-map)
+                                       (= datatype :persistent-set)
+                                       (= datatype :object))
                                    (throw (ex-info "Complex objects aren't supported" {:column name}))
                                    ;; list of items
                                    (= datatype :persistent-vector)
-                                   (let [list-type (->> column
+                                   (let [item-type (->> column
                                                         (mapcat #(map dtype/elemwise-datatype %))
                                                         (set))
-                                         list-type (if (or (empty? list-type) (> (count list-type) 1))
+                                         item-type (if (or (empty? item-type) (> (count item-type) 1))
                                                      :string
-                                                     (-> (first list-type)
+                                                     (-> (first item-type)
                                                          (packing/unpack-datatype)))]
-                                     [:list list-type])
+                                     (when (or (= item-type :persistent-map)
+                                               (= item-type :persistent-set)
+                                               (= item-type :object))
+                                       (throw (ex-info "Complex objects aren't supported" {:column name})))
+                                     [:list item-type])
                                    ;; temporal types with timezone
                                    (contains? zoned-types datatype)
                                    [:zoned datatype timezone]
