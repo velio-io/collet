@@ -9,7 +9,6 @@
    [tech.v3.libs.arrow :as arrow]
    [collet.utils :as utils])
   (:import
-   [java.nio.charset StandardCharsets]
    [java.time Duration Instant LocalDate LocalDateTime LocalTime ZoneOffset]
    [org.apache.arrow.memory RootAllocator]
    [org.apache.arrow.vector.complex ListVector]

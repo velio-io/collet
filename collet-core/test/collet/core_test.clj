@@ -152,8 +152,8 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})
           actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))
       (is (nil? (second result))
@@ -174,8 +174,8 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})
           actual    (first result)]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
@@ -187,8 +187,8 @@
                                  :fn   (fn []
                                          {:count (swap! counter inc)})}]
                      :iterator {:data [:state :count-action :count]}}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})]
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
       (is (= (first result) 11))))
@@ -201,8 +201,8 @@
                      ;; name of the action is overridden by the external action
                      :iterator {:data [:state :my-external-action]
                                 :next false}}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})]
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})]
       (is (= 1 (first result))))))
 
 
@@ -213,8 +213,8 @@
                                 :name :bad-action
                                 :fn   (fn []
                                         (throw (ex-info "Bad action" {})))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (first (task {:config {} :state {}}))))))
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
+      (is (thrown? Exception (first (task-fn {:config {} :state {}}))))))
 
   (testing "Tasks retried on failure"
     (let [runs-count (atom 0)
@@ -225,29 +225,10 @@
                                  :fn   (fn []
                                          (swap! runs-count inc)
                                          (throw (ex-info "Bad action" {})))}]}
-          task       (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (seq (task {:config {} :state {}}))))
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
+      (is (thrown? Exception (seq (task-fn {:config {} :state {}}))))
       ;; function will be called 4 times: 1 initial run + 3 retries
-      (is (= @runs-count 4))))
-
-  (testing "Tasks continued to execute after failure"
-    (let [runs-count (atom 0)
-          task-spec  {:name          :throwing-task
-                      :skip-on-error true
-                      :actions       [{:type :custom
-                                       :name :bad-action
-                                       :fn   (fn []
-                                               (swap! runs-count inc)
-                                               (if (= @runs-count 3)
-                                                 (throw (ex-info "Bad action" {}))
-                                                 @runs-count))}]
-                      :iterator      {:data [:state :bad-action]}}
-          task       (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (= (->> (task {:config {} :state {}})
-                  (take 5))
-             ;; we will see a number 2 two times
-             ;; because when exception is thrown the previous iteration values is used on next run
-             (list 1 2 2 4 5))))))
+      (is (= @runs-count 4)))))
 
 
 (deftest pipeline-test
@@ -275,7 +256,8 @@
       @(pipeline {})
 
       (is (= :done (sut/pipe-status pipeline)))
-      (is (= '(3) (-> pipeline :task2)))))
+      (is (= '(3) (-> pipeline :task2)))
+      pipeline))
 
   (testing "Pipeline lifecycle"
     (let [pipeline-spec {:name  :test-pipeline
@@ -447,6 +429,98 @@
       (is (= (-> @results :task22) 5))
       (is (= (-> @results :task31) 7))
       (is (= (-> @results :task4) 12)))))
+
+
+(deftest skipping-tasks-test
+  (testing "If :skip-on-error is set on the task, all dependent tasks are skipped"
+    (let [pipeline-spec {:name  :test-pipeline
+                         :tasks [;; root tasks
+                                 {:name    :task1
+                                  :actions [{:type :custom
+                                             :name :action1
+                                             :fn   (constantly 1)}]}
+                                 {:name          :task2
+                                  :skip-on-error true
+                                  :actions       [{:type :custom
+                                                   :name :action2
+                                                   :fn   (fn []
+                                                           (throw (ex-info "Bad action" {})))}]}
+                                 {:name    :task3
+                                  :actions [{:type :custom
+                                             :name :action3
+                                             :fn   (constantly 3)}]}
+                                 ;; dependent tasks
+                                 {:name       :task11
+                                  :keep-state true
+                                  :inputs     [:task1]
+                                  :actions    [{:type      :custom
+                                                :name      :action11
+                                                :selectors '{t1 [:inputs :task1]}
+                                                :params    '[t1]
+                                                :fn        (fn [v]
+                                                             (let [value (+ 1 (last v))]
+                                                               value))}]}
+                                 {:name    :task21
+                                  :inputs  [:task2]
+                                  :actions [{:type      :custom
+                                             :name      :action21
+                                             :selectors '{t2 [:inputs :task2]}
+                                             :params    '[t2]
+                                             :fn        (fn [v]
+                                                          (let [value (+ 2 (last v))]
+                                                            value))}]}
+                                 {:name    :task22
+                                  :inputs  [:task2 :task3]
+                                  :actions [{:type      :custom
+                                             :name      :action22
+                                             :selectors '{t2 [:inputs :task2]
+                                                          t3 [:inputs :task3]}
+                                             :params    '[t2 t3]
+                                             :fn        (fn [t2 t3]
+                                                          (let [value (+ (last t2) (last t3))]
+                                                            value))}]}
+                                 {:name    :task31
+                                  :inputs  [:task3]
+                                  :actions [{:type      :custom
+                                             :name      :action31
+                                             :selectors '{t3 [:inputs :task3]}
+                                             :params    '[t3]
+                                             :fn        (fn [v]
+                                                          (let [value (+ 4 (last v))]
+                                                            value))}]}
+                                 {:name    :task4
+                                  :inputs  [:task22 :task31]
+                                  :actions [{:type      :custom
+                                             :name      :action4
+                                             :selectors '{t22 [:inputs :task22]
+                                                          t31 [:inputs :task31]}
+                                             :params    '[t22 t31]
+                                             :fn        (fn [t22 t31]
+                                                          (let [value (+ (last t22) (last t31))]
+                                                            value))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      @(pipeline {})
+      (let [{:keys [task1 task2 task3
+                    task11 task21 task22 task31
+                    task4]}
+            pipeline]
+        (is (= (first task1) 1))
+        (is (= (first task3) 3))
+        (is (= (first task11) 2))
+        (is (= (first task31) 7))
+
+        (is (= (first task2) nil))
+        (is (= (-> @(.-tasks pipeline) :task2 :status)
+               :failed))
+        (is (= (first task21) nil))
+        (is (= (-> @(.-tasks pipeline) :task21 :status)
+               :skipped))
+        (is (= (first task22) nil))
+        (is (= (-> @(.-tasks pipeline) :task22 :status)
+               :skipped))
+        (is (= (first task4) nil))
+        (is (= (-> @(.-tasks pipeline) :task4 :status)
+               :skipped))))))
 
 
 (deftest pipeline-tasks-results-in-arrow
