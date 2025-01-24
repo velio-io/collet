@@ -27,6 +27,7 @@
   (:import
    [clojure.lang IFn ILookup]
    [java.io File]
+   [java.util.concurrent ExecutorService Executors]
    [weavejester.dependency MapDependencyGraph]))
 
 
@@ -605,7 +606,7 @@
    running-count              ;; atom (long) how many tasks are currently running
    max-parallelism            ;; max number of tasks that can run in parallel
    use-arrow                  ;; boolean; if true, use Arrow for data serialization
-   thread-factory             ;; (fn [^Runnable r] -> Thread) to spawn virtual threads
+   executor                   ;; executor service to spawn virtual threads
    on-task-start              ;; (fn [task]) called just before a task starts
    on-task-complete           ;; (fn [task]) called on success
    on-task-error              ;; (fn [task]) called on error
@@ -663,9 +664,7 @@
   (stop [this]
     (ml/log :collet/stopping-pipeline-execution)
     (reset! status :stopped)
-    (doseq [{:keys [status ^Thread thread]} (vals @tasks)]
-      (when (and (= :running status) (some? thread))
-        (.interrupt thread))))
+    (.shutdown ^ExecutorService executor))
 
   (pause [this]
     (when (= :running @status)
@@ -687,7 +686,7 @@
     :as       task}]
   (ml/trace :collet/starting-task [:task task-name]
     (let [log-ctx          (ml/local-context)
-          thread-factory   (.-thread-factory pipeline)
+          executor         ^ExecutorService (.-executor pipeline)
           status           (.-status pipeline)
           error            (.-error pipeline)
           tasks            (.-tasks pipeline)
@@ -696,99 +695,94 @@
           tasks-graph      (.-tasks-graph pipeline)
           on-task-start    (.-on-task-start pipeline)
           on-task-complete (.-on-task-complete pipeline)
-          on-task-error    (.-on-task-error pipeline)
-          task-thread      ^Thread
-                           (thread-factory
-                            (fn []
-                              (ml/with-context log-ctx
-                                (let [{:keys [task-fn inputs keep-state state-format]} task
-                                      inputs-map (reduce
-                                                  (fn [is i]
-                                                    (let [input-data (get-in @tasks [i :result])
-                                                          input-data (if (arrow-task-result? input-data)
-                                                                       (arrow->dataset input-data)
-                                                                       input-data)]
-                                                      (assoc is i input-data)))
-                                                  {} inputs)
-                                      context    (-> (->context config)
-                                                     (assoc :inputs inputs-map))]
-                                  (try
-                                    (let [task-result-seq       (-> (task-fn context)
-                                                                    (seq))
-                                          formatted-task-result (case state-format
-                                                                  :latest (last task-result-seq)
-                                                                  :flatten (flatten task-result-seq)
-                                                                  task-result-seq)
-                                          has-dependents?       (has-dependants? task-name tasks-graph)
-                                          keep-result           (or keep-state has-dependents?)
-                                          task-result           (handle-task-result
-                                                                 task-name
-                                                                 formatted-task-result
-                                                                 {:use-arrow   use-arrow
-                                                                  :keep-result keep-result})]
-                                      (tap> {:task      task-name
-                                             :task-spec task-spec
-                                             :context   context
-                                             :result    task-result})
-                                      (swap! tasks update task-name assoc
-                                             :status :completed
-                                             :result (when keep-result task-result)))
-
-                                    (when (fn? on-task-complete)
-                                      (on-task-complete (get @tasks task-name)))
-
-                                    (catch Throwable t
-                                      (let [root-cause (->> (iterate ex-cause t)
-                                                            (take-while identity)
-                                                            (last))]
-                                        (if (instance? InterruptedException root-cause)
-                                          ;; if the exception is an InterruptedException
-                                          ;; it means the pipeline was stopped externally
-                                          ;; no need to log it and propagate this error
-                                          (swap! tasks update task-name assoc :status :interrupted)
-
-                                          (let [{:keys [task action]} (ex-data t)
-                                                original-error (ex-message root-cause)
-                                                msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
-                                                                       original-error task action)]
-                                            (tap> {:message   msg
-                                                   :task      task
-                                                   :action    action
-                                                   :context   (utils/samplify context)
-                                                   :exception t})
-                                            (swap! tasks update task-name assoc
-                                                   :status :failed
-                                                   :error-cause t)
-                                            (when (fn? on-task-error)
-                                              (on-task-error (get @tasks task-name)))
-
-                                            (if skip-on-error
-                                              (do
-                                                (ml/log :collet/skipping-task-failure
-                                                        :task name
-                                                        :reason (ex-data t)
-                                                        :message (ex-message t))
-                                                (skip-downstream-tasks task-name tasks-graph tasks))
-
-                                              (do
-                                                (ml/log :collet/pipeline-execution-failed
-                                                        :message msg :task task :action action :exception t)
-                                                (reset! status :failed)
-                                                (reset! error {:message msg :task task :action action :exception t})))))))
-
-                                    (finally
-                                      (swap! running-count dec)))))))]
-
-      (swap! tasks update task-name assoc
-             :status :running
-             :thread task-thread)
-
+          on-task-error    (.-on-task-error pipeline)]
+      (swap! tasks update task-name assoc :status :running)
       (swap! running-count inc)
 
       (when (fn? on-task-start)
         (on-task-start (get @tasks task-name)))
-      ;; start task
-      (.start task-thread))))
+      ;; start the task
+      (.submit executor
+               ^Runnable
+               (fn []
+                 (ml/with-context log-ctx
+                   (let [{:keys [task-fn inputs keep-state state-format]} task
+                         inputs-map (reduce
+                                     (fn [is i]
+                                       (let [input-data (get-in @tasks [i :result])
+                                             input-data (if (arrow-task-result? input-data)
+                                                          (arrow->dataset input-data)
+                                                          input-data)]
+                                         (assoc is i input-data)))
+                                     {} inputs)
+                         context    (-> (->context config)
+                                        (assoc :inputs inputs-map))]
+                     (try
+                       (let [task-result-seq       (-> (task-fn context)
+                                                       (seq))
+                             formatted-task-result (case state-format
+                                                     :latest (last task-result-seq)
+                                                     :flatten (flatten task-result-seq)
+                                                     task-result-seq)
+                             has-dependents?       (has-dependants? task-name tasks-graph)
+                             keep-result           (or keep-state has-dependents?)
+                             task-result           (handle-task-result
+                                                    task-name
+                                                    formatted-task-result
+                                                    {:use-arrow   use-arrow
+                                                     :keep-result keep-result})]
+                         (tap> {:task      task-name
+                                :task-spec task-spec
+                                :context   context
+                                :result    task-result})
+                         (swap! tasks update task-name assoc
+                                :status :completed
+                                :result (when keep-result task-result)))
+
+                       (when (fn? on-task-complete)
+                         (on-task-complete (get @tasks task-name)))
+
+                       (catch Throwable t
+                         (let [root-cause (->> (iterate ex-cause t)
+                                               (take-while identity)
+                                               (last))]
+                           (if (instance? InterruptedException root-cause)
+                             ;; if the exception is an InterruptedException
+                             ;; it means the pipeline was stopped externally
+                             ;; no need to log it and propagate this error
+                             (swap! tasks update task-name assoc :status :interrupted)
+
+                             (let [{:keys [task action]} (ex-data t)
+                                   original-error (ex-message root-cause)
+                                   msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
+                                                          original-error task action)]
+                               (tap> {:message   msg
+                                      :task      task
+                                      :action    action
+                                      :context   (utils/samplify context)
+                                      :exception t})
+                               (swap! tasks update task-name assoc
+                                      :status :failed
+                                      :error-cause t)
+                               (when (fn? on-task-error)
+                                 (on-task-error (get @tasks task-name)))
+
+                               (if skip-on-error
+                                 (do
+                                   (ml/log :collet/skipping-task-failure
+                                           :task name
+                                           :reason (ex-data t)
+                                           :message (ex-message t))
+                                   (skip-downstream-tasks task-name tasks-graph tasks))
+
+                                 (do
+                                   (ml/log :collet/pipeline-execution-failed
+                                           :message msg :task task :action action :exception t)
+                                   (reset! status :failed)
+                                   (reset! error {:message msg :task task :action action :exception t})))))))
+
+                       (finally
+                         (swap! running-count dec))))))))))
 
 
 (def pipeline?
@@ -840,14 +834,6 @@
       (collet.deps/add-dependencies {:requires actions-deps}))))
 
 
-(defn virtual-thread-factory
-  "Returns a function that creates a virtual thread for the given runnable."
-  []
-  (let [thread-factory (.factory (Thread/ofVirtual))]
-    (fn create-vthread [^Runnable r]
-      (.newThread thread-factory r))))
-
-
 (defn compile-pipeline
   "Compiles a pipeline spec into a function.
    Resulting function can be executed with a configuration map
@@ -887,7 +873,7 @@
      (atom 0)
      max-parallelism
      use-arrow
-     (virtual-thread-factory)
+     (Executors/newVirtualThreadPerTaskExecutor)
      on-task-start
      on-task-complete
      on-task-error

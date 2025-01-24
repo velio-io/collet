@@ -7,6 +7,7 @@
    [malli.core :as m]
    [tech.v3.dataset :as ds])
   (:import
+   [collet.core Pipeline]
    [java.io File]
    [java.time Duration LocalDate LocalDateTime ZoneOffset]))
 
@@ -521,6 +522,87 @@
         (is (= (first task4) nil))
         (is (= (-> @(.-tasks pipeline) :task4 :status)
                :skipped))))))
+
+
+(deftest max-parallel-tasks-test
+  (testing "Number of parallel tasks is limited by :max-parallel-tasks"
+    (let [pipeline-spec {:name            :test-pipeline
+                         :max-parallelism 2
+                         :tasks           [{:name    :task1
+                                            :actions [{:type :custom
+                                                       :name :action1
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task2
+                                            :actions [{:type :custom
+                                                       :name :action2
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task3
+                                            :actions [{:type :custom
+                                                       :name :action3
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task4
+                                            :actions [{:type :custom
+                                                       :name :action4
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task5
+                                            :actions [{:type :custom
+                                                       :name :action5
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task6
+                                            :actions [{:type :custom
+                                                       :name :action6
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task7
+                                            :actions [{:type :custom
+                                                       :name :action7
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task8
+                                            :actions [{:type :custom
+                                                       :name :action8
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task9
+                                            :actions [{:type :custom
+                                                       :name :action9
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task10
+                                            :actions [{:type :custom
+                                                       :name :action10
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      (pipeline {})
+
+      (Thread/sleep 1000)
+      (is (= 2 @(.-running-count ^Pipeline pipeline)))
+      (is (zero? (->> @(.-tasks pipeline)
+                      (map (fn [[_ {:keys [status]}]] status))
+                      (filter #(= :completed %))
+                      (count))))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :running %))
+                    (count))))
+
+      (Thread/sleep 2000)
+      (is (= 2 @(.-running-count ^Pipeline pipeline)))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :completed %))
+                    (count))))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :running %))
+                    (count))))
+
+      (Thread/sleep 8000)
+      (is (zero? @(.-running-count ^Pipeline pipeline)))
+      (is (= 10 (->> @(.-tasks pipeline)
+                     (map (fn [[_ {:keys [status]}]] status))
+                     (filter #(= :completed %))
+                     (count))))
+      (is (zero? (->> @(.-tasks pipeline)
+                      (map (fn [[_ {:keys [status]}]] status))
+                      (filter #(= :running %))
+                      (count)))))))
 
 
 (deftest pipeline-tasks-results-in-arrow

@@ -52,7 +52,7 @@
                                               (get data id))}]
                      :iterator {:data [:state :enrich-collection]
                                 :next [:true? [:$enrich/has-next-item]]}}
-          task-fn   (collet/compile-task (utils/eval-ctx) task-spec)
+          {:keys [task-fn]} (collet/compile-task (utils/eval-ctx) task-spec)
           result    (-> (task-fn {:config {:collection [{:id 1} {:id 2} {:id 3}]
                                            :data       {1 {:name "one"}
                                                         2 {:name "two"}
