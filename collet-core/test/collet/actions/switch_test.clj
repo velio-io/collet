@@ -120,8 +120,8 @@
                                                                    :type      :clj/inc
                                                                    :selectors {'value [:state :value]}
                                                                    :params    ['value]}]}]}]
-                                :iterator   {:data [:state :value]
-                                             :next [:< [:state :value] 15]}}]}
+                                :iterator   {:next [:< [:state :value] 15]}
+                                :return     [:state :value]}]}
         pipeline      (collet/compile-pipeline pipeline-spec)]
     @(pipeline {})
     (is (= [2 4 6 8 10 11 12 13 14 15]

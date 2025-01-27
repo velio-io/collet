@@ -84,8 +84,8 @@
                                                                                :query  'events-query}}
                                                     :return    [:body :events]}]
 
-                                    :iterator     {:data [:state :events-request]
-                                                   :next false}}]}
+                                    :iterator     {:next false}
+                                    :return       [:state :events-request]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:city "London"})
             {:keys [area-events]} pipeline]
@@ -115,9 +115,9 @@
                                                                         :rate         1
                                                                         :query-params {:inc "ratings"}}
                                                             :return    [:body]}]
-                                              :iterator   {:data [{:artist-rate [:state :artist-details :rating :value]
-                                                                   :event-id    [:$mapper/item :id]}]
-                                                           :next [:true? [:$mapper/has-next-item]]}}]}
+                                              :iterator   {:next [:true? [:$mapper/has-next-item]]}
+                                              :return     [{:artist-rate [:state :artist-details :rating :value]
+                                                            :event-id    [:$mapper/item :id]}]}]}
             pipeline                (collet/compile-pipeline pipeline-spec)
             _                       @(pipeline {:events @events})
             {:keys [event-artists-rating]} pipeline
@@ -157,8 +157,8 @@
                                                                                0)]
                                                                   {:event-id event-id
                                                                    :rating   rating}))}]
-                                     :iterator   {:data [:state :calculated-rating]
-                                                  :next [:true? [:$mapper/has-next-item]]}}]}
+                                     :iterator   {:next [:true? [:$mapper/has-next-item]]}
+                                     :return     [:state :calculated-rating]}]}
             pipeline       (collet/compile-pipeline pipeline-spec)
             _              @(pipeline {:artists @artists})
             {:keys [best-events]} pipeline
@@ -215,8 +215,7 @@
                                                                              :offset 'offset
                                                                              :query  'events-query}}
                                                   :return    [:body :events]}]
-                                  :iterator     {:data [:state :events-request]
-                                                 :next [:< [:state :req-count] 3]}}
+                                  :iterator     {:next [:< [:state :req-count] 3]}}
 
                                  {:name     :events-with-artists
                                   :inputs   [:area-events]
@@ -238,8 +237,7 @@
                                                           :query-params {:inc "ratings"}}
                                               :return    [:body]
                                               :fold-in   [:artist]}]
-                                  :iterator {:data [:state :artist-details]
-                                             :next [:true? [:$enrich/has-next-item]]}}
+                                  :iterator {:next [:true? [:$enrich/has-next-item]]}}
 
                                  {:name       :rated-events
                                   :keep-state true
@@ -268,8 +266,7 @@
                                                                                         (count ratings)))
                                                                              0)]
                                                                (assoc event :rating rating)))}]
-                                  :iterator   {:data [:state :event-with-rating]
-                                               :next [:true? [:$mapper/has-next-item]]}}]}
+                                  :iterator   {:next [:true? [:$mapper/has-next-item]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:city "London"})
 

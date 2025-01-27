@@ -285,14 +285,6 @@
       (is (every? #(string/starts-with? % "B")
                   (map #(get-in % ["AddressInfo" 0 "City" "Name"]) people))))))
 
-(comment
- (sut/odata-request
-  {:service-url "http://services.odata.org/V4/TripPinService/"
-   :segment     [:Airports]}
-  ;;:order            [:AirlineCode]
-  ;;:filter           [:ne :AirlineCode nil]}
-  nil)
- nil)
 
 (deftest odata-pipeline-test
   (let [total-count (:body (sut/odata-request
@@ -310,8 +302,8 @@
                                                            :segment          [:Airports]
                                                            :order            [:IcaoCode]
                                                            :follow-next-link true}}]
-                                    :iterator   {:data [:state :airports-request :body "value"]
-                                                 :next [:not-nil? [:state :airports-request :body "@odata.nextLink"]]}}]}
+                                    :iterator   {:next [:not-nil? [:state :airports-request :body "@odata.nextLink"]]}
+                                    :return     [:state :airports-request :body "value"]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {})
             {:keys [airports]} pipeline]
@@ -338,8 +330,7 @@
                                                               :top         'bs
                                                               :skip        'skip}
                                                   :return    [:body "value"]}]
-                                    :iterator   {:data [:state :airports-request]
-                                                 :next [:not-empty? [:state :airports-request]]}}]}
+                                    :iterator   {:next [:not-empty? [:state :airports-request]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
             {:keys [airports]} pipeline]
@@ -381,8 +372,8 @@
                                                   :params    ['batch-size 'skip 'total-airports-count]
                                                   :fn        (fn [batch-size skip total-airports-count]
                                                                (< (+ skip batch-size) total-airports-count))}]
-                                    :iterator   {:data [:state :airports-request]
-                                                 :next [:true? [:state :continue?]]}}]}
+                                    :iterator   {:next [:true? [:state :continue?]]}
+                                    :return     [:state :airports-request]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
             _             @(pipeline {:batch-size 4})
             {:keys [airports]} pipeline]

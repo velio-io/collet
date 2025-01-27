@@ -8,6 +8,7 @@
    [malli.dev.pretty :as pretty]
    [malli.error :as me]
    [malli.util :as mu]
+   [tech.v3.dataset :as ds]
    [weavejester.dependency :as dep]
    [diehard.core :as dh]
    [com.brunobonacci.mulog :as ml]
@@ -27,7 +28,7 @@
   (:import
    [clojure.lang IFn ILookup]
    [java.io File]
-   [java.util.concurrent ExecutorService Executors]
+   [java.util.concurrent ExecutorService Executors Future Semaphore]
    [weavejester.dependency MapDependencyGraph]))
 
 
@@ -58,6 +59,7 @@
    [:type :keyword]
    [:fn {:optional true} [:or fn? list?]]
    [:when {:optional true} collet.conds/condition?]
+   [:keep-state {:optional true} :boolean]
    [:params {:optional true}
     [:or map? [:vector :any]]]
    [:selectors {:optional true}
@@ -198,28 +200,48 @@
 
 
 (def task-spec
-  [:map
-   [:name :keyword]
-   [:inputs {:optional true}
-    [:vector :keyword]]
-   [:retry {:optional true}
-    [:map
-     [:max-retries {:optional true} :int]
-     [:backoff-ms {:optional true} [:vector :int]]]]
-   [:skip-on-error {:optional true} :boolean]
-   [:keep-state {:optional true} :boolean]
-   [:state-format {:optional true} [:enum :latest :flatten]]
-   [:setup {:optional true}
-    [:vector action-spec]]
-   [:actions
-    [:vector {:min 1} action-spec]]
-   [:iterator {:optional true}
-    [:map
-     [:data {:description "specifies how to get the data"}
-      [:or collet.select/select-path fn?]]
-     [:next {:optional    true
-             :description "answers on the question should we iterate over task actions again"}
-      [:maybe [:or collet.conds/condition? :boolean]]]]]])
+  [:and
+   [:map
+    [:name :keyword]
+    [:inputs {:optional true}
+     [:vector :keyword]]
+    [:retry {:optional true}
+     [:map
+      [:max-retries {:optional true} :int]
+      [:backoff-ms {:optional true} [:vector :int]]]]
+    [:skip-on-error {:optional true} :boolean]
+    [:keep-state {:optional true} :boolean]
+    [:state-format {:optional true} [:enum :latest :flatten]]
+    [:setup {:optional true}
+     [:vector action-spec]]
+    [:actions
+     [:vector {:min 1} action-spec]]
+    [:return {:optional    true
+              :description "specifies how to get the data when all actions are executed"}
+     [:or collet.select/select-path fn?]]
+    [:iterator {:optional true}
+     [:map
+      [:next {:description "answers on the question should we iterate over task actions again"}
+       [:or collet.conds/condition? :boolean]]]]
+    [:divider {:optional true}
+     [:and [:map
+            [:items {:optional true} collet.select/select-path]
+            [:range {:optional true}
+             [:map
+              [:end :int]
+              [:start {:optional true} :int]
+              [:step {:optional true} :int]]]
+            [:threads {:optional true} :int]]
+      [:fn {:error/message "either :items or :range should be specified but not both"}
+       (fn [{:keys [items range]}]
+         (if (or items range)
+           (not (and items range))
+           true))]]]]
+   [:fn {:error/message "either :iterator or :divider should be specified but not both"}
+    (fn [{:keys [iterator divider]}]
+      (if (or iterator divider)
+        (not (and iterator divider))
+        true))]])
 
 
 (defn execute-actions
@@ -236,25 +258,21 @@
   "Returns a function that extracts data from the context based on the iterator spec."
   {:malli/schema [:=> [:cat task-spec]
                   [:=> [:cat context-spec] :any]]}
-  [{:keys [actions iterator]}]
-  (let [{:keys [data]} iterator
-        last-action (-> actions last :name)]
+  [{:keys [actions return]}]
+  (let [last-action (-> actions last :name)]
     (cond
-      (nil? data) (fn [context] (get-in context [:state last-action]))
-      (vector? data) (fn [context] (collet.select/select data context))
-      :otherwise data)))
+      (nil? return) (fn [context] (get-in context [:state last-action]))
+      (vector? return) (fn [context] (collet.select/select return context))
+      :otherwise return)))
 
 
 (defn next-fn
   "Returns a function that decides whether to continue iterating based on the context."
-  {:malli/schema [:=> [:cat [:maybe (mu/get task-spec :iterator)]]
+  {:malli/schema [:=> [:cat [:maybe (mu/get-in task-spec [0 :iterator])]]
                   [:=> [:cat context-spec] :any]]}
-  [{:keys [data next]}]
+  [{:keys [next]}]
   (cond
-    ;; if next is not provided, but we want to extract some data
-    ;; possibly useful for infinite iterators
-    (or (and (nil? next) (some? data))
-        (true? next))
+    (true? next)
     identity
     ;; if given vector is a condition DSL
     (and (vector? next) (collet.conds/valid-condition? next))
@@ -357,21 +375,24 @@
   {:malli/schema [:=> [:cat utils/eval-context-spec task-spec]
                   task?]}
   [eval-context task]
-  (let [{:keys [name setup actions iterator retry skip-on-error inputs keep-state state-format]
-         :as   task}
-        (-> task
-            (update :actions replace-external-actions)
-            (expand-on-actions))
+  (let [{:keys [name setup actions iterator divider retry
+                skip-on-error inputs keep-state state-format]
+         :as   task} (cond-> task
+                       :always (update :actions replace-external-actions)
+                       :always (expand-on-actions)
+                       (some? (:divider task))
+                       (utils/replace-all {:$divider/item [:state :$divider/item]}))
+
+        {:keys [max-retries backoff-ms]
+         :or   {max-retries 2
+                backoff-ms  [200 3000]}} retry
 
         compile-action-ctx (partial compile-action eval-context)
         setup-actions      (flatten (map compile-action-ctx setup))
         task-actions       (flatten (map compile-action-ctx actions))
         extract-data       (extract-data-fn task)
-        next-iteration     (next-fn iterator)
-        {:keys [max-retries backoff-ms]
-         :or   {max-retries 2
-                backoff-ms  [200 3000]}} retry
-        task-iteration-fn  (fn execute-task [ctx]
+
+        task-exec-fn       (fn execute-task [ctx]
                              (try
                                (if (some? retry)
                                  (dh/with-retry {:retry-on    Exception
@@ -386,7 +407,65 @@
                                  ;; execute without retry
                                  (execute-actions task-actions ctx))
                                (catch Exception e
-                                 (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e)))))]
+                                 (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e)))))
+
+        task-fn            (cond
+                             (some? divider)
+                             (fn [context]
+                               ;; run actions to set up the task
+                               (let [context'    (cond->> context
+                                                   (seq setup-actions) (execute-actions setup-actions))
+                                     items       (if (some? (:range divider))
+                                                   (let [{:keys [start end step]
+                                                          :or   {start 0 step 1}} (:range divider)]
+                                                     (range start end step))
+                                                   (collet.select/select (:items divider) context'))
+                                     executor    (Executors/newVirtualThreadPerTaskExecutor)
+                                     semaphore   (Semaphore. (or (:threads divider) 10))
+                                     submit-task (fn [item]
+                                                   (.submit executor
+                                                            ^Callable
+                                                            (fn []
+                                                              ; Block if limit is reached
+                                                              (.acquire semaphore)
+                                                              (try
+                                                                (-> context'
+                                                                    (assoc-in [:state :$divider/item] item)
+                                                                    (task-exec-fn)
+                                                                    (extract-data))
+                                                                (finally
+                                                                  ; Release permit
+                                                                  (.release semaphore))))))
+                                     items'      (cond
+                                                   (ds/dataset? items) (ds/rows items)
+                                                   (utils/ds-seq? items) (mapcat ds/rows items)
+                                                   :otherwise items)
+                                     futures     (doall (map submit-task items'))]
+                                 (try
+                                   ;; Collect results in original order by dereferencing futures
+                                   (mapv (fn [^Future future]
+                                           (.get future))
+                                         futures)
+                                   (finally
+                                     (.shutdown executor)))))
+
+                             (some? iterator)
+                             (let [next-iteration (next-fn iterator)]
+                               (fn [context]
+                                 ;; run actions to set up the task
+                                 (let [context' (cond->> context
+                                                  (seq setup-actions) (execute-actions setup-actions))]
+                                   (-> (iteration task-exec-fn
+                                                  :initk context'
+                                                  :vf extract-data
+                                                  :kf next-iteration)
+                                       (with-meta {:iteration true})))))
+
+                             :otherwise
+                             (fn [context]
+                               (let [context' (cond->> context
+                                                (seq setup-actions) (execute-actions setup-actions))]
+                                 (extract-data (task-exec-fn context')))))]
     (map->Task
      {:name          name
       :spec          task
@@ -395,14 +474,7 @@
       :skip-on-error skip-on-error
       :status        :waiting
       :inputs        inputs
-      :task-fn       (fn [context]
-                       ;; run actions to set up the task
-                       (let [context' (cond->> context
-                                        (seq setup-actions) (execute-actions setup-actions))]
-                         (iteration task-iteration-fn
-                                    :initk context'
-                                    :vf extract-data
-                                    :kf next-iteration)))})))
+      :task-fn       task-fn})))
 
 
 (defn find-task
@@ -463,7 +535,7 @@
 
 (defn add-task-and-deps
   "Adds dependencies to the graph for the given task."
-  {:malli/schema [:=> [:cat graph? :keyword [:maybe (mu/get task-spec :inputs)]]
+  {:malli/schema [:=> [:cat graph? :keyword [:maybe (mu/get-in task-spec [0 :inputs])]]
                   graph?]}
   [graph task-key inputs]
   (if (seq inputs)
@@ -504,36 +576,41 @@
 
 
 (defn handle-task-result
-  [task-name data-seq {:keys [use-arrow keep-result]}]
-  (cond
-    (and keep-result use-arrow)
-    (let [seq-items?    (sequential? (first data-seq))
-          arrow-columns (if seq-items?
-                          (collet.arrow/get-columns (first data-seq))
-                          (collet.arrow/get-columns data-seq))]
-      (if (some? arrow-columns)
-        ;; write to arrow file
-        (let [file ^File (File/createTempFile (name task-name) ".arrow")]
-          (.deleteOnExit file)
-          (with-open [writer (collet.arrow/make-writer file arrow-columns)]
-            (if seq-items?
-              (loop [batch     (first data-seq)
-                     remaining (rest data-seq)]
-                (when (some? batch)
-                  (collet.arrow/write writer batch)
-                  (recur (first remaining) (rest remaining))))
-              ;; TODO add batching for flat sequences
-              (collet.arrow/write writer data-seq)))
-          (ArrowTaskResult. task-name arrow-columns file))
-        ;; return as is
-        (doall data-seq)))
+  [task-name data {:keys [use-arrow keep-result]}]
+  (if (not (sequential? data))
+    (when keep-result
+      data)
+    ;; process as a sequence
+    (cond
+      (and keep-result use-arrow)
+      (let [seq-items?    (sequential? (first data))
+            arrow-columns (if seq-items?
+                            (collet.arrow/get-columns (first data))
+                            (collet.arrow/get-columns data))]
+        (if (and (some? arrow-columns)
+                 (not-empty arrow-columns))
+          ;; write to arrow file
+          (let [file ^File (File/createTempFile (name task-name) ".arrow")]
+            (.deleteOnExit file)
+            (with-open [writer (collet.arrow/make-writer file arrow-columns)]
+              (if seq-items?
+                (loop [batch     (first data)
+                       remaining (rest data)]
+                  (when (some? batch)
+                    (collet.arrow/write writer batch)
+                    (recur (first remaining) (rest remaining))))
+                ;; TODO add batching for flat sequences
+                (collet.arrow/write writer data)))
+            (ArrowTaskResult. task-name arrow-columns file))
+          ;; return as is
+          (doall data)))
 
-    keep-result
-    (doall data-seq)
+      keep-result
+      (doall data)
 
-    :otherwise
-    (do (doall data-seq)
-        nil)))
+      :otherwise
+      (do (doall data)
+          nil))))
 
 
 (defn dependencies-met?
@@ -718,12 +795,21 @@
                          context    (-> (->context config)
                                         (assoc :inputs inputs-map))]
                      (try
-                       (let [task-result-seq       (-> (task-fn context)
-                                                       (seq))
-                             formatted-task-result (case state-format
-                                                     :latest (last task-result-seq)
-                                                     :flatten (flatten task-result-seq)
-                                                     task-result-seq)
+                       (let [task-result-raw       (task-fn context)
+                             task-result-raw       (if (-> task-result-raw meta :iteration)
+                                                     (seq task-result-raw)
+                                                     task-result-raw)
+                             result-sequential?    (sequential? task-result-raw)
+                             formatted-task-result (cond
+                                                     (and result-sequential?
+                                                          (= state-format :latest))
+                                                     (last task-result-raw)
+
+                                                     (and result-sequential?
+                                                          (= state-format :flatten))
+                                                     (flatten task-result-raw)
+
+                                                     :otherwise task-result-raw)
                              has-dependents?       (has-dependants? task-name tasks-graph)
                              keep-result           (or keep-state has-dependents?)
                              task-result           (handle-task-result

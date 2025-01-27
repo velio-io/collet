@@ -35,9 +35,9 @@
                       :selectors {next-link [:state :repositories-request :link]}
                       :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
                       :return    [[:$/op :first]]}]
-          :iterator {:data [:state :repositories-request :repos [:$/cat #include "/data/repo-keys.edn"]]
-                     ;; proceed while there is a next page link
-                     :next [:not-nil? [:state :next-page-link]]}}
+          ;; proceed while there is a next page link
+          :iterator {:next [:not-nil? [:state :next-page-link]]}
+          :return   [:state :repositories-request :repos [:$/cat #include "/data/repo-keys.edn"]]}
 
          ;; get the list of pull requests for each repository
          {:name     :pull-requests
@@ -80,10 +80,10 @@
                               :actions   [{:name   :repository-prs
                                            :type   :clj/identity
                                            :params {:prs [] :link nil}}]}]}]
-          :iterator {:data [:state :repository-prs :prs [:$/cat #include "/data/pr-keys.edn"]]
-                     ;; proceed while there is a next page link or there are more repositories
-                     :next [:or [:not-nil? [:state :repository-prs :link]]
-                            [:true? [:$mapper/has-next-item]]]}}
+          ;; proceed while there is a next page link or there are more repositories
+          :iterator {:next [:or [:not-nil? [:state :repository-prs :link]]
+                            [:true? [:$mapper/has-next-item]]]}
+          :return   [:state :repository-prs :prs [:$/cat #include "/data/pr-keys.edn"]]}
 
          ;; generate productivity reports
          {:name    :productivity-reports

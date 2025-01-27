@@ -1,6 +1,7 @@
 (ns collet.core-test
   (:require
    [clojure.test :refer :all]
+   [collet.core :as collet]
    [collet.core :as sut]
    [collet.test-fixtures :as tf]
    [collet.utils :as utils]
@@ -154,11 +155,8 @@
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task-fn {:config {} :state {}})
-          actual    (first result)]
-      (is (= actual "Params extracted a: 1, b: 2, e: 5"))
-      (is (nil? (second result))
-          "shouldn't continue executing tasks without iterator set")))
+          actual    (task-fn {:config {} :state {}})]
+      (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with setup actions"
     (let [task-spec {:name    :test-task
@@ -176,8 +174,7 @@
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task-fn {:config {} :state {}})
-          actual    (first result)]
+          actual    (task-fn {:config {} :state {}})]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with iterator"
@@ -187,7 +184,8 @@
                                  :name :count-action
                                  :fn   (fn []
                                          {:count (swap! counter inc)})}]
-                     :iterator {:data [:state :count-action :count]}}
+                     :iterator {:next true}
+                     :return   [:state :count-action :count]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task-fn {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
@@ -195,16 +193,15 @@
       (is (= (first result) 11))))
 
   (testing "Task with external actions"
-    (let [task-spec {:name     :test-task
-                     :actions  [{:name   :count-action
-                                 :type   :test.collet/counter-action.edn
-                                 :params [0]}]
+    (let [task-spec {:name    :test-task
+                     :actions [{:name   :count-action
+                                :type   :test.collet/counter-action.edn
+                                :params [0]}]
                      ;; name of the action is overridden by the external action
-                     :iterator {:data [:state :my-external-action]
-                                :next false}}
+                     :return  [:state :my-external-action]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
           result    (task-fn {:config {} :state {}})]
-      (is (= 1 (first result))))))
+      (is (= 1 result)))))
 
 
 (deftest handle-task-errors-test
@@ -215,7 +212,7 @@
                                 :fn   (fn []
                                         (throw (ex-info "Bad action" {})))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (first (task-fn {:config {} :state {}}))))))
+      (is (thrown? Exception (task-fn {:config {} :state {}})))))
 
   (testing "Tasks retried on failure"
     (let [runs-count (atom 0)
@@ -227,7 +224,7 @@
                                          (swap! runs-count inc)
                                          (throw (ex-info "Bad action" {})))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (seq (task-fn {:config {} :state {}}))))
+      (is (thrown? Exception (task-fn {:config {} :state {}})))
       ;; function will be called 4 times: 1 initial run + 3 retries
       (is (= @runs-count 4)))))
 
@@ -247,9 +244,7 @@
                                                 :selectors '{val1 [:inputs :task1]}
                                                 :params    '[val1]
                                                 :fn        (fn [v1]
-                                                             ;; task result is a sequable/reducible
-                                                             (-> (last v1)
-                                                                 (+ 2)))}]}]}
+                                                             (+ v1 2))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
       (is (m/validate sut/pipeline? pipeline))
       (is (= :pending (sut/pipe-status pipeline)))
@@ -257,7 +252,7 @@
       @(pipeline {})
 
       (is (= :done (sut/pipe-status pipeline)))
-      (is (= '(3) (-> pipeline :task2)))
+      (is (= 3 (:task2 pipeline)))
       pipeline))
 
   (testing "Pipeline lifecycle"
@@ -274,7 +269,7 @@
                                   :keep-state true
                                   :actions    [{:type      :custom
                                                 :name      :action2
-                                                :selectors '{val1 [:inputs :task1 [:$/op :first]]}
+                                                :selectors '{val1 [:inputs :task1]}
                                                 :params    '[val1]
                                                 :fn        (fn [v1]
                                                              (Thread/sleep 2000)
@@ -283,15 +278,15 @@
       (let [pipeline-1 (sut/compile-pipeline pipeline-spec)]
         @(sut/start pipeline-1 {})
         (is (= :done (sut/pipe-status pipeline-1)))
-        (is (= '(3) (-> pipeline-1 :task2))))
+        (is (= 3 (:task2 pipeline-1))))
 
       (let [pipeline-2 (sut/compile-pipeline pipeline-spec)]
         (sut/start pipeline-2 {})
         (Thread/sleep 2100)
         (sut/stop pipeline-2)
         (is (= :stopped (sut/pipe-status pipeline-2)))
-        (is (= '(1) (-> pipeline-2 :task1)))
-        (is (= nil (-> pipeline-2 :task2)))
+        (is (= 1 (:task1 pipeline-2)))
+        (is (= nil (:task2 pipeline-2)))
 
         (testing "Stopped pipeline can't be started again"
           (sut/start pipeline-2 {})
@@ -305,11 +300,11 @@
         (Thread/sleep 2100)
         (sut/pause pipeline-3)
         (is (= :paused (sut/pipe-status pipeline-3)))
-        (is (= '(1) (-> pipeline-3 :task1)))
-        (is (= nil (-> pipeline-3 :task2)))
+        (is (= 1 (:task1 pipeline-3)))
+        (is (= nil (:task2 pipeline-3)))
         (sut/resume pipeline-3 {})
         (Thread/sleep 2100)
-        (is (= '(3) (-> pipeline-3 :task2))))))
+        (is (= 3 (:task2 pipeline-3))))))
 
   (testing "Pipeline with throwing task"
     (let [pipeline-spec {:name  :test-pipeline
@@ -326,6 +321,15 @@
   (testing "Invalid pipeline spec error"
     (let [pipeline-spec {:name   "invalid type"
                          :taskas :missing-tasks-key}]
+      (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))
+
+    (let [pipeline-spec {:name  :sample-pipeline
+                         :tasks [{:name     :sample-task
+                                  :actions  [{:name :sample-action
+                                              :type :clj/inc}]
+                                  ;; you can't specify both :iterator and :divider
+                                  :iterator {:next true}
+                                  :divider  {:range {:end 10}}}]}]
       (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))))
 
 
@@ -339,12 +343,12 @@
                                           :params    '[count]
                                           :fn        (fn [c]
                                                        (inc (or c 0)))}]
-                            :iterator   {:data [:state :count-action]
-                                         :next [:< [:state :count-action] 10]}}]}
+                            :iterator   {:next [:< [:state :count-action] 10]}}]}
         pipeline  (sut/compile-pipeline pipe-spec)]
     @(pipeline {})
     (is (= (list 1 2 3 4 5)
-           (take 5 (:counting-task pipeline))))))
+           (take 5 (:counting-task pipeline))))
+    (is (= 10 (count (:counting-task pipeline))))))
 
 
 (deftest complex-pipeline-test
@@ -377,7 +381,7 @@
                                              :selectors '{t1 [:inputs :task1]}
                                              :params    '[t1]
                                              :fn        (fn [v]
-                                                          (let [value (+ 1 (last v))]
+                                                          (let [value (+ 1 v)]
                                                             (swap! results assoc :task11 value)
                                                             value))}]}
                                  {:name    :task21
@@ -387,7 +391,7 @@
                                              :selectors '{t2 [:inputs :task2]}
                                              :params    '[t2]
                                              :fn        (fn [v]
-                                                          (let [value (+ 2 (last v))]
+                                                          (let [value (+ 2 v)]
                                                             (swap! results assoc :task21 value)
                                                             value))}]}
                                  {:name    :task22
@@ -398,7 +402,7 @@
                                                           t3 [:inputs :task3]}
                                              :params    '[t2 t3]
                                              :fn        (fn [t2 t3]
-                                                          (let [value (+ (last t2) (last t3))]
+                                                          (let [value (+ t2 t3)]
                                                             (swap! results assoc :task22 value)
                                                             value))}]}
                                  {:name    :task31
@@ -408,7 +412,7 @@
                                              :selectors '{t3 [:inputs :task3]}
                                              :params    '[t3]
                                              :fn        (fn [v]
-                                                          (let [value (+ 4 (last v))]
+                                                          (let [value (+ 4 v)]
                                                             (swap! results assoc :task31 value)
                                                             value))}]}
                                  {:name    :task4
@@ -419,7 +423,7 @@
                                                           t31 [:inputs :task31]}
                                              :params    '[t22 t31]
                                              :fn        (fn [t22 t31]
-                                                          (let [value (+ (last t22) (last t31))]
+                                                          (let [value (+ t22 t31)]
                                                             (swap! results assoc :task4 value)
                                                             value))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
@@ -459,7 +463,7 @@
                                                 :selectors '{t1 [:inputs :task1]}
                                                 :params    '[t1]
                                                 :fn        (fn [v]
-                                                             (let [value (+ 1 (last v))]
+                                                             (let [value (+ 1 v)]
                                                                value))}]}
                                  {:name    :task21
                                   :inputs  [:task2]
@@ -468,7 +472,7 @@
                                              :selectors '{t2 [:inputs :task2]}
                                              :params    '[t2]
                                              :fn        (fn [v]
-                                                          (let [value (+ 2 (last v))]
+                                                          (let [value (+ 2 v)]
                                                             value))}]}
                                  {:name    :task22
                                   :inputs  [:task2 :task3]
@@ -478,7 +482,7 @@
                                                           t3 [:inputs :task3]}
                                              :params    '[t2 t3]
                                              :fn        (fn [t2 t3]
-                                                          (let [value (+ (last t2) (last t3))]
+                                                          (let [value (+ t2 t3)]
                                                             value))}]}
                                  {:name    :task31
                                   :inputs  [:task3]
@@ -487,7 +491,7 @@
                                              :selectors '{t3 [:inputs :task3]}
                                              :params    '[t3]
                                              :fn        (fn [v]
-                                                          (let [value (+ 4 (last v))]
+                                                          (let [value (+ 4 v)]
                                                             value))}]}
                                  {:name    :task4
                                   :inputs  [:task22 :task31]
@@ -497,7 +501,7 @@
                                                           t31 [:inputs :task31]}
                                              :params    '[t22 t31]
                                              :fn        (fn [t22 t31]
-                                                          (let [value (+ (last t22) (last t31))]
+                                                          (let [value (+ t22 t31)]
                                                             value))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
       @(pipeline {})
@@ -505,21 +509,21 @@
                     task11 task21 task22 task31
                     task4]}
             pipeline]
-        (is (= (first task1) 1))
-        (is (= (first task3) 3))
-        (is (= (first task11) 2))
-        (is (= (first task31) 7))
+        (is (= task1 1))
+        (is (= task3 3))
+        (is (= task11 2))
+        (is (= task31 7))
 
-        (is (= (first task2) nil))
+        (is (= task2 nil))
         (is (= (-> @(.-tasks pipeline) :task2 :status)
                :failed))
-        (is (= (first task21) nil))
+        (is (= task21 nil))
         (is (= (-> @(.-tasks pipeline) :task21 :status)
                :skipped))
-        (is (= (first task22) nil))
+        (is (= task22 nil))
         (is (= (-> @(.-tasks pipeline) :task22 :status)
                :skipped))
-        (is (= (first task4) nil))
+        (is (= task4 nil))
         (is (= (-> @(.-tasks pipeline) :task4 :status)
                :skipped))))))
 
@@ -605,6 +609,62 @@
                       (count)))))))
 
 
+(deftest task-divider-test
+  (let [completed-tasks (atom [])
+        pipe-spec       {:name  :divider-test
+                         :tasks [{:name       :sample-task
+                                  :keep-state true
+                                  :actions    [{:type      :custom
+                                                :name      :sample-action
+                                                :selectors {'item [:$divider/item]}
+                                                :params    ['item]
+                                                :fn        (fn [j]
+                                                             (Thread/sleep 1000)
+                                                             (swap! completed-tasks conj j)
+                                                             j)}]
+                                  :divider    {:range   {:end 10}
+                                               :threads 5}}]}
+        pipeline        (sut/compile-pipeline pipe-spec)]
+    (pipeline {})
+    (Thread/sleep 500)
+    (is (= :running (collet/pipe-status pipeline)))
+    (is (zero? (count @completed-tasks)))
+    (Thread/sleep 1000)
+    (is (= :running (collet/pipe-status pipeline)))
+    (is (= 5 (count @completed-tasks)))
+    (Thread/sleep 1000)
+    (is (= :done (collet/pipe-status pipeline)))
+    (is (= 10 (count @completed-tasks)))
+    (is (= (range 10) (:sample-task pipeline))))
+
+  (let [pipe-spec {:name  :divider-test
+                   :tasks [{:name    :prep-task
+                            :actions [{:type   :clj/identity
+                                       :name   :sample-items
+                                       :params [[{:a 10 :b "abc"}
+                                                 {:a 20 :b "def"}
+                                                 {:a 30 :b "ghi"}]]}]}
+                           {:name       :sample-task
+                            :keep-state true
+                            :inputs     [:prep-task]
+                            :actions    [{:type      :custom
+                                          :name      :sample-action
+                                          :selectors {'item [:$divider/item]}
+                                          :params    ['item]
+                                          :fn        (fn [{:keys [a]}]
+                                                       (Thread/sleep 1000)
+                                                       (inc a))}]
+                            :divider    {:items   [:inputs :prep-task]
+                                         :threads 5}}]}
+        pipeline  (sut/compile-pipeline pipe-spec)]
+    (pipeline {})
+    (Thread/sleep 2000)
+    (is (= :done (collet/pipe-status pipeline)))
+    (is (= 3 (count (:sample-task pipeline))))
+    (is (= [11 21 31] (:sample-task pipeline)))
+    (collet/pipe-error pipeline)))
+
+
 (deftest pipeline-tasks-results-in-arrow
   (testing "task result stored in arrow file"
     (let [pipe-spec {:name  :test-arrow-pipeline
@@ -645,7 +705,7 @@
       (is (= [{:id 1 :name "John"}
               {:id 2 :name "Jane"}
               {:id 3 :name "Doe"}]
-             (-> pipeline :users-collection first)))))
+             (:users-collection pipeline)))))
 
   (testing "complex data stored in arrow file and parsed correctly"
     (let [john-uuid (random-uuid)

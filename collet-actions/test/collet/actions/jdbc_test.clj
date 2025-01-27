@@ -176,7 +176,7 @@
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-pg-data-types conn))
             _        @(pipeline {:connection connection-map})
-            result   (-> pipeline :query first)]
+            result   (:query pipeline)]
         (is (= '(#:data_types{:bool_col      true
                               :date_col      "2024-04-22"
                               :float_col     3.14
@@ -220,7 +220,7 @@
                                                                         :where  [:= :mood_col (types/as-other mood)]}}}]}]})
             _        @(pipeline {:connection connection-map
                                  :mood       "sad"})
-            result   (-> pipeline :query first)]
+            result   (:query pipeline)]
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
 
@@ -240,7 +240,7 @@
                                                           :query           {:select [:*]
                                                                             :from   :data-types}}}]}]})
             _        @(pipeline {:connection connection-map})
-            result   (-> pipeline :query first)]
+            result   (:query pipeline)]
         (are [key expected] (= expected (-> result first key))
           :bool_col true
           :mood_col "happy"
@@ -310,7 +310,7 @@
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (populate-mysql-table conn))
             _        @(pipeline {:connection connection-map})
-            result   (-> pipeline :query first)]
+            result   (:query pipeline)]
         (is (= 5 (count result)))
         (is (= '("Alice" "Bob" "Charlie" "David" "Eve") result))))
 
@@ -398,7 +398,7 @@
                        (create-tables conn)
                        (populate-orders-data conn))
             _        @(pipeline {:connection connection-map})
-            result   (-> pipeline :query first)]
+            result   (:query pipeline)]
         (is (instance? LazySeq result))
         (is (= 4 (count result)))
         (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1 :total_amount 30.0}

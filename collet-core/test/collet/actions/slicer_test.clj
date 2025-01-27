@@ -462,7 +462,7 @@
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 
-      (let [events-with-artists (-> pipeline :events-with-artists last)]
+      (let [events-with-artists (:events-with-artists pipeline)]
         (is (= (map :id test-events-data)
                (distinct (ds/column events-with-artists :id)))
             "all events are present")
