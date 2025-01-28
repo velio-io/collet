@@ -327,9 +327,9 @@
                          :tasks [{:name     :sample-task
                                   :actions  [{:name :sample-action
                                               :type :clj/inc}]
-                                  ;; you can't specify both :iterator and :divider
+                                  ;; you can't specify both :iterator and :parallel
                                   :iterator {:next true}
-                                  :divider  {:range {:end 10}}}]}]
+                                  :parallel {:range {:end 10}}}]}]
       (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))))
 
 
@@ -609,20 +609,20 @@
                       (count)))))))
 
 
-(deftest task-divider-test
+(deftest task-parallel-test
   (let [completed-tasks (atom [])
-        pipe-spec       {:name  :divider-test
+        pipe-spec       {:name  :parallel-test
                          :tasks [{:name       :sample-task
                                   :keep-state true
                                   :actions    [{:type      :custom
                                                 :name      :sample-action
-                                                :selectors {'item [:$divider/item]}
+                                                :selectors {'item [:$parallel/item]}
                                                 :params    ['item]
                                                 :fn        (fn [j]
                                                              (Thread/sleep 1000)
                                                              (swap! completed-tasks conj j)
                                                              j)}]
-                                  :divider    {:range   {:end 10}
+                                  :parallel   {:range   {:end 10}
                                                :threads 5}}]}
         pipeline        (sut/compile-pipeline pipe-spec)]
     (pipeline {})
@@ -637,7 +637,7 @@
     (is (= 10 (count @completed-tasks)))
     (is (= (range 10) (:sample-task pipeline))))
 
-  (let [pipe-spec {:name  :divider-test
+  (let [pipe-spec {:name  :parallel-test
                    :tasks [{:name    :prep-task
                             :actions [{:type   :clj/identity
                                        :name   :sample-items
@@ -649,12 +649,12 @@
                             :inputs     [:prep-task]
                             :actions    [{:type      :custom
                                           :name      :sample-action
-                                          :selectors {'item [:$divider/item]}
+                                          :selectors {'item [:$parallel/item]}
                                           :params    ['item]
                                           :fn        (fn [{:keys [a]}]
                                                        (Thread/sleep 1000)
                                                        (inc a))}]
-                            :divider    {:items   [:inputs :prep-task]
+                            :parallel   {:items   [:inputs :prep-task]
                                          :threads 5}}]}
         pipeline  (sut/compile-pipeline pipe-spec)]
     (pipeline {})

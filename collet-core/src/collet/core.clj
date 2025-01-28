@@ -223,7 +223,7 @@
      [:map
       [:next {:description "answers on the question should we iterate over task actions again"}
        [:or collet.conds/condition? :boolean]]]]
-    [:divider {:optional true}
+    [:parallel {:optional true}
      [:and [:map
             [:items {:optional true} collet.select/select-path]
             [:range {:optional true}
@@ -237,10 +237,10 @@
          (if (or items range)
            (not (and items range))
            true))]]]]
-   [:fn {:error/message "either :iterator or :divider should be specified but not both"}
-    (fn [{:keys [iterator divider]}]
-      (if (or iterator divider)
-        (not (and iterator divider))
+   [:fn {:error/message "either :iterator or :parallel should be specified but not both"}
+    (fn [{:keys [iterator parallel]}]
+      (if (or iterator parallel)
+        (not (and iterator parallel))
         true))]])
 
 
@@ -375,13 +375,13 @@
   {:malli/schema [:=> [:cat utils/eval-context-spec task-spec]
                   task?]}
   [eval-context task]
-  (let [{:keys [name setup actions iterator divider retry
+  (let [{:keys [name setup actions iterator parallel retry
                 skip-on-error inputs keep-state state-format]
          :as   task} (cond-> task
                        :always (update :actions replace-external-actions)
                        :always (expand-on-actions)
-                       (some? (:divider task))
-                       (utils/replace-all {:$divider/item [:state :$divider/item]}))
+                       (some? (:parallel task))
+                       (utils/replace-all {:$parallel/item [:state :$parallel/item]}))
 
         {:keys [max-retries backoff-ms]
          :or   {max-retries 2
@@ -410,18 +410,18 @@
                                  (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e)))))
 
         task-fn            (cond
-                             (some? divider)
+                             (some? parallel)
                              (fn [context]
                                ;; run actions to set up the task
                                (let [context'    (cond->> context
                                                    (seq setup-actions) (execute-actions setup-actions))
-                                     items       (if (some? (:range divider))
+                                     items       (if (some? (:range parallel))
                                                    (let [{:keys [start end step]
-                                                          :or   {start 0 step 1}} (:range divider)]
+                                                          :or   {start 0 step 1}} (:range parallel)]
                                                      (range start end step))
-                                                   (collet.select/select (:items divider) context'))
+                                                   (collet.select/select (:items parallel) context'))
                                      executor    (Executors/newVirtualThreadPerTaskExecutor)
-                                     semaphore   (Semaphore. (or (:threads divider) 10))
+                                     semaphore   (Semaphore. (or (:threads parallel) 10))
                                      submit-task (fn [item]
                                                    (.submit executor
                                                             ^Callable
@@ -430,7 +430,7 @@
                                                               (.acquire semaphore)
                                                               (try
                                                                 (-> context'
-                                                                    (assoc-in [:state :$divider/item] item)
+                                                                    (assoc-in [:state :$parallel/item] item)
                                                                     (task-exec-fn)
                                                                     (extract-data))
                                                                 (finally
