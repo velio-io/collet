@@ -63,4 +63,5 @@
               "--push" ".")
     (bump-version "collet-cli/project.clj" "collet-app" next-version)
     (ps/shell {:dir "collet-cli"} "bb build")
+    (ps/shell {:dir "collet-cli"} "lein change version leiningen.release/bump-version patch")
     (println "Create GH release and attach the collet-cli archive from collet-cli/target/collet-cli.tar.gz")))
