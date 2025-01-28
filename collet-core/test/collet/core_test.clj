@@ -1,12 +1,14 @@
 (ns collet.core-test
   (:require
    [clojure.test :refer :all]
+   [collet.core :as collet]
    [collet.core :as sut]
    [collet.test-fixtures :as tf]
    [collet.utils :as utils]
    [malli.core :as m]
    [tech.v3.dataset :as ds])
   (:import
+   [collet.core Pipeline]
    [java.io File]
    [java.time Duration LocalDate LocalDateTime ZoneOffset]))
 
@@ -152,12 +154,9 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})
-          actual    (first result)]
-      (is (= actual "Params extracted a: 1, b: 2, e: 5"))
-      (is (nil? (second result))
-          "shouldn't continue executing tasks without iterator set")))
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          actual    (task-fn {:config {} :state {}})]
+      (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with setup actions"
     (let [task-spec {:name    :test-task
@@ -174,9 +173,8 @@
                                 :fn        (fn [a b e]
                                              (format "Params extracted a: %s, b: %s, e: %s"
                                                      a b e))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})
-          actual    (first result)]
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          actual    (task-fn {:config {} :state {}})]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with iterator"
@@ -186,24 +184,24 @@
                                  :name :count-action
                                  :fn   (fn []
                                          {:count (swap! counter inc)})}]
-                     :iterator {:data [:state :count-action :count]}}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})]
+                     :iterator {:next true}
+                     :return   [:state :count-action :count]}
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
       (is (= (first result) 11))))
 
   (testing "Task with external actions"
-    (let [task-spec {:name     :test-task
-                     :actions  [{:name   :count-action
-                                 :type   :test.collet/counter-action.edn
-                                 :params [0]}]
+    (let [task-spec {:name    :test-task
+                     :actions [{:name   :count-action
+                                :type   :test.collet/counter-action.edn
+                                :params [0]}]
                      ;; name of the action is overridden by the external action
-                     :iterator {:data [:state :my-external-action]
-                                :next false}}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task {:config {} :state {}})]
-      (is (= 1 (first result))))))
+                     :return  [:state :my-external-action]}
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
+          result    (task-fn {:config {} :state {}})]
+      (is (= 1 result)))))
 
 
 (deftest handle-task-errors-test
@@ -213,8 +211,8 @@
                                 :name :bad-action
                                 :fn   (fn []
                                         (throw (ex-info "Bad action" {})))}]}
-          task      (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (first (task {:config {} :state {}}))))))
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
+      (is (thrown? Exception (task-fn {:config {} :state {}})))))
 
   (testing "Tasks retried on failure"
     (let [runs-count (atom 0)
@@ -225,29 +223,10 @@
                                  :fn   (fn []
                                          (swap! runs-count inc)
                                          (throw (ex-info "Bad action" {})))}]}
-          task       (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (thrown? Exception (seq (task {:config {} :state {}}))))
+          {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
+      (is (thrown? Exception (task-fn {:config {} :state {}})))
       ;; function will be called 4 times: 1 initial run + 3 retries
-      (is (= @runs-count 4))))
-
-  (testing "Tasks continued to execute after failure"
-    (let [runs-count (atom 0)
-          task-spec  {:name          :throwing-task
-                      :skip-on-error true
-                      :actions       [{:type :custom
-                                       :name :bad-action
-                                       :fn   (fn []
-                                               (swap! runs-count inc)
-                                               (if (= @runs-count 3)
-                                                 (throw (ex-info "Bad action" {}))
-                                                 @runs-count))}]
-                      :iterator      {:data [:state :bad-action]}}
-          task       (sut/compile-task (utils/eval-ctx) task-spec)]
-      (is (= (->> (task {:config {} :state {}})
-                  (take 5))
-             ;; we will see a number 2 two times
-             ;; because when exception is thrown the previous iteration values is used on next run
-             (list 1 2 2 4 5))))))
+      (is (= @runs-count 4)))))
 
 
 (deftest pipeline-test
@@ -265,9 +244,7 @@
                                                 :selectors '{val1 [:inputs :task1]}
                                                 :params    '[val1]
                                                 :fn        (fn [v1]
-                                                             ;; task result is a sequable/reducible
-                                                             (-> (last v1)
-                                                                 (+ 2)))}]}]}
+                                                             (+ v1 2))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
       (is (m/validate sut/pipeline? pipeline))
       (is (= :pending (sut/pipe-status pipeline)))
@@ -275,7 +252,8 @@
       @(pipeline {})
 
       (is (= :done (sut/pipe-status pipeline)))
-      (is (= '(3) (-> pipeline :task2)))))
+      (is (= 3 (:task2 pipeline)))
+      pipeline))
 
   (testing "Pipeline lifecycle"
     (let [pipeline-spec {:name  :test-pipeline
@@ -291,7 +269,7 @@
                                   :keep-state true
                                   :actions    [{:type      :custom
                                                 :name      :action2
-                                                :selectors '{val1 [:inputs :task1 [:$/op :first]]}
+                                                :selectors '{val1 [:inputs :task1]}
                                                 :params    '[val1]
                                                 :fn        (fn [v1]
                                                              (Thread/sleep 2000)
@@ -300,15 +278,15 @@
       (let [pipeline-1 (sut/compile-pipeline pipeline-spec)]
         @(sut/start pipeline-1 {})
         (is (= :done (sut/pipe-status pipeline-1)))
-        (is (= '(3) (-> pipeline-1 :task2))))
+        (is (= 3 (:task2 pipeline-1))))
 
       (let [pipeline-2 (sut/compile-pipeline pipeline-spec)]
         (sut/start pipeline-2 {})
         (Thread/sleep 2100)
         (sut/stop pipeline-2)
         (is (= :stopped (sut/pipe-status pipeline-2)))
-        (is (= '(1) (-> pipeline-2 :task1)))
-        (is (= nil (-> pipeline-2 :task2)))
+        (is (= 1 (:task1 pipeline-2)))
+        (is (= nil (:task2 pipeline-2)))
 
         (testing "Stopped pipeline can't be started again"
           (sut/start pipeline-2 {})
@@ -322,11 +300,11 @@
         (Thread/sleep 2100)
         (sut/pause pipeline-3)
         (is (= :paused (sut/pipe-status pipeline-3)))
-        (is (= '(1) (-> pipeline-3 :task1)))
-        (is (= nil (-> pipeline-3 :task2)))
+        (is (= 1 (:task1 pipeline-3)))
+        (is (= nil (:task2 pipeline-3)))
         (sut/resume pipeline-3 {})
         (Thread/sleep 2100)
-        (is (= '(3) (-> pipeline-3 :task2))))))
+        (is (= 3 (:task2 pipeline-3))))))
 
   (testing "Pipeline with throwing task"
     (let [pipeline-spec {:name  :test-pipeline
@@ -343,6 +321,15 @@
   (testing "Invalid pipeline spec error"
     (let [pipeline-spec {:name   "invalid type"
                          :taskas :missing-tasks-key}]
+      (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))
+
+    (let [pipeline-spec {:name  :sample-pipeline
+                         :tasks [{:name     :sample-task
+                                  :actions  [{:name :sample-action
+                                              :type :clj/inc}]
+                                  ;; you can't specify both :iterator and :parallel
+                                  :iterator {:next true}
+                                  :parallel {:range {:end 10}}}]}]
       (is (thrown? Exception (sut/compile-pipeline pipeline-spec))))))
 
 
@@ -356,12 +343,12 @@
                                           :params    '[count]
                                           :fn        (fn [c]
                                                        (inc (or c 0)))}]
-                            :iterator   {:data [:state :count-action]
-                                         :next [:< [:state :count-action] 10]}}]}
+                            :iterator   {:next [:< [:state :count-action] 10]}}]}
         pipeline  (sut/compile-pipeline pipe-spec)]
     @(pipeline {})
     (is (= (list 1 2 3 4 5)
-           (take 5 (:counting-task pipeline))))))
+           (take 5 (:counting-task pipeline))))
+    (is (= 10 (count (:counting-task pipeline))))))
 
 
 (deftest complex-pipeline-test
@@ -394,7 +381,7 @@
                                              :selectors '{t1 [:inputs :task1]}
                                              :params    '[t1]
                                              :fn        (fn [v]
-                                                          (let [value (+ 1 (last v))]
+                                                          (let [value (+ 1 v)]
                                                             (swap! results assoc :task11 value)
                                                             value))}]}
                                  {:name    :task21
@@ -404,7 +391,7 @@
                                              :selectors '{t2 [:inputs :task2]}
                                              :params    '[t2]
                                              :fn        (fn [v]
-                                                          (let [value (+ 2 (last v))]
+                                                          (let [value (+ 2 v)]
                                                             (swap! results assoc :task21 value)
                                                             value))}]}
                                  {:name    :task22
@@ -415,7 +402,7 @@
                                                           t3 [:inputs :task3]}
                                              :params    '[t2 t3]
                                              :fn        (fn [t2 t3]
-                                                          (let [value (+ (last t2) (last t3))]
+                                                          (let [value (+ t2 t3)]
                                                             (swap! results assoc :task22 value)
                                                             value))}]}
                                  {:name    :task31
@@ -425,7 +412,7 @@
                                              :selectors '{t3 [:inputs :task3]}
                                              :params    '[t3]
                                              :fn        (fn [v]
-                                                          (let [value (+ 4 (last v))]
+                                                          (let [value (+ 4 v)]
                                                             (swap! results assoc :task31 value)
                                                             value))}]}
                                  {:name    :task4
@@ -436,7 +423,7 @@
                                                           t31 [:inputs :task31]}
                                              :params    '[t22 t31]
                                              :fn        (fn [t22 t31]
-                                                          (let [value (+ (last t22) (last t31))]
+                                                          (let [value (+ t22 t31)]
                                                             (swap! results assoc :task4 value)
                                                             value))}]}]}
           pipeline      (sut/compile-pipeline pipeline-spec)]
@@ -447,6 +434,235 @@
       (is (= (-> @results :task22) 5))
       (is (= (-> @results :task31) 7))
       (is (= (-> @results :task4) 12)))))
+
+
+(deftest skipping-tasks-test
+  (testing "If :skip-on-error is set on the task, all dependent tasks are skipped"
+    (let [pipeline-spec {:name  :test-pipeline
+                         :tasks [;; root tasks
+                                 {:name    :task1
+                                  :actions [{:type :custom
+                                             :name :action1
+                                             :fn   (constantly 1)}]}
+                                 {:name          :task2
+                                  :skip-on-error true
+                                  :actions       [{:type :custom
+                                                   :name :action2
+                                                   :fn   (fn []
+                                                           (throw (ex-info "Bad action" {})))}]}
+                                 {:name    :task3
+                                  :actions [{:type :custom
+                                             :name :action3
+                                             :fn   (constantly 3)}]}
+                                 ;; dependent tasks
+                                 {:name       :task11
+                                  :keep-state true
+                                  :inputs     [:task1]
+                                  :actions    [{:type      :custom
+                                                :name      :action11
+                                                :selectors '{t1 [:inputs :task1]}
+                                                :params    '[t1]
+                                                :fn        (fn [v]
+                                                             (let [value (+ 1 v)]
+                                                               value))}]}
+                                 {:name    :task21
+                                  :inputs  [:task2]
+                                  :actions [{:type      :custom
+                                             :name      :action21
+                                             :selectors '{t2 [:inputs :task2]}
+                                             :params    '[t2]
+                                             :fn        (fn [v]
+                                                          (let [value (+ 2 v)]
+                                                            value))}]}
+                                 {:name    :task22
+                                  :inputs  [:task2 :task3]
+                                  :actions [{:type      :custom
+                                             :name      :action22
+                                             :selectors '{t2 [:inputs :task2]
+                                                          t3 [:inputs :task3]}
+                                             :params    '[t2 t3]
+                                             :fn        (fn [t2 t3]
+                                                          (let [value (+ t2 t3)]
+                                                            value))}]}
+                                 {:name    :task31
+                                  :inputs  [:task3]
+                                  :actions [{:type      :custom
+                                             :name      :action31
+                                             :selectors '{t3 [:inputs :task3]}
+                                             :params    '[t3]
+                                             :fn        (fn [v]
+                                                          (let [value (+ 4 v)]
+                                                            value))}]}
+                                 {:name    :task4
+                                  :inputs  [:task22 :task31]
+                                  :actions [{:type      :custom
+                                             :name      :action4
+                                             :selectors '{t22 [:inputs :task22]
+                                                          t31 [:inputs :task31]}
+                                             :params    '[t22 t31]
+                                             :fn        (fn [t22 t31]
+                                                          (let [value (+ t22 t31)]
+                                                            value))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      @(pipeline {})
+      (let [{:keys [task1 task2 task3
+                    task11 task21 task22 task31
+                    task4]}
+            pipeline]
+        (is (= task1 1))
+        (is (= task3 3))
+        (is (= task11 2))
+        (is (= task31 7))
+
+        (is (= task2 nil))
+        (is (= (-> @(.-tasks pipeline) :task2 :status)
+               :failed))
+        (is (= task21 nil))
+        (is (= (-> @(.-tasks pipeline) :task21 :status)
+               :skipped))
+        (is (= task22 nil))
+        (is (= (-> @(.-tasks pipeline) :task22 :status)
+               :skipped))
+        (is (= task4 nil))
+        (is (= (-> @(.-tasks pipeline) :task4 :status)
+               :skipped))))))
+
+
+(deftest max-parallel-tasks-test
+  (testing "Number of parallel tasks is limited by :max-parallel-tasks"
+    (let [pipeline-spec {:name            :test-pipeline
+                         :max-parallelism 2
+                         :tasks           [{:name    :task1
+                                            :actions [{:type :custom
+                                                       :name :action1
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task2
+                                            :actions [{:type :custom
+                                                       :name :action2
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task3
+                                            :actions [{:type :custom
+                                                       :name :action3
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task4
+                                            :actions [{:type :custom
+                                                       :name :action4
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task5
+                                            :actions [{:type :custom
+                                                       :name :action5
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task6
+                                            :actions [{:type :custom
+                                                       :name :action6
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task7
+                                            :actions [{:type :custom
+                                                       :name :action7
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task8
+                                            :actions [{:type :custom
+                                                       :name :action8
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task9
+                                            :actions [{:type :custom
+                                                       :name :action9
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}
+                                           {:name    :task10
+                                            :actions [{:type :custom
+                                                       :name :action10
+                                                       :fn   (fn [] (Thread/sleep 2000))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      (pipeline {})
+
+      (Thread/sleep 1000)
+      (is (= 2 @(.-running-count ^Pipeline pipeline)))
+      (is (zero? (->> @(.-tasks pipeline)
+                      (map (fn [[_ {:keys [status]}]] status))
+                      (filter #(= :completed %))
+                      (count))))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :running %))
+                    (count))))
+
+      (Thread/sleep 2000)
+      (is (= 2 @(.-running-count ^Pipeline pipeline)))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :completed %))
+                    (count))))
+      (is (= 2 (->> @(.-tasks pipeline)
+                    (map (fn [[_ {:keys [status]}]] status))
+                    (filter #(= :running %))
+                    (count))))
+
+      (Thread/sleep 8000)
+      (is (zero? @(.-running-count ^Pipeline pipeline)))
+      (is (= 10 (->> @(.-tasks pipeline)
+                     (map (fn [[_ {:keys [status]}]] status))
+                     (filter #(= :completed %))
+                     (count))))
+      (is (zero? (->> @(.-tasks pipeline)
+                      (map (fn [[_ {:keys [status]}]] status))
+                      (filter #(= :running %))
+                      (count)))))))
+
+
+(deftest task-parallel-test
+  (let [completed-tasks (atom [])
+        pipe-spec       {:name  :parallel-test
+                         :tasks [{:name       :sample-task
+                                  :keep-state true
+                                  :actions    [{:type      :custom
+                                                :name      :sample-action
+                                                :selectors {'item [:$parallel/item]}
+                                                :params    ['item]
+                                                :fn        (fn [j]
+                                                             (Thread/sleep 1000)
+                                                             (swap! completed-tasks conj j)
+                                                             j)}]
+                                  :parallel   {:range   {:end 10}
+                                               :threads 5}}]}
+        pipeline        (sut/compile-pipeline pipe-spec)]
+    (pipeline {})
+    (Thread/sleep 500)
+    (is (= :running (collet/pipe-status pipeline)))
+    (is (zero? (count @completed-tasks)))
+    (Thread/sleep 1000)
+    (is (= :running (collet/pipe-status pipeline)))
+    (is (= 5 (count @completed-tasks)))
+    (Thread/sleep 1000)
+    (is (= :done (collet/pipe-status pipeline)))
+    (is (= 10 (count @completed-tasks)))
+    (is (= (range 10) (:sample-task pipeline))))
+
+  (let [pipe-spec {:name  :parallel-test
+                   :tasks [{:name    :prep-task
+                            :actions [{:type   :clj/identity
+                                       :name   :sample-items
+                                       :params [[{:a 10 :b "abc"}
+                                                 {:a 20 :b "def"}
+                                                 {:a 30 :b "ghi"}]]}]}
+                           {:name       :sample-task
+                            :keep-state true
+                            :inputs     [:prep-task]
+                            :actions    [{:type      :custom
+                                          :name      :sample-action
+                                          :selectors {'item [:$parallel/item]}
+                                          :params    ['item]
+                                          :fn        (fn [{:keys [a]}]
+                                                       (Thread/sleep 1000)
+                                                       (inc a))}]
+                            :parallel   {:items   [:inputs :prep-task]
+                                         :threads 5}}]}
+        pipeline  (sut/compile-pipeline pipe-spec)]
+    (pipeline {})
+    (Thread/sleep 2000)
+    (is (= :done (collet/pipe-status pipeline)))
+    (is (= 3 (count (:sample-task pipeline))))
+    (is (= [11 21 31] (:sample-task pipeline)))
+    (collet/pipe-error pipeline)))
 
 
 (deftest pipeline-tasks-results-in-arrow
@@ -489,7 +705,7 @@
       (is (= [{:id 1 :name "John"}
               {:id 2 :name "Jane"}
               {:id 3 :name "Doe"}]
-             (-> pipeline :users-collection first)))))
+             (:users-collection pipeline)))))
 
   (testing "complex data stored in arrow file and parsed correctly"
     (let [john-uuid (random-uuid)

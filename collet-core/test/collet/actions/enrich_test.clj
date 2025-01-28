@@ -50,9 +50,8 @@
                                  :params    ['data 'id]
                                  :fn        (fn [data id]
                                               (get data id))}]
-                     :iterator {:data [:state :enrich-collection]
-                                :next [:true? [:$enrich/has-next-item]]}}
-          task-fn   (collet/compile-task (utils/eval-ctx) task-spec)
+                     :iterator {:next [:true? [:$enrich/has-next-item]]}}
+          {:keys [task-fn]} (collet/compile-task (utils/eval-ctx) task-spec)
           result    (-> (task-fn {:config {:collection [{:id 1} {:id 2} {:id 3}]
                                            :data       {1 {:name "one"}
                                                         2 {:name "two"}
@@ -89,8 +88,7 @@
                                                             :query-params {:inc "ratings"}}
                                                 :return    [:body]
                                                 :fold-in   [:artist]}]
-                                  :iterator   {:data [:state :enrich-artist-details]
-                                               :next [:true? [:$enrich/has-next-item]]}}]}
+                                  :iterator   {:next [:true? [:$enrich/has-next-item]]}}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
 
