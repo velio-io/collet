@@ -1,4 +1,4 @@
-(defproject io.velio/collet-cli "0.1.5-SNAPSHOT"
+(defproject io.velio/collet-cli "0.2.0-SNAPSHOT"
   :description "CLI interface for Collet app"
   :url "https://github.com/velio-io/collet"
   :license

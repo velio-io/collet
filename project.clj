@@ -1,4 +1,4 @@
-(defproject io.velio/collet "0.1.0-SNAPSHOT"
+(defproject io.velio/collet "0.2.0"
   :description "Library for defining and executing workflows"
   :url "https://github.com/velio-io/collet"
   :license {:name    "Apache-2.0"
