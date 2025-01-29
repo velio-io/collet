@@ -19,7 +19,7 @@
   [[org.clojure/clojure "1.12.0"]
    [org.clojure/java.jmx "1.1.0"]
    [org.clojure/tools.cli "1.1.230"]
-   [io.velio/collet-core "0.2.0"]
+   [io.velio/collet-core "0.2.1"]
    [com.brunobonacci/mulog "0.9.0"]
    [com.brunobonacci/mulog-zipkin "0.9.0"]
    [com.brunobonacci/mulog-elasticsearch "0.9.0"]
