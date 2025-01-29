@@ -10,7 +10,8 @@
    [collet.core :as collet.core]
    [portal.api :as p])
   (:import
-   [java.io EOFException PushbackInputStream StringWriter]))
+   [java.io EOFException PushbackInputStream StringWriter]
+   [java.util.regex Pattern]))
 
 
 (def stdin
@@ -37,6 +38,16 @@
   (when debug?
     (binding [*out* (io/writer System/err)]
       (apply println strs))))
+
+
+(defn get-config [pipe-spec]
+  ;; regex breaks the edn reader
+  (walk/postwalk
+   (fn [x]
+     (if (instance? Pattern x)
+       (str x)
+       x))
+   (collet.main/file-or-map :spec pipe-spec)))
 
 
 (defn list-actions [pipe-spec]
@@ -76,7 +87,8 @@
         config   (collet.main/file-or-map :config pipe-config)
         pipeline (collet.core/compile-pipeline spec)]
     @(pipeline config)
-    (:results @(.-state pipeline))))
+    (or (collet.core/pipe-error pipeline)
+        (collet.core/pipe-status pipeline))))
 
 
 (defn open-portal []
@@ -85,7 +97,7 @@
 
 
 (def lookup
-  {'pod.collet.core/compile      collet.main/file-or-map
+  {'pod.collet.core/compile      get-config
    'pod.collet.core/list-actions list-actions
    'pod.collet.core/list-tasks   list-tasks
    'pod.collet.core/run-action   run-action

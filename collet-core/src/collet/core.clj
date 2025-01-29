@@ -494,10 +494,12 @@
    (execute-task task {} config))
 
   ([task config context]
-   (let [task-fn (compile-task (utils/eval-ctx) task)]
-     (-> (task-fn (merge (->context config) context))
-         (seq)
-         (doall)))))
+   (let [{:keys [task-fn]} (compile-task (utils/eval-ctx) task)
+         result     (task-fn (merge (->context config) context))
+         iteration? (-> result meta :iteration)]
+     (if iteration?
+       (doall (seq result))
+       result))))
 
 
 ;;------------------------------------------------------------------------------

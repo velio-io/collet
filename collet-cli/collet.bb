@@ -129,7 +129,7 @@
                "run action" (run-action options)
                "run task" (run-task options)
                "run pipeline" (run-pipeline options)
-               "show spec" (do (puget/cprint (collet/compile :spec (:pipe-spec options)))
+               "show spec" (do (puget/cprint (collet/compile (:pipe-spec options)))
                                (println))
                "open portal view" (do (collet/open-portal)
                                       (reset! *portal-opened true))

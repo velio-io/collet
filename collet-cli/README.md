@@ -4,10 +4,10 @@ Download the tar file from the latest release and extract it.
 
 ```shell
 # Using curl:
-curl -L -o collet-cli.tar.gz https://github.com/velio-io/collet/releases/download/v0.1.0/collet-cli.tar.gz
+curl -L -o collet-cli.tar.gz https://github.com/velio-io/collet/releases/latest/download/collet-cli.tar.gz
 
 # Or using wget:
-wget -O collet-cli.tar.gz https://github.com/velio-io/collet/releases/download/v0.1.0/collet-cli.tar.gz
+wget -O collet-cli.tar.gz https://github.com/velio-io/collet/releases/latest/download/collet-cli.tar.gz
 ```
 
 ```shell
