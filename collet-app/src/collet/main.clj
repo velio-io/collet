@@ -10,6 +10,7 @@
    [collet.aws :as aws]
    [collet.utils :as utils])
   (:import
+   [java.io File]
    [java.net URI URISyntaxException]))
 
 
@@ -69,14 +70,26 @@
     (last maps)))
 
 
+(defn normalize-path
+  "If path is relative, make sure that it's relative to the main spec file"
+  ^String [base-path path]
+  (if (some? base-path)
+    (let [base   ^File (io/file base-path)
+          target ^File (io/file path)]
+      (if (.isAbsolute target)
+        path
+        (.getCanonicalPath (io/file (.getParent base) path))))
+    path))
+
+
 (defn include-spec
-  [path]
+  [file-path path]
   (if (sequential? path)
     (let [[path overrides] path]
       (deep-merge
-       (read-config-file :spec (new URI path))
+       (read-config-file :spec (new URI (normalize-path file-path path)))
        overrides))
-    (read-config-file :spec (new URI path))))
+    (read-config-file :spec (new URI (normalize-path file-path path)))))
 
 
 (defn read-regex
@@ -84,10 +97,17 @@
   (re-pattern rgx))
 
 
-(defn read-config-string [target s]
-  (if (= target :config)
-    (edn/read-string {:eof nil :readers {'env get-env}} s)
-    (edn/read-string {:eof nil :readers {'include include-spec 'rgx read-regex}} s)))
+(defn read-config-string
+  ([target content]
+   (read-config-string target nil content))
+
+  ([target file-path content]
+   (if (= target :config)
+     (edn/read-string {:eof nil :readers {'env get-env}} content)
+     (edn/read-string {:eof     nil
+                       :readers {'include (partial include-spec file-path)
+                                 'rgx     read-regex}}
+                      content))))
 
 
 (defn query->map
@@ -135,8 +155,8 @@
       ;; defaults to local file
       (let [file (io/as-file file-path)]
         (if (.exists file)
-          (->> file slurp (read-config-string target))
-          (throw (ex-info "File does not exist" {:file file-path})))))))
+          (->> file slurp (read-config-string target file-path))
+          (throw (ex-info (str "File does not exist: " file-path) {:file file-path})))))))
 
 
 (defn file-or-map

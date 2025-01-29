@@ -1,6 +1,6 @@
 {:name  :devs-productivity-pipeline
  ;; add extra dependencies
- :deps  {:coordinates [[io.velio/collet-actions "0.1.4"]]
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.0"]]
          :imports     [java.time.LocalDate java.time.format.DateTimeFormatter]}
  ;; specify the list of tasks
  :tasks [;; get the list of repositories for the organization
@@ -13,7 +13,7 @@
                                            :type      :collet.actions.http/request
                                            :selectors {next-page [:state :next-page-link]
                                                        gh-token  [:config :gh-token]}
-                                           :params    #include ["/data/gh-request.edn"
+                                           :params    #include ["./gh-request.edn"
                                                                 {:url next-page}]
                                            :return    [{:repos [:body]
                                                         :link  [:headers :link]}]}]}
@@ -23,7 +23,7 @@
                                            :type      :collet.actions.http/request
                                            :selectors {gh-token [:config :gh-token]
                                                        org-name [:config :org-name]}
-                                           :params    #include ["/data/gh-request.edn"
+                                           :params    #include ["./gh-request.edn"
                                                                 {:url          ["https://api.github.com/orgs/%s/repos" org-name]
                                                                  :query-params {:per_page 100}}]
                                            :return    [{:repos [:body]
@@ -37,7 +37,7 @@
                       :return    [[:$/op :first]]}]
           ;; proceed while there is a next page link
           :iterator {:next [:not-nil? [:state :next-page-link]]}
-          :return   [:state :repositories-request :repos [:$/cat #include "/data/repo-keys.edn"]]}
+          :return   [:state :repositories-request :repos [:$/cat #include "./repo-keys.edn"]]}
 
          ;; get the list of pull requests for each repository
          {:name     :pull-requests
@@ -55,7 +55,7 @@
                                            :selectors {gh-token [:config :gh-token]
                                                        org-name [:config :org-name]
                                                        repo     [:$mapper/item :name]}
-                                           :params    #include ["/data/gh-request.edn"
+                                           :params    #include ["./gh-request.edn"
                                                                 {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
                                                                  :query-params {:per_page 100 :state "closed"}}]
                                            :return    [{:prs  [:body]
@@ -71,7 +71,7 @@
                                            :type      :collet.actions.http/request
                                            :selectors {next-page [:state :next-page-link]
                                                        gh-token  [:config :gh-token]}
-                                           :params    #include ["/data/gh-request.edn"
+                                           :params    #include ["./gh-request.edn"
                                                                 {:url next-page}]
                                            :return    [{:prs  [:body]
                                                         :link [:headers :link]}]}]}
@@ -83,7 +83,7 @@
           ;; proceed while there is a next page link or there are more repositories
           :iterator {:next [:or [:not-nil? [:state :repository-prs :link]]
                             [:true? [:$mapper/has-next-item]]]}
-          :return   [:state :repository-prs :prs [:$/cat #include "/data/pr-keys.edn"]]}
+          :return   [:state :repository-prs :prs [:$/cat #include "./pr-keys.edn"]]}
 
          ;; generate productivity reports
          {:name    :productivity-reports
@@ -103,7 +103,7 @@
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "/data/reports/total-prs-by-member.csv"}}
+                                 :file-name   "./reports/total-prs-by-member.csv"}}
 
                     ;; calculate the number of PRs for each member per month
                     {:name      :monthly-prs-by-member
@@ -124,4 +124,4 @@
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "/data/reports/monthly-prs-by-member.csv"}}]}]}
+                                 :file-name   "./reports/monthly-prs-by-member.csv"}}]}]}

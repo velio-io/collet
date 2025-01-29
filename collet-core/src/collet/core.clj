@@ -734,7 +734,7 @@
   IPipelineLifeCycle
   (start [this config]
     (when (= :pending @status)
-      (ml/log :collet/starting-pipeline-execution :tasks @tasks)
+      (ml/log :collet/starting-pipeline-execution)
       (reset! status :running)
       (run-pipeline this config)))
 

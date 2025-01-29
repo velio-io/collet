@@ -1,7 +1,7 @@
 {:name  :gh-pipeline
  :tasks [{:name    :gh-repositories
           :actions [;; include request action
-                    #include ["configs/github-request-action.edn"
+                    #include ["./github-request-action.edn"
                               {:params {:url ["https://api.github.com/orgs/%s/repos" org-name]}}]
 
                     ;; next action
@@ -9,7 +9,7 @@
 
          {:name    :gh-pull-requests
           :actions [;; include request action
-                    #include ["configs/github-request-action.edn"
+                    #include ["./github-request-action.edn"
                               {:selectors {repo [:state :repository-name]}
                                :params    {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
                                            :query-params {:state "closed" :rx #rgx "foo"}}}]
