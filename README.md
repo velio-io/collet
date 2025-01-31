@@ -91,7 +91,7 @@ Don't worry if you don't understand everything at once, we will explain it step 
  ;; include postgres jdbc driver as a runtime dependency
  :deps  {:coordinates [[org.postgresql/postgresql "42.7.3"]
                        ;; also you can include a library with some prebuilt actions
-                       [io.velio/collet-actions "0.2.2"]]
+                       [io.velio/collet-actions "0.2.3"]]
          ;; you'll need to require namespaces with actions we're going to use
          :requires    [[collet.actions.jdbc-pg]]} ;; postgres specific bindings
  ;; define the pipeline tasks
@@ -410,7 +410,7 @@ action execution.
 will be called without arguments.
 `:return` is a "path vector" (with special syntax supported)
 
-Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.2.2"]`
+Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.2.3"]`
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
 `:collet.actions.queue/enqueue`
@@ -508,7 +508,7 @@ For Leiningen:
 For deps.edn:
 
 ```clojure
-io.velio/collet-core {:mvn/version "0.2.0"}
+io.velio/collet-core {:mvn/version "0.2.3"}
 ```
 
 After adding Collet to your project dependencies, you can use it as follows:
