@@ -1,4 +1,4 @@
-(defproject io.velio/collet-actions "0.2.3-SNAPSHOT"
+(defproject io.velio/collet-actions "0.2.3"
   :description "Actions library for Collet workflows"
   :url "https://github.com/velio-io/collet"
   :license
