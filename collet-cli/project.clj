@@ -1,4 +1,4 @@
-(defproject io.velio/collet-cli "0.2.3-SNAPSHOT"
+(defproject io.velio/collet-cli "0.2.4-SNAPSHOT"
   :description "CLI interface for Collet app"
   :url "https://github.com/velio-io/collet"
   :license
@@ -18,6 +18,6 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
-   [io.velio/collet-app "0.2.2"]
+   [io.velio/collet-app "0.2.3"]
    [nrepl/bencode "1.1.0"]
    [djblue/portal "0.58.2"]])
