@@ -36,7 +36,7 @@ available in classpath ([see deps](./deps.md) sections) and then use the fully q
 If you have a common action, used in different places multiple times you can create a separate file for that action.
 Then you can use this action by providing the action type that match with a relative path to that file.
 
-Let's say you have a such file `my-folder/with-actions/my-action.edn`
+Let's say you have a file `my-folder/with-actions/my-action.edn`
 
 ```clojure
 {:name   :my-action

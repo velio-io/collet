@@ -13,7 +13,7 @@ Here is an example of how to add a dependency on `org.clojure/data.csv`:
 {:name  :my-pipeline
  :deps  {:coordinates [[org.clojure/data.csv "0.2.0"]]
          :requires    [[clojure.data.csv :as csv]]
-         :imports     [java.time.LocalDate]}
+         :imports     [java.time.LocalDate java.io.File]}
  :tasks []}
 ```
 

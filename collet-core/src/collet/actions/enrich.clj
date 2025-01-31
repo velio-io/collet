@@ -81,4 +81,7 @@
         (assoc :state-format (or (:state-format task) :latest))
         (update :iterator utils/replace-all
                 {:$enrich/item          [:state mapper-key :current]
+                 :$enrich/has-next-item [:state mapper-key :next]})
+        (update :return utils/replace-all
+                {:$enrich/item          [:state mapper-key :current]
                  :$enrich/has-next-item [:state mapper-key :next]}))))

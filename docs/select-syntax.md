@@ -8,7 +8,7 @@ In the basic form you can think of that as a "path vector", similar to what you'
 Elements in the "path vector" could be a keywords, integers or strings.
 
 ```clojure
-{:data [:state :user :name]}
+{:return [:state :user :name]}
 ```
 
 In example above, we're selecting the `:name` key from the `:user` key in the `:state` map.
@@ -28,8 +28,8 @@ In addition select DSL supports some additional functions to make it more powerf
                             :city   "Springfield"}}}}
 
 ;; you can specify in your task iterator key:
-{:data [:state :user {:user-name :name
-                      :street    [:address :street]}]}
+{:return [:state :user {:user-name :name
+                        :street    [:address :street]}]}
 
 ;; and the result will be:
 {:user-name "John"
@@ -49,7 +49,7 @@ In addition select DSL supports some additional functions to make it more powerf
 
 ;; using the :$/cat function. 
 ;; notice that :first-name is a key in each user map, but you can use more complex paths as well
-{:data [:state :users [:$/cat :first-name]]}
+{:return [:state :users [:$/cat :first-name]]}
 
 ;; will return:
 ["John" "Jane" "Alice" "Bob"]
@@ -67,7 +67,7 @@ In addition select DSL supports some additional functions to make it more powerf
                  {:first-name "Bob" :last-name "Smith" :age 40}]}}
 
 ;; notice how you can combine :$/cat and :$/cond functions
-{:data [:state :users [:$/cat :first-name [:cond [:> :age 18]]]]}
+{:return [:state :users [:$/cat :first-name [:$/cond [:> :age 18]]]]}
 
 ;; will return:
 ["Jane" "Bob"]
@@ -83,7 +83,7 @@ In addition select DSL supports some additional functions to make it more powerf
                  {:first-name "Alice" :last-name "Smith" :age 17}
                  {:first-name "Bob" :last-name "Smith" :age 40}]}}
 
-{:data [:state :users [:$/op :first] :first-name]}
+{:return [:state :users [:$/op :first] :first-name]}
 
 ;; will return:
 "John"
