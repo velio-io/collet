@@ -309,14 +309,6 @@
       (throw (ex-info "File does not exist" {:file file-path})))))
 
 
-(defn deep-merge
-  "Deeply merges maps"
-  [& maps]
-  (if (every? map? maps)
-    (apply merge-with deep-merge maps)
-    (last maps)))
-
-
 (defn replace-external-actions
   "Replace the actions which refers to external files"
   [actions]
@@ -326,7 +318,7 @@
        (assoc action :case (map #(update % :actions replace-external-actions)
                                 (:case action)))
        (if (string/ends-with? (name (:type action)) ".edn")
-         (deep-merge action (read-action (:type action)))
+         (utils/deep-merge action (read-action (:type action)))
          action)))
    actions))
 
