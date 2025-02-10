@@ -1,9 +1,9 @@
 (ns collet.actions.jslt-test
   (:require
    [clojure.test :refer :all]
+   [collet.core :as collet]
    [collet.action :as action]
-   [collet.actions.jslt :as sut]
-   [collet.core :as collet]))
+   [collet.actions.jslt :as sut]))
 
 
 (deftest jslt-action-test

@@ -748,3 +748,38 @@
         (is (= john-uuid (parse-uuid (str uuid))))
         (is (= (LocalDateTime/of 2020 1 1 0 0)
                (LocalDateTime/ofInstant dob ZoneOffset/UTC)))))))
+
+
+(deftest external-deps-test
+  (testing "Adding and using external dependencies"
+    (let [pipeline-spec {:name  :parsing-pipeline
+                         :deps  {:coordinates '[[org.clojure/data.xml "0.0.8"]]
+                                 :requires    '[[clojure.data.xml :as xml]]
+                                 :imports     '[java.io.StringReader]}
+                         :tasks [{:name       :xml-doc
+                                  :keep-state true
+                                  :actions    [{:name   :parse-xml-string
+                                                :type   :custom
+                                                :params ["<root><child>data</child></root>"]
+                                                :fn     '(fn [xml-str]
+                                                           (xml/parse (java.io.StringReader. xml-str)))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      @(pipeline {})
+      (is (= :root (:tag (:xml-doc pipeline))))
+      (is (= :child (:tag (first (:content (:xml-doc pipeline))))))
+      (is (= ["data"] (:content (first (:content (:xml-doc pipeline))))))))
+
+  (testing "Catch custom function error"
+    (let [pipeline-spec {:name  :parsing-pipeline
+                         :deps  {:coordinates '[[org.clojure/data.xml "0.0.8"]]
+                                 :requires    '[[clojure.data.xml :as xml]]}
+                         :tasks [{:name       :xml-doc
+                                  :keep-state true
+                                  :actions    [{:name   :parse-xml-string
+                                                :type   :custom
+                                                :params ["<root><child>data</child></root>"]
+                                                :fn     '(fn [xml-str]
+                                                           (xml/parse xml-str))}]}]}
+          pipeline      (sut/compile-pipeline pipeline-spec)]
+      @(pipeline {})
+      (is (instance? Exception (:exception (sut/pipe-error pipeline)))))))
