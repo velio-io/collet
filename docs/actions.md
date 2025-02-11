@@ -22,15 +22,19 @@ Here's a basic example of greeting action:
 `"Hello, %s"` and `"world"`. The result will be `"Hello, world"`.
 
 If you need a function from the different namespace (outside clojure/core) first make sure that namespace is
-available in classpath ([see deps](./deps.md) sections) and then use the fully qualified function name.
+available in classpath ([see deps](./deps.md) sections), then you can use it in the custom actions.
 
 ```clojure
 {:name  :parsing-pipeline
- :deps  [[org.clojure/data.xml "0.0.8"]]
+ :deps  {:coordinates [[org.clojure/data.xml "0.0.8"]]
+         :requires    [[clojure.data.xml :as xml]]
+         :imports     [java.io.StringReader]}
  :tasks [{:name    :xml-doc
           :actions [{:name   :parse-xml-string
-                     :type   :clojure.data.xml/parse
-                     :params ["<root><child>data</child></root>"]}]}]}
+                     :type   :custom
+                     :params ["<root><child>data</child></root>"]
+                     :fn     '(fn [xml-str]
+                                (xml/parse (java.io.StringReader. xml-str)))}]}]}
 ```
 
 If you have a common action, used in different places multiple times you can create a separate file for that action.
@@ -414,8 +418,8 @@ The request map can contain the following keys:
 {:type   :collet.actions.http/request
  :name   :events-request
  :params {:url          "https://musicbrainz.org/ws/2/event"
-          :as           :json ;; send as json
-          :accept       :json ;; parse response as json
+          :as           :json ;; parse response as json 
+          :accept       :json ;; send as json (Content-Type: application/json)
           :rate         1 ;; repeat this query (in the next iteration) no more than once per second
           :query-params {:limit  10
                          :offset 0
@@ -467,6 +471,8 @@ Accepts all HTTP options and the following OData specific options:
 - `:follow-next-link` - if service supports a server side pagination you can set this parameter to true to automatically
   fetch all pages from the collection
 - `:get-total-count` - return just a count of items instead the actuall collection
+- `:as` - `:json` by default. Can be `:auto` `:text` `:stream` or `:byte-array`
+- `:content-type` - `:json` by default.
 
 ```clojure
 {:type   :collet.actions.odata/request
@@ -581,6 +587,7 @@ Options:
 the [Chronicle queue](https://github.com/OpenHFT/Chronicle-Queue).
 Input can be a single message or a sequence of messages. Message should be a Clojure map.
 Options:
+
 - `:input` - the message to write
 - `:queue-name` - the name of the queue
 - `:queue-path` - path on the file system where the queue is stored
@@ -596,4 +603,24 @@ Options:
                      :type   :collet.actions.queue/enqueue
                      :params {:input      {:a 1 :b 2}
                               :queue-name :pipeline-queue-test}}]}]}
+```
+
+### JSLT transformation
+
+`:collet.actions.jslt/apply` Apply a JSLT transformation to the input data.
+Options:
+
+- `:input` - the data to transform
+- `:template` - the JSLT transformation
+- `:as` - the output format. One of :string or :clj (default).
+
+```clojure
+{:name   :jslt-action
+ :type   :collet.actions.jslt/apply
+ :params {:input    {:a 1 :b 2}
+          :template "{
+                      \"a\": .a,
+                      \"b\": .b,
+                      \"sum\": .a + .b
+                    }"}}
 ```

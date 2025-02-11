@@ -413,7 +413,7 @@ will be called without arguments.
 Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.2.3"]`
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
-`:collet.actions.queue/enqueue`
+`:collet.actions.queue/enqueue`, `:collet.actions.jslt/apply`
 
 Check the [actions documentation](./docs/actions.md) for more details.
 

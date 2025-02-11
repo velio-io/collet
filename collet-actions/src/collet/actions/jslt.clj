@@ -1,5 +1,6 @@
 (ns collet.actions.jslt
   (:require
+   [malli.core :as m]
    [collet.action :as action])
   (:import
    [com.fasterxml.jackson.databind JsonNode ObjectMapper]
@@ -33,7 +34,39 @@
     :else (.toString node)))
 
 
+(def object-mapper?
+  (m/-simple-schema
+   {:type :object-mapper?
+    :pred #(instance? ObjectMapper %)
+    :type-properties
+    {:error/message "should be an instance of ObjectMapper"}}))
+
+
+(def expression?
+  (m/-simple-schema
+   {:type :expression?
+    :pred #(instance? Exception %)
+    :type-properties
+    {:error/message "should be an instance of Expression"}}))
+
+
+(def apply-jslt-params-spec
+  [:map
+   [::mapper object-mapper?]
+   [::expr expression?]
+   [:input :string]
+   [:as {:optional true}
+    [:enum :string :clj]]])
+
+
 (defn apply-jslt-template
+  "Apply a JSLT template to a JSON input.
+   Parameters:
+   - input: The JSON input to apply the template to.
+   - template: The JSLT template to apply.
+   - as: The output format. One of :string or :clj (default)."
+  {:malli/schema [:=> [:cat apply-jslt-params-spec]
+                  :any]}
   [{::keys [^ObjectMapper mapper ^Expression expr]
     :keys  [^String input as]}]
   (let [input-node ^JsonNode (.readTree mapper input)
