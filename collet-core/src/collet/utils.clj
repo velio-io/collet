@@ -43,6 +43,13 @@
            (partition 2 kvs))))
 
 
+(defn deep-merge
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+
 (defn replace-vec-element
   "Replaces elements in a vector according to a replacement map"
   [replacement-map x]

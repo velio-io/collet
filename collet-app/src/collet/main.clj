@@ -63,13 +63,6 @@
 (declare read-config-file)
 
 
-(defn deep-merge
-  [& maps]
-  (if (every? map? maps)
-    (apply merge-with deep-merge maps)
-    (last maps)))
-
-
 (defn normalize-path
   "If path is relative, make sure that it's relative to the main spec file"
   ^String [base-path path]
@@ -86,7 +79,7 @@
   [file-path path]
   (if (sequential? path)
     (let [[path overrides] path]
-      (deep-merge
+      (utils/deep-merge
        (read-config-file :spec (new URI (normalize-path file-path path)))
        overrides))
     (read-config-file :spec (new URI (normalize-path file-path path)))))

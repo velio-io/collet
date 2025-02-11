@@ -34,7 +34,8 @@
    [org.slf4j/slf4j-nop "2.0.16"]
    [com.cognitect.aws/api "0.8.692"]
    [com.cognitect.aws/endpoints "1.1.12.772"]
-   [com.cognitect.aws/s3 "869.2.1687.0"]]
+   [com.cognitect.aws/s3 "869.2.1687.0"]
+   [com.schibsted.spt.data/jslt "0.1.14"]]
 
   ;; required by Chronicle Queue to work with Java 11, Java 17 or Java 21
   :jvm-opts

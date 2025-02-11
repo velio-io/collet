@@ -289,10 +289,10 @@
         request   (-> params
                       (assoc :next-link next-link)
                       (make-odata-request-map))]
-    (-> (merge (dissoc params :service-url :segment :filter :select :expand :order :top :skip :count :follow-next-link :get-total-count)
-               {:content-type :json
+    (-> (merge {:content-type :json
                 :as           :json
                 :keywordize   false}
+               (dissoc params :service-url :segment :filter :select :expand :order :top :skip :count :follow-next-link :get-total-count)
                request)
         (collet.http/make-request))))
 
