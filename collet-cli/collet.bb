@@ -3,6 +3,7 @@
 (require
  '[babashka.pods :as pods]
  '[babashka.cli :as cli]
+ '[babashka.fs :as fs]
  '[bblgum.core :as b]
  '[clojure.string :as string]
  '[puget.printer :as puget])
@@ -12,7 +13,20 @@
   (string/replace *file* "collet.bb" "collet.pod.jar"))
 
 ;; run collet pod
-(pods/load-pod ["java" "-jar" pod-jar-path])
+(pods/load-pod
+ ["java"
+  "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
+  "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+  "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"
+  "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
+  "--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED"
+  "--add-opens=java.base/java.lang=ALL-UNNAMED"
+  "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+  "--add-opens=java.base/java.io=ALL-UNNAMED"
+  "--add-opens=java.base/java.util=ALL-UNNAMED"
+  "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+  "--enable-native-access=ALL-UNNAMED"
+  "-jar" pod-jar-path])
 ;;(pods/load-pod ["lein" "run"])
 (require '[pod.collet.core :as collet])
 
@@ -113,7 +127,18 @@
 
 
 (defn main [& args]
+  (when-not (fs/exists? ".collet")
+    (fs/create-dir ".collet"))
+
   (let [options        (cli/parse-opts args collet-cli-spec)
+        options        (if (nil? (:context-file options))
+                         (let [temp-file (fs/create-temp-file {:dir    ".collet"
+                                                               :suffix ".edn"})
+                               path      (str temp-file)]
+                           (fs/delete-on-exit temp-file)
+                           (spit path "{}")
+                           (assoc options :context-file path))
+                         options)
         *command       (atom nil)
         *portal-opened (atom false)]
     ;; show header
@@ -138,7 +163,9 @@
                nil)
              (catch Exception ex
                (message (format "Error executing command %s" cmd))
-               (message (ex-message ex)))))
+               (message (ex-message ex))
+               (message (ex-cause ex))
+               (message ex))))
 
       ;; ask again
       (if (= cmd "repeat action")

@@ -17,6 +17,7 @@
    ;; built-in actions
    [collet.actions.counter]
    [collet.actions.slicer]
+   [collet.actions.stats]
    [collet.actions.fold]
    [collet.actions.enrich]
    [collet.actions.mapper]
@@ -483,14 +484,23 @@
 
 (defn execute-task
   ([task config]
-   (execute-task task {} config))
+   (execute-task task config {} nil))
 
   ([task config context]
-   (let [{:keys [task-fn]} (compile-task (utils/eval-ctx) task)
-         result     (task-fn (merge (->context config) context))
-         iteration? (-> result meta :iteration)]
+   (execute-task task config context nil))
+
+  ([task config context deps]
+   (let [{:keys [task-fn inputs]} (compile-task (utils/eval-ctx (:requires deps) (:imports deps)) task)
+         inputs       (reduce
+                       (fn [is i]
+                         (let [input-data (get-in context [:state i])]
+                           (assoc is i input-data)))
+                       {} inputs)
+         task-context (merge (->context config) context {:inputs inputs})
+         result       (task-fn task-context)
+         iteration?   (-> result meta :iteration)]
      (if iteration?
-       (doall (seq result))
+       (first (seq result))
        result))))
 
 

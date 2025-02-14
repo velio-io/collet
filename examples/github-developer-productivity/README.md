@@ -27,10 +27,20 @@ You should be able to find them in the `report` folder after the pipeline execut
 You can use two Vega configuration files to visualize the results.
 First Vega file [total-prs-distribution.vg.json](total-prs-distribution.vg.json) 
 shows the total number of pull requests made by each developer.
+You can use the following command to generate the SVG file.
+
+```shell
+vg2svg -h ./total-prs-distribution.vg.json total-prs-distribution.svg
+```
 
 ![total-prs-distribution.svg](total-prs-distribution.svg)
 
 The second Vega file [monthly-prs-distribution.vg.json](monthly-prs-distribution.vg.json) 
 shows the split of pull requests made by each developer on the per month basis.
+You can use the following command to generate the SVG file.
+
+```shell
+vg2svg -h ./monthly-prs-distribution.vg.json monthly-prs-distribution.svg
+```
 
 ![monthly-prs-distribution.svg](monthly-prs-distribution.svg)

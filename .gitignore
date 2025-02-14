@@ -19,3 +19,4 @@ data
 tmp
 local.clj
 .portal
+.collet

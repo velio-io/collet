@@ -8,20 +8,26 @@
  :tasks
  {:requires
   ([babashka.fs :as fs]
+   [babashka.process :as ps]
    [release :as release])
 
   dev-setup
   {:doc  "Create a checkouts folders and symlinks for sub projects"
-   :task (do (fs/create-dir "collet-actions/checkouts")
+   :task (do (ps/shell {:dir "collet-core"} "lein" "install")
+             (fs/create-dir "collet-actions/checkouts")
              (fs/create-sym-link "collet-actions/checkouts/collet-core" "../../collet-core/")
              (fs/create-dir "collet-app/checkouts")
-             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/"))}
+             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/")
+             (ps/shell {:dir "collet-app"} "lein" "install")
+             (fs/create-dir "collet-cli/checkouts")
+             (fs/create-sym-link "collet-cli/checkouts/collet-app" "../../collet-app/"))}
 
 
   dev-cleanup
   {:doc  "Cleanup dev resources"
    :task (do (fs/delete-tree "collet-actions/checkouts")
-             (fs/delete-tree "collet-app/checkouts"))}
+             (fs/delete-tree "collet-app/checkouts")
+             (fs/delete-tree "collet-cli/checkouts"))}
 
 
   release
