@@ -467,7 +467,7 @@ metrics you want to calculate. Available metrics are: `:sum` `:mean` `:median` `
 ## Actions to work with external datasource's
 
 Collet has a separate package with actions to work with external datasource's like third-party APIs, databases, etc.
-You'll have to include that package as a dependency `[io.velio/collet-actions "0.2.4"]`
+You'll have to include that package as a dependency `[io.velio/collet-actions "0.2.5"]`
 Available actions are:
 
 ### HTTP request
@@ -579,7 +579,7 @@ The request map can contain the following keys:
 
 ```clojure
 {:name  :products-bought-by-users
- :deps  {:coordinates [[io.velio/collet-actions "0.2.4"]
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.5"]
                        [com.mysql/mysql-connector-j "9.0.0"]]}
  :tasks [{:name    :query
           :actions [{:name   :query-action
@@ -618,7 +618,7 @@ The request map can contain the following:
 
 ```clojure
 {:name  :s3-sink-test
- :deps  {:coordinates [[io.velio/collet-actions "0.2.4"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.5"]]}
  :tasks [{:name    :s3-test-task
           :actions [{:name   :s3-action
                      :type   :collet.actions.s3/sink
@@ -669,7 +669,7 @@ Options:
 
 ```clojure
 {:name  :queue-sink-test
- :deps  {:coordinates [[io.velio/collet-actions "0.2.4"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.5"]]}
  :tasks [{:name    :write-messages
           :actions [{:name   :queue-action
                      :type   :collet.actions.queue/enqueue
