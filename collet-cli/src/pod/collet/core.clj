@@ -6,6 +6,7 @@
    [clojure.java.io :as io]
    [clojure.walk :as walk]
    [bencode.core :as bencode]
+   [tech.v3.dataset :as ds]
    [collet.main :as collet.main]
    [collet.core :as collet.core]
    [portal.api :as p])
@@ -79,7 +80,12 @@
                     {})
         task-spec (collet.core/find-task spec task-name)]
     (collet.core/check-dependencies (:deps spec) (:tasks spec))
-    (collet.core/execute-task task-spec config context)))
+    (let [result   (collet.core/execute-task task-spec config context (:deps spec))
+          context' (cond->> result
+                     (ds/dataset? result) (ds/rows)
+                     :always (assoc-in context [:state task-name]))]
+      (spit context-file (pr-str context'))
+      result)))
 
 
 (defn run-pipeline [{:keys [pipe-spec pipe-config]}]

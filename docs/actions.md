@@ -227,6 +227,14 @@ column names and their types (e.g. `{:column-name-1 :instant :column-name-2 int3
 ```
 
 Reverse operation is `:fold`.
+You can provide a `:columns` map to include columns in the resulting dataset. Key should be a column name and value
+should be a function keyword to apply on the column values during the folding process. Available functions are:
+`:values` (get all values as a vector), `:distinct` (collect only distinct values), `:first-value` (take only the first
+value), `:row-count` (count all values), `:count-distinct` (count only distinct values), `:mean` (calculate mean),
+`:sum` (calculate sum)
+
+With `:rollup` param set to true you can tell the slicer to take only a single value for `:distinct` operation if all
+values are the same (so `[1 1 1]` will become just `1`).
 
 ```clojure
 {:actions [{:name   :users
@@ -236,13 +244,34 @@ Reverse operation is `:fold`.
                                 {:id 3 :name "James" :street "Elm St."}
                                 {:id 4 :name "Jacob" :street "Elm St."}
                                 {:id 5 :name "Jason" :street "Main St."}]
-                     :apply    [[:fold {:by     [:street]
-                                        :rollup true}]]}}]}
+                     :apply    [[:fold {:by      :street
+                                        :rollup  true
+                                        :columns {:id   :distinct
+                                                  :name :distinct}}]]}}]}
 
 ;; will result in:
 [{:street "Main St." :id [1 5] :name ["John" "Jason"]}
  {:street "NorthG St." :id 2 :name "Jane"}
  {:street "Elm St." :id [3 4] :name ["James" "Jacob"]}]
+```
+
+Value in the `:columns` map can be a vector of function keyword and column name. In this case you can create a new
+column with the result of the function applied to the values of the specified column.
+
+```clojure
+{:actions [{:name   :users
+            :type   :slicer
+            :params {:sequence [{:id 1 :name "John" :city "Springfield"}
+                                {:id 2 :name "Jane" :city "Lakeside"}
+                                {:id 3 :name "Jack" :city "Springfield"}
+                                {:id 4 :name "Jill" :city "Lakeside"}
+                                {:id 5 :name "Joe" :city "Lakeside"}]
+                     :apply    [[:fold {:by      :city
+                                        :columns {:city-rows-count [:row-count :id]}}]]}}]}
+
+;; will result in:
+[{:city "Springfield" :city-rows-count 2}
+ {:city "Lakeside" :city-rows-count 3}]
 ```
 
 You can group values with `:group` transformation. There's two options available: preserve a single dataset but add a
@@ -328,7 +357,21 @@ Use `:map` function to iterate on over every row in the dataset
                                              {:full-name (str name " " second-name)})}]]}}]}
 ```
 
-Of course, you can combine multiple transformations together.
+If need additional arguments for your mapping function you can provide them within `:args` key.
+
+```clojure
+{:actions [{:name   :users
+            :type   :slicer
+            :params {:sequence [{:id 1 :name "John" :second-name "Doe"}
+                                {:id 2 :name "Jane" :second-name "Lane"}
+                                {:id 3 :name "Jack" :second-name "Black"}]
+                     ;; this will add a new column to every row with a full name
+                     :apply    [[:map {:fn   (fn [{:keys [name second-name]} prefix]
+                                               {:full-name (str prefix " " name " " second-name)})
+                                       :args ["Mr."]}]]}}]}
+```
+
+Of course, you can combine multiple transformations together. Operations will be executed in the order they are defined.
 
 ```clojure
 {:actions [{:name   :users
@@ -390,6 +433,35 @@ With `:switch` action you can create multiple branches which will be invoked if 
         ;; default condition will be executed if none of the conditions above met
         {:condition :default
          :actions   [{:name :update-user}]}]}
+```
+
+### Stats
+
+`stats` action calculates basic statistics for the input collection. You can provide a `:metrics` key with a map of
+metrics you want to calculate. Available metrics are: `:sum` `:mean` `:median` `:min` `:max` `:quartiles`.
+
+```clojure
+;;data
+[{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
+
+;; action
+{:name   :stats
+ :type   :stats
+ :params {:sequence data
+          :metrics  {:sum-a       [:sum :a]
+                     :min-b       [:min :b]
+                     :max-a       [:max :a]
+                     :mean-b      [:mean :b]
+                     :median-a    [:median :a]
+                     :quartiles-b [:quartiles :b]}}}
+
+;; will result in:
+{:sum-a       9.0,
+ :min-b       2.0,
+ :max-a       5.0,
+ :mean-b      4.0,
+ :median-a    3.0,
+ :quartiles-b [2.0 2.0 4.0 6.0 6.0]}
 ```
 
 ## Actions to work with external datasource's

@@ -83,20 +83,26 @@
     (cond
       (and take-one? (some? arrow-column))
       (collet.arrow/prep-value (first unique) arrow-column)
+
       take-one?
       (first unique)
+
       (some? arrow-columns)
       (mapv #(collet.arrow/prep-value % arrow-column) column')
+
       :otherwise
       (vec column'))))
 
 
-(defn zip-columns
-  "Zip grouped dataset into a single row"
-  [options dataset]
-  (->> (ds/columns dataset)
-       (map (partial prep-column options))
-       (zipmap (ds/column-names dataset))))
+(defn vector-reducer
+  "Create a reducer that adds all values into a vector."
+  [column-name]
+  (ds.reduce/reducer
+   column-name
+   (fn [] [])
+   (fn [acc val] (conj acc val))
+   (fn [acc1 acc2] (into acc1 acc2))
+   identity))
 
 
 (defn ->agg-columns
@@ -108,6 +114,7 @@
          (map (fn [[k v]]
                 (let [[rf-func rf-col] (if (sequential? v) v [v k])
                       reducer (case rf-func
+                                :values (vector-reducer rf-col)
                                 :distinct (ds.reduce/distinct
                                            rf-col #(prep-column (assoc options :column-name rf-col) %))
                                 :count-distinct (ds.reduce/count-distinct rf-col)
@@ -121,7 +128,7 @@
 
 (defn do-fold-by
   "Fold dataset by the provided columns"
-  [dataset {:keys [by rollup rollup-except keep-columns]
+  [dataset {:keys [by rollup rollup-except columns]
             :or   {rollup false rollup-except false}}]
   (let [rollup'           (cond
                             (true? rollup) :all
@@ -132,24 +139,14 @@
                             (set by)
                             #{by})
         keep-columns      (merge (into {} (map #(vector % :distinct)) target-columns)
-                                 keep-columns)]
-    (if (utils/ds-seq? dataset)
-      (let [arrow-columns  (-> dataset meta :arrow-columns)
-            finalizer-opts {:rollup         rollup'
-                            :rollup-except  rollup-except
-                            :target-columns target-columns
-                            :arrow-columns  arrow-columns}
-            agg-columns    (->agg-columns keep-columns finalizer-opts)]
-        (ds.reduce/group-by-column-agg by agg-columns dataset))
-
-      (let [zip-options {:rollup         rollup'
-                         :rollup-except  rollup-except
-                         :target-columns target-columns}
-            options     {:group-by-finalizer (partial zip-columns zip-options)}
-            groups      (if multiple-columns?
-                          (ds/group-by dataset #(select-keys % by) options)
-                          (ds/group-by-column dataset by options))]
-        (-> groups vals ds/->dataset)))))
+                                 columns)]
+    (let [arrow-columns  (-> dataset meta :arrow-columns)
+          finalizer-opts {:rollup         rollup'
+                          :rollup-except  rollup-except
+                          :target-columns target-columns
+                          :arrow-columns  arrow-columns}
+          agg-columns    (->agg-columns keep-columns finalizer-opts)]
+      (ds.reduce/group-by-column-agg by agg-columns dataset))))
 
 
 (defn flatten-mapper
@@ -262,13 +259,15 @@
 
 
 (defn do-map-with
-  [dataset {:keys [with as-dataset?] :or {as-dataset? false}}]
+  [dataset {:keys [with args as-dataset?] :or {as-dataset? false}}]
   (cond
     (utils/ds-seq? dataset)
     (let [{:keys [arrow-columns] :as ds-meta} (-> dataset meta)
           map-fn (if (some? arrow-columns)
-                   (comp with #(collet.arrow/prep-record % arrow-columns))
-                   with)]
+                   (fn [row]
+                     (apply with (collet.arrow/prep-record row arrow-columns) args))
+                   (fn [row]
+                     (apply with row args)))]
       (-> (map #(ds/row-map % map-fn) dataset)
           (with-meta (dissoc ds-meta :arrow-columns))))
     (ds/dataset? dataset)

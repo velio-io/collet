@@ -1,7 +1,11 @@
 {:name  :devs-productivity-pipeline
  ;; add extra dependencies
  :deps  {:coordinates [[io.velio/collet-actions "0.2.3"]]
-         :imports     [java.time.LocalDate java.time.format.DateTimeFormatter]}
+         :imports     [java.lang.Math
+                       java.time.LocalDate
+                       java.time.LocalDateTime
+                       java.time.format.DateTimeFormatter
+                       java.time.temporal.ChronoUnit]}
  ;; specify the list of tasks
  :tasks [;; get the list of repositories for the organization
          {:name     :repositories
@@ -13,8 +17,7 @@
                                            :type      :collet.actions.http/request
                                            :selectors {next-page [:state :next-page-link]
                                                        gh-token  [:config :gh-token]}
-                                           :params    #include ["./gh-request.edn"
-                                                                {:url next-page}]
+                                           :params    #include ["./gh-request.edn" {:url next-page}]
                                            :return    [{:repos [:body]
                                                         :link  [:headers :link]}]}]}
                              {:condition :default
@@ -86,42 +89,95 @@
           :return   [:state :repository-prs :prs [:$/cat #include "./pr-keys.edn"]]}
 
          ;; generate productivity reports
-         {:name    :productivity-reports
+         ;; calculate the total number of PRs for each member across all repositories
+         {:name    :total-prs-by-member
           :inputs  [:pull-requests]
-          :actions [;; calculate the total number of PRs for each member across all repositories
-                    {:name      :total-prs-by-member
+          :actions [{:name      :prs-by-member
                      :type      :slicer
                      :selectors {pulls [:inputs :pull-requests]}
                      :params    {:sequence pulls
-                                 :apply    [[:fold {:by :user-id :keep-columns {:title :distinct}}]
-                                            [:map {:with (fn [{:keys [title]}]
-                                                           {:pulls-count (count title)})}]
+                                 :apply    [[:fold {:by      :user-id
+                                                    :columns {:pulls-count [:count-distinct :id]}}]
                                             [:select {:columns [:user-id :pulls-count]}]]}}
                     {:name      :save-total-report
                      :type      :collet.actions.file/sink
-                     :selectors {data [:state :total-prs-by-member]}
+                     :selectors {data [:state :prs-by-member]}
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "./reports/total-prs-by-member.csv"}}
+                                 :file-name   "./reports/total-prs-by-member.csv"}}]}
 
-                    ;; calculate the number of PRs for each member per month
-                    {:name      :monthly-prs-by-member
+         ;; calculate the merge ratio for each member
+         {:name    :merge-ratio-by-member
+          :inputs  [:pull-requests]
+          :actions [{:name      :merge-ratios
+                     :type      :slicer
+                     :selectors {pulls [:inputs :pull-requests]}
+                     :params    {:sequence pulls
+                                 :apply    [[:fold {:by      :user-id
+                                                    :columns {:merged-count [:count-distinct :merged_at]
+                                                              :total-count  [:count-distinct :id]}}]
+                                            [:map {:with (fn [{:keys [merged-count total-count]}]
+                                                           {:merge-ratio (Math/round
+                                                                           (* (double (/ merged-count total-count))
+                                                                             100))})}]
+                                            [:select {:columns [:user-id :merge-ratio]}]]}}
+                    {:name      :save-merge-ratio-report
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :merge-ratios]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "./reports/merge-ratio-by-member.csv"}}]}
+
+         ;; calculate the number of PRs for each member per month
+         {:name    :monthly-prs-by-member
+          :inputs  [:pull-requests]
+          :actions [{:name      :prs-by-member
                      :type      :slicer
                      :selectors {pulls [:inputs :pull-requests]}
                      :params    {:sequence pulls
                                  :apply    [[:map {:with (fn [{:keys [^String closed_at]}]
-                                                           (let [dt ^LocalDate (LocalDate/parse closed_at (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'"))]
+                                                           (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                                                                 dt ^LocalDate (LocalDate/parse closed_at formatter)]
                                                              {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
-                                            [:fold {:by           [:user-id :year-month]
-                                                    :keep-columns {:title :distinct}}]
-                                            [:map {:with (fn [{:keys [title]}]
-                                                           {:pulls-count (count title)})}]
+                                            [:fold {:by      [:user-id :year-month]
+                                                    :columns {:pulls-count [:count-distinct :id]}}]
                                             [:select {:columns [:user-id :pulls-count :year-month]}]]}}
                     {:name      :save-monthly-report
                      :type      :collet.actions.file/sink
-                     :selectors {data [:state :monthly-prs-by-member]}
+                     :selectors {data [:state :prs-by-member]}
                      :params    {:input       data
                                  :format      :csv
                                  :csv-header? true
-                                 :file-name   "./reports/monthly-prs-by-member.csv"}}]}]}
+                                 :file-name   "./reports/monthly-prs-by-member.csv"}}]}
+
+         ;; calculate average time to merge
+         {:name    :average-time-to-merge
+          :inputs  [:pull-requests]
+          :actions [{:name      :time-to-merge
+                     :type      :slicer
+                     :selectors {pulls [:inputs :pull-requests]}
+                     :params    {:sequence pulls
+                                 :apply    [[:map {:with (fn [{:keys [^String created_at ^String merged_at]}]
+                                                           (if (and (not-empty created_at) (not-empty merged_at))
+                                                             (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                                                                   created ^LocalDateTime (LocalDateTime/parse created_at formatter)
+                                                                   merged ^LocalDateTime (LocalDateTime/parse merged_at formatter)]
+                                                               {:time-to-merge (.until created merged ChronoUnit/SECONDS)})
+                                                             {:time-to-merge 0}))}]
+                                            [:filter {:by [:not= :time-to-merge 0]}]
+                                            [:fold {:by      :user-id
+                                                    :columns {:time-to-merge :sum
+                                                              :total-prs     [:count-distinct :id]}}]
+                                            [:map {:with (fn [{:keys [time-to-merge total-prs]}]
+                                                           {:average-ttm (int (/ time-to-merge total-prs))})}]
+                                            [:select {:columns [:user-id :average-ttm]}]]}}
+                    {:name      :save-average-time
+                     :type      :collet.actions.file/sink
+                     :selectors {data [:state :time-to-merge]}
+                     :params    {:input       data
+                                 :format      :csv
+                                 :csv-header? true
+                                 :file-name   "./reports/average-time-to-merge.csv"}}]}]}
+

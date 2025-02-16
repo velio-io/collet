@@ -7,7 +7,10 @@
    [collet.test-fixtures :as tf]
    [collet.core :as collet]
    [collet.arrow :as collet.arrow]
-   [collet.actions.slicer :as sut]))
+   [collet.actions.slicer :as sut])
+  (:import
+   [java.time LocalDate]
+   [java.time.format DateTimeFormatter]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.slicer))
@@ -65,13 +68,14 @@
                               {:id 3 :name "James" :street "Elm St."}
                               {:id 4 :name "Jacob" :street "Elm St."}
                               {:id 5 :name "Jason" :street "Main St."}]
-                   :apply    [[:fold {:by     :street
-                                      :rollup true}]]})]
+                   :apply    [[:fold {:by      :street
+                                      :rollup  true
+                                      :columns {:id :distinct :name :distinct}}]]})]
       (is (= 3 (ds/row-count result)))
-      (is (= [{:street "Main St." :id [1 5] :name ["John" "Jason"]}
-              {:street "NorthG St." :id 2 :name "Jane"}
-              {:street "Elm St." :id [3 4] :name ["James" "Jacob"]}]
-             (ds/rows result))))
+      (is (= #{{:street "Main St." :id [1 5] :name ["John" "Jason"]}
+               {:street "NorthG St." :id 2 :name "Jane"}
+               {:street "Elm St." :id [3 4] :name ["James" "Jacob"]}}
+             (set (ds/rows result)))))
 
     (let [data-seq [[{:id 1 :name "John" :street "Main St."}
                      {:id 2 :name "Jane" :street "NorthG St."}
@@ -81,9 +85,9 @@
           sequence (data->dataset-seq "tmp/slicer-folding-arrow-test.arrow" data-seq)
           result   (sut/prep-dataset
                     {:sequence sequence
-                     :apply    [[:fold {:by           :street
-                                        :keep-columns {:id :distinct :name :distinct}
-                                        :rollup       true}]]})]
+                     :apply    [[:fold {:by      :street
+                                        :columns {:id :distinct :name :distinct}
+                                        :rollup  true}]]})]
       (is (= 3 (ds/row-count result)))
       (is (= #{{:street "Main St." :id [1 5] :name ["John" "Jason"]}
                {:street "NorthG St." :id 2 :name "Jane"}
@@ -423,7 +427,7 @@
         sequence (data->dataset-seq "tmp/slicer-arrow-test.arrow" data-seq)
         result   (sut/prep-dataset
                   {:sequence sequence
-                   :apply    [[:fold {:by :b :keep-columns {:a :distinct :c :distinct}}]
+                   :apply    [[:fold {:by :b :columns {:a :distinct :c :distinct}}]
                               [:map {:with (fn [{:keys [a]}]
                                              {:a-count (count a)})}]]})]
     (is (ds/dataset? result))
@@ -461,7 +465,6 @@
                                                                                                  :artist]]}}]]}}]}]}
           pipeline      (collet/compile-pipeline pipeline-spec)]
       @(pipeline {:area-events test-events-data})
-
       (let [events-with-artists (:events-with-artists pipeline)]
         (is (= (map :id test-events-data)
                (distinct (ds/column events-with-artists :id)))
@@ -472,3 +475,70 @@
 
         (is (= 22 (ds/row-count events-with-artists))
             "all artists are present")))))
+
+
+(deftest fold-columns-test
+  (let [prs           [{:user-id 1 :title "PR 1" :date "2025-02-19"}
+                       {:user-id 1 :title "PR 2" :date "2025-02-19"}
+                       {:user-id 2 :title "PR 3" :date "2025-02-20"}
+                       {:user-id 2 :title "PR 4" :date "2025-02-21"}
+                       {:user-id 3 :title "PR 5" :date "2025-02-01"}
+                       {:user-id 3 :title "PR 6" :date "2025-02-01"}
+                       {:user-id 3 :title "PR 7" :date "2025-02-02"}]
+        pipeline-spec {:name  :columns-test
+                       :tasks [{:name       :prs-count-by-member
+                                :keep-state true
+                                :actions    [{:name   :prs-by-member
+                                              :type   :slicer
+                                              :params {:sequence prs
+                                                       :apply    [[:fold {:by      :user-id
+                                                                          :columns {:title     :distinct
+                                                                                    :date      :values
+                                                                                    :prs-count :row-count}}]]}}]}]}
+        pipeline      (collet/compile-pipeline pipeline-spec)]
+    @(pipeline {})
+    (let [prs-by-member (:prs-count-by-member pipeline)]
+      (is (= 3 (ds/row-count prs-by-member)))
+      (is (= #{1 2 3}
+             (-> prs-by-member (ds/column :user-id) set)))
+      (is (= #{2 3}
+             (-> prs-by-member (ds/column :prs-count) set)))
+      (is (= [#{"PR 1" "PR 2"} #{"PR 3" "PR 4"} #{"PR 5" "PR 6" "PR 7"}]
+             (map set (-> prs-by-member (ds/column :title)))))
+      (is (= [["2025-02-19" "2025-02-19"]
+              ["2025-02-20" "2025-02-21"]
+              ["2025-02-01" "2025-02-01" "2025-02-02"]]
+             (-> prs-by-member (ds/column :date)))))))
+
+
+(deftest fold-multiple-columns-test
+  (let [pulls         [{:id 1 :user-id 1 :closed_at "2025-02-19"}
+                       {:id 2 :user-id 1 :closed_at "2025-01-19"}
+                       {:id 3 :user-id 2 :closed_at "2025-02-20"}
+                       {:id 4 :user-id 2 :closed_at "2025-02-21"}
+                       {:id 5 :user-id 3 :closed_at "2025-01-01"}
+                       {:id 6 :user-id 3 :closed_at "2025-02-01"}
+                       {:id 7 :user-id 3 :closed_at "2025-02-02"}]
+        pipeline-spec {:name  :multiple-columns-test
+                       :deps  {:imports '[java.time.LocalDate java.time.format.DateTimeFormatter]}
+                       :tasks [{:name       :monthly-prs-by-member
+                                :keep-state true
+                                :actions    [{:name   :prs-by-member
+                                              :type   :slicer
+                                              :params {:sequence pulls
+                                                       :apply    [[:map {:with '(fn [{:keys [^String closed_at]}]
+                                                                                  (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd")
+                                                                                        dt        ^LocalDate (LocalDate/parse closed_at formatter)]
+                                                                                    {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
+                                                                  [:fold {:by      [:user-id :year-month]
+                                                                          :columns {:pulls-count [:count-distinct :id]}}]
+                                                                  [:select {:columns [:user-id :pulls-count :year-month]}]]}}]}]}
+        pipeline      (collet/compile-pipeline pipeline-spec)]
+    @(pipeline {})
+    (is (= 5 (ds/row-count (:monthly-prs-by-member pipeline))))
+    (is (= #{{:user-id 2, :pulls-count 2, :year-month "2025-2"}
+             {:user-id 1, :pulls-count 1, :year-month "2025-1"}
+             {:user-id 1, :pulls-count 1, :year-month "2025-2"}
+             {:user-id 3, :pulls-count 1, :year-month "2025-1"}
+             {:user-id 3, :pulls-count 2, :year-month "2025-2"}}
+           (-> (:monthly-prs-by-member pipeline) (ds/rows) set)))))
