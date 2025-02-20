@@ -6,7 +6,7 @@
    [sci.core :as sci]
    [tech.v3.dataset :as ds])
   (:import
-   [clojure.lang PersistentVector]
+   [clojure.lang Fn PersistentVector]
    [ham_fisted LinkedHashMap]
    [sci.impl.opts Ctx]))
 
@@ -124,6 +124,7 @@
        (ds-seq? x) (list (ds/select-rows (first x) (range (min 100 (ds/row-count (first x))))))
        (ds/dataset? x) (ds/select-rows x (range (min 100 (ds/row-count x))))
        (and (sequential? x) (not (map-entry? x))) (take 100 x)
+       (fn? x) (-> ^Fn x .getClass .getName)
        :otherwise x))
    data))
 

@@ -59,3 +59,17 @@ bb build
 
 This will produce a `target/collet-cli.tar.gz` file.
 You can upload this file to GitHub releases.
+
+### Development
+
+When you are developing the collet-cli, you can use the following command to run the CLI.
+
+```shell
+bb --config ./collet-bb-deps.edn -f collet.bb -s /path/to/spec.edn -c /path/to/config.edn
+```
+
+In case you need a REPL to the babashka process
+
+```shell
+bb --config "./collet-bb-deps.edn" nrepl-server 1667
+```
