@@ -783,3 +783,60 @@
           pipeline      (sut/compile-pipeline pipeline-spec)]
       @(pipeline {})
       (is (instance? Exception (:exception (sut/pipe-error pipeline)))))))
+
+
+(deftest execute-task-test
+  (testing "execute-task respects the state format option"
+    (let [context {:state {:gh-repos [{:name "repo1"}
+                                      {:name "repo2"}
+                                      {:name "repo3"}
+                                      {:name "repo4"}
+                                      {:name "repo5"}]
+                           :gh-prs   {"repo1" [{:title "PR1" :state "open"}
+                                               {:title "PR2" :state "closed"}]
+                                      "repo2" [{:title "PR3" :state "open"}
+                                               {:title "PR4" :state "closed"}]
+                                      "repo3" [{:title "PR5" :state "open"}
+                                               {:title "PR6" :state "closed"}]
+                                      "repo4" [{:title "PR7" :state "open"}
+                                               {:title "PR8" :state "closed"}]
+                                      "repo5" [{:title "PR9" :state "open"}
+                                               {:title "PR10" :state "closed"}]}}}]
+      (let [task   {:name         :gh-prs
+                    :inputs       [:gh-repos :gh-prs]
+                    :parallel     {:items   [:inputs :gh-repos]
+                                   :threads 2}
+                    :actions      [{:name      :fetch-gh-prs
+                                    :type      :custom
+                                    :selectors {'repo-name [:$parallel/item :name]
+                                                'all-prs   [:state :gh-prs]}
+                                    :params    ['all-prs 'repo-name]
+                                    :fn        (fn [prs repo-name]
+                                                 (get prs repo-name))}]
+                    :state-format :flatten}
+            result (sut/execute-task task {} context)]
+        (is (= 10 (count result)))
+        (is (= ["PR1" "PR2" "PR3" "PR4" "PR5" "PR6" "PR7" "PR8" "PR9" "PR10"]
+               (map :title result))))
+
+      (testing "with iterator only first result is calculated"
+        (let [task   {:name         :gh-prs
+                      :inputs       [:gh-repos :gh-prs]
+                      :actions      [{:name      :repo
+                                      :type      :mapper
+                                      :selectors {'repos [:inputs :gh-repos]}
+                                      :params    {:sequence 'repos}}
+                                     {:name      :fetch-gh-prs
+                                      :type      :custom
+                                      :selectors {'repo-name [:$mapper/item :name]
+                                                  'all-prs   [:state :gh-prs]}
+                                      :params    ['all-prs 'repo-name]
+                                      :fn        (fn [prs repo-name]
+                                                   (get prs repo-name))}]
+                      :iterator     {:next [:true? [:$mapper/has-next-item]]}
+                      :state-format :flatten}
+              result (sut/execute-task task {} context)]
+          (is (= 2 (count result)))
+          (is (= ["PR1" "PR2"]
+                 (map :title result))))))))
+

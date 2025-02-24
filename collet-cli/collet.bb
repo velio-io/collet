@@ -1,12 +1,13 @@
 #!/usr/bin/env bb
 
-(require
- '[babashka.pods :as pods]
- '[babashka.cli :as cli]
- '[babashka.fs :as fs]
- '[bblgum.core :as b]
- '[clojure.string :as string]
- '[puget.printer :as puget])
+(ns collet
+  (:require
+   [babashka.pods :as pods]
+   [babashka.cli :as cli]
+   [babashka.fs :as fs]
+   [bblgum.core :as b]
+   [clojure.string :as string]
+   [puget.printer :as puget]))
 
 
 (def pod-jar-path
