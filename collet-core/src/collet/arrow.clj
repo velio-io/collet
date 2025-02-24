@@ -56,7 +56,8 @@
 
 (defn ds->columns
   "Infer a list of columns (simple representation of Arrow fields) from a dataset sample."
-  {:malli/schema [:=> [:cat utils/dataset?]
+  {:malli/schema [:=> [:cat [:or utils/dataset?
+                             [:sequential utils/dataset?]]]
                   columns-spec]}
   [dataset]
   (->> dataset
@@ -101,9 +102,12 @@
     (try
       (let [ds-sample (if (ds/dataset? data)
                         (ds/sample data (min 200 (ds/row-count data)))
-                        (take 200 (shuffle data)))]
+                        (repeatedly
+                         (min (count data) 200)
+                         #(rand-nth data)))]
         (-> (utils/make-dataset ds-sample {})
-            (ds->columns)))
+            (ds->columns)
+            (not-empty)))
       (catch Exception _ex
         nil))))
 
@@ -415,6 +419,11 @@
                 :arrow-columns columns})))
 
 
+(defn micros->duration
+  [^long micros]
+  (Duration/ofNanos (* micros 1000)))
+
+
 (defn prep-value
   [value [_column-key _column-name column-type]]
   (cond (= column-type :string)
@@ -428,6 +437,9 @@
 
         (and (vector? column-type) (= :list (first column-type)))
         (vec-or-nil value)
+
+        (= column-type :duration)
+        (micros->duration value)
 
         :otherwise value))
 

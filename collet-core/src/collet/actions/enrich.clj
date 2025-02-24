@@ -77,11 +77,14 @@
   (let [action-name (:name action)
         base-name   (name action-name)
         mapper-key  (keyword (str base-name "-mapper"))]
-    (-> task
-        (assoc :state-format (or (:state-format task) :latest))
-        (update :iterator utils/replace-all
-                {:$enrich/item          [:state mapper-key :current]
-                 :$enrich/has-next-item [:state mapper-key :next]})
-        (update :return utils/replace-all
-                {:$enrich/item          [:state mapper-key :current]
-                 :$enrich/has-next-item [:state mapper-key :next]}))))
+    (cond-> task
+      :always
+      (assoc :state-format (or (:state-format task) :latest))
+      (some? (:iterator task))
+      (update :iterator utils/replace-all
+              {:$enrich/item          [:state mapper-key :current]
+               :$enrich/has-next-item [:state mapper-key :next]})
+      (some? (:update task))
+      (update :return utils/replace-all
+              {:$enrich/item          [:state mapper-key :current]
+               :$enrich/has-next-item [:state mapper-key :next]}))))

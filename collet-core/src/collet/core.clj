@@ -578,10 +578,10 @@
 
 
 (defn arrow->dataset
-  [arrow-task-result]
+  [^ArrowTaskResult arrow-task-result]
   (collet.arrow/read-dataset
-   (.-file ^ArrowTaskResult arrow-task-result)
-   (.-columns ^ArrowTaskResult arrow-task-result)))
+   (.-file arrow-task-result)
+   (.-columns arrow-task-result)))
 
 
 (defn handle-task-result
@@ -596,8 +596,7 @@
             arrow-columns (if seq-items?
                             (collet.arrow/get-columns (first data))
                             (collet.arrow/get-columns data))]
-        (if (and (some? arrow-columns)
-                 (not-empty arrow-columns))
+        (if (some? arrow-columns)
           ;; write to arrow file
           (let [file ^File (File/createTempFile (name task-name) ".arrow")]
             (.deleteOnExit file)
