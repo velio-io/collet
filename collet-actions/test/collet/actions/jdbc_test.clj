@@ -7,10 +7,11 @@
    [collet.core :as collet]
    [collet.deps :as collet.deps]
    [collet.utils :as utils]
-   [collet.actions.jdbc :as sut])
+   [collet.actions.jdbc :as sut]
+   [tech.v3.dataset :as ds])
   (:import
    [clojure.lang LazySeq]
-   [java.time LocalDate LocalDateTime LocalTime]))
+   [java.time LocalDate LocalDateTime LocalTime Duration]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.jdbc))
@@ -151,6 +152,12 @@
                         VALUES (false, 43, 3.15, 'text2', '2024-04-23', '21:01:04', '2024-04-23 21:01:04', '{\"c\": 3}', '{\"d\": 4}', '2 days 3 hours 4 minutes 5 seconds', 'sad')"]))
 
 
+(defn add-more-rows [conn]
+  (dotimes [_i 20]
+    (jdbc/execute! conn ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
+                          VALUES (true, 42, 3.14, 'text', '2024-04-22', '21:01:03', '2024-04-22 21:01:03', '{\"a\": 1}', '{\"b\": 2}', '1 day 2 hours 3 minutes 4 seconds', 'happy')"])))
+
+
 (deftest postgres-various-data-types-query-test
   (let [pg             (pg-container)
         port           (get (:mapped-ports pg) 5432)
@@ -160,6 +167,9 @@
                         :dbname   "test"
                         :user     "test"
                         :password "password"}]
+    (with-open [conn (jdbc/get-connection connection-map)]
+      (populate-pg-data-types conn))
+
     (testing "query various data types"
       (let [pipeline (collet/compile-pipeline
                       {:name  :data-types
@@ -173,34 +183,32 @@
                                               :params    {:connection 'connection
                                                           :query      {:select [:*]
                                                                        :from   :data-types}}}]}]})
-            _        (with-open [conn (jdbc/get-connection connection-map)]
-                       (populate-pg-data-types conn))
             _        @(pipeline {:connection connection-map})
             result   (:query pipeline)]
-        (is (= '(#:data_types{:bool_col      true
-                              :date_col      "2024-04-22"
-                              :float_col     3.14
-                              :id            1
-                              :int_col       42
-                              :interval_col  "PT26H3M4S"
-                              :json_col      {:a 1}
-                              :jsonb_col     {:b 2}
-                              :mood_col      "happy"
-                              :text_col      "text"
-                              :time_col      "21:01:03"
-                              :timestamp_col "2024-04-22T21:01:03"}
-                 #:data_types{:bool_col      false
-                              :date_col      "2024-04-23"
-                              :float_col     3.15
-                              :id            2
-                              :int_col       43
-                              :interval_col  "PT51H4M5S"
-                              :json_col      {:c 3}
-                              :jsonb_col     {:d 4}
-                              :mood_col      "sad"
-                              :text_col      "text2"
-                              :time_col      "21:01:04"
-                              :timestamp_col "2024-04-23T21:01:04"})
+        (is (= (list #:data_types{:bool_col      true
+                                  :date_col      (LocalDate/parse "2024-04-22")
+                                  :float_col     3.14
+                                  :id            1
+                                  :int_col       42
+                                  :interval_col  (Duration/parse "PT26H3M4S")
+                                  :json_col      {:a 1}
+                                  :jsonb_col     {:b 2}
+                                  :mood_col      "happy"
+                                  :text_col      "text"
+                                  :time_col      (LocalTime/parse "21:01:03")
+                                  :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
+                     #:data_types{:bool_col      false
+                                  :date_col      (LocalDate/parse "2024-04-23")
+                                  :float_col     3.15
+                                  :id            2
+                                  :int_col       43
+                                  :interval_col  (Duration/parse "PT51H4M5S")
+                                  :json_col      {:c 3}
+                                  :jsonb_col     {:d 4}
+                                  :mood_col      "sad"
+                                  :text_col      "text2"
+                                  :time_col      (LocalTime/parse "21:01:04")
+                                  :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04")})
                result)))
 
       (let [pipeline (collet/compile-pipeline
@@ -234,17 +242,16 @@
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
-                                              :params    {:connection      'connection
-                                                          :preserve-types? true
-                                                          :prefix-table?   false
-                                                          :query           {:select [:*]
-                                                                            :from   :data-types}}}]}]})
+                                              :params    {:connection    'connection
+                                                          :prefix-table? false
+                                                          :query         {:select [:*]
+                                                                          :from   :data-types}}}]}]})
             _        @(pipeline {:connection connection-map})
             result   (:query pipeline)]
         (are [key expected] (= expected (-> result first key))
           :bool_col true
           :mood_col "happy"
-          :interval_col "PT26H3M4S"
+          :interval_col (Duration/parse "PT26H3M4S")
           :json_col {:a 1}
           :jsonb_col {:b 2}
           :date_col (LocalDate/parse "2024-04-22")
@@ -254,12 +261,119 @@
         (are [key expected] (= expected (-> result second key))
           :bool_col false
           :mood_col "sad"
-          :interval_col "PT51H4M5S"
+          :interval_col (Duration/parse "PT51H4M5S")
           :json_col {:c 3}
           :jsonb_col {:d 4}
           :date_col (LocalDate/parse "2024-04-23")
           :time_col (LocalTime/parse "21:01:04")
           :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04"))))
+
+    ;; add 20 more records to the table
+    (with-open [conn (jdbc/get-connection connection-map)]
+      (add-more-rows conn))
+
+    (testing "writing results into arrow"
+      (let [pipeline (collet/compile-pipeline
+                      {:name  :arrow-results
+                       :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
+                               :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
+                       :tasks [{:name       :query
+                                :keep-state true
+                                :actions    [{:name      :query-action
+                                              :type      :collet.actions.jdbc/query
+                                              :selectors '{connection [:config :connection]}
+                                              :params    '{:connection    connection
+                                                           :fetch-size    10
+                                                           :prefix-table? false
+                                                           :query         {:select [:id :bool_col
+                                                                                    :mood_col :interval_col
+                                                                                    :date_col :time_col :timestamp_col]
+                                                                           :from   :data-types}}}]}]})
+            _        @(pipeline {:connection connection-map})
+            result   (:query pipeline)
+            columns  (-> result meta :arrow-columns)]
+        (is (= 3 (count result)))
+        (is (utils/ds-seq? result))
+        (is (= [10 10 2] (map ds/row-count result)))
+        (is (= {:id            1
+                :bool_col      true
+                :mood_col      "happy"
+                :interval_col  (Duration/parse "PT26H3M4S")
+                :date_col      (LocalDate/parse "2024-04-22")
+                :time_col      (LocalTime/parse "21:01:03")
+                :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
+               (-> (first result)
+                   (ds/row-at 0)
+                   (collet.arrow/prep-record columns))))))
+
+    (testing "writing results into json"
+      (let [pipeline (collet/compile-pipeline
+                      {:name  :arrow-results
+                       :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
+                               :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
+                       :tasks [{:name       :query
+                                :keep-state true
+                                :actions    [{:name      :query-action
+                                              :type      :collet.actions.jdbc/query
+                                              :selectors '{connection [:config :connection]}
+                                              :params    '{:connection    connection
+                                                           :fetch-size    10
+                                                           :prefix-table? false
+                                                           :query         {:select [:id :bool_col
+                                                                                    ;; json columns couldn't be converted to arrow
+                                                                                    :json_col :jsonb_col
+                                                                                    :mood_col :interval_col
+                                                                                    :date_col :time_col :timestamp_col]
+                                                                           :from   :data-types}}}]}]})
+            _        @(pipeline {:connection connection-map})
+            result   (:query pipeline)]
+        (is (instance? LazySeq result))
+        (is (= 22 (count result)))
+        (is (= {:id            1
+                :bool_col      true
+                :mood_col      "happy"
+                :interval_col  "PT26H3M4S"
+                :json_col      {:a 1}
+                :jsonb_col     {:b 2}
+                :date_col      "2024-04-22"
+                :time_col      "21:01:03"
+                :timestamp_col "2024-04-22T21:01:03"}
+               (first result)))))
+
+    (testing "writing results into json with preserving data types"
+      (let [pipeline (collet/compile-pipeline
+                      {:name  :arrow-results
+                       :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
+                               :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
+                       :tasks [{:name       :query
+                                :keep-state true
+                                :actions    [{:name      :query-action
+                                              :type      :collet.actions.jdbc/query
+                                              :selectors '{connection [:config :connection]}
+                                              :params    '{:connection      connection
+                                                           :fetch-size      10
+                                                           :prefix-table?   false
+                                                           :preserve-types? true
+                                                           :query           {:select [:id :bool_col
+                                                                                      ;; json columns couldn't be converted to arrow
+                                                                                      :json_col :jsonb_col
+                                                                                      :mood_col :interval_col
+                                                                                      :date_col :time_col :timestamp_col]
+                                                                             :from   :data-types}}}]}]})
+            _        @(pipeline {:connection connection-map})
+            result   (:query pipeline)]
+        (is (instance? LazySeq result))
+        (is (= 22 (count result)))
+        (is (= {:id            1
+                :bool_col      true
+                :mood_col      "happy"
+                :json_col      {:a 1}
+                :jsonb_col     {:b 2}
+                :interval_col  (Duration/parse "PT26H3M4S")
+                :date_col      (LocalDate/parse "2024-04-22")
+                :time_col      (LocalTime/parse "21:01:03")
+                :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
+               (first result)))))
 
     (tc/stop! pg)))
 
@@ -401,10 +515,10 @@
             result   (:query pipeline)]
         (is (instance? LazySeq result))
         (is (= 4 (count result)))
-        (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1 :total_amount 30.0}
-                 {:users/username "Alice" :products/product_name "Laptop" :total_quantity 1 :total_amount 1000.0}
-                 {:users/username "Alice" :products/product_name "Mouse" :total_quantity 1 :total_amount 20.0}
-                 {:users/username "Bob" :products/product_name "Mouse" :total_quantity 1 :total_amount 20.0})
+        (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1M :total_amount 30.00M}
+                 {:users/username "Alice" :products/product_name "Laptop" :total_quantity 1M :total_amount 1000.00M}
+                 {:users/username "Alice" :products/product_name "Mouse" :total_quantity 1M :total_amount 20.00M}
+                 {:users/username "Bob" :products/product_name "Mouse" :total_quantity 1M :total_amount 20.00M})
                result))))
 
     (tc/stop! mysql)))
