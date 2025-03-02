@@ -2,18 +2,20 @@
   (:require
    [clojure.java.io :as io]
    [charred.api :as charred]
-   [collet.action :as action]
    [next.jdbc :as jdbc]
    [next.jdbc.result-set :as rs]
    [next.jdbc.connection :as connection]
    [next.jdbc.date-time :as date-time]
    [honey.sql :as sql]
+   [collet.action :as action]
+   [collet.arrow :as arrow]
    [collet.utils :as utils])
   (:import
-   [java.io File Writer]
-   [java.util Locale]
+   [clojure.lang ILookup]
+   [java.io Closeable File Writer]
+   [java.util Arrays Locale]
    [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
-   [java.time LocalDate LocalDateTime LocalTime]))
+   [java.time Duration LocalDate LocalDateTime LocalTime]))
 
 
 ;; next.jdbc.types namespace exports the following functions to convert Clojure types to SQL types:
@@ -54,10 +56,8 @@
 
 (defn append-row-to-file
   "Append a row to a file as a JSON string."
-  [^Writer writer ^ResultSet row]
-  (let [row-keys (rs/column-names row)
-        row-data (select-keys row row-keys)
-        row-json ^String (charred/write-json-str row-data)]
+  [^Writer writer row]
+  (let [row-json ^String (charred/write-json-str row)]
     (.write writer row-json)
     (.write writer "\n")))
 
@@ -86,6 +86,11 @@
                     Types/TIME_WITH_TIMEZONE (LocalTime/parse v)
                     Types/TIMESTAMP (LocalDateTime/parse v)
                     Types/TIMESTAMP_WITH_TIMEZONE (LocalDateTime/parse v)
+                    ;; Add Duration support
+                    Types/OTHER (if (and (string? v) (.startsWith ^String v "P"))
+                                  (try (Duration/parse v)
+                                       (catch Exception _ v))
+                                  v)
                     v)]
        (assoc acc k value)))
    {}
@@ -128,6 +133,88 @@
     (jdbc/get-connection conn)))
 
 
+(defn record->map
+  [^ResultSet record]
+  (let [row-keys (rs/column-names record)]
+    (select-keys record row-keys)))
+
+
+(defprotocol PRecordHandler
+  (append [this record])
+  (flush-batch [this batch]))
+
+
+(deftype BatchResult
+  [^Object/1 batch
+   ^boolean prefix-table?
+   ^:unsynchronized-mutable ^long size
+   ^:unsynchronized-mutable arrow?
+   ^:unsynchronized-mutable arrow-columns
+   ^:unsynchronized-mutable writer
+   ^:unsynchronized-mutable ^File file
+   ^:unsynchronized-mutable column-types]
+
+  PRecordHandler
+  (append [this record]
+    (when (nil? column-types)
+      (set! column-types (get-columns-types record prefix-table?)))
+    (aset batch size (record->map record))
+    (set! size (inc size))
+   ;; flush the batch if it's full
+    (when (= (alength batch) size)
+      (flush-batch this batch)))
+
+  (flush-batch [this batch-out]
+   ;; check if convertable to arrow
+    (when (nil? arrow?)       ;; we completed the first batch
+      (if-let [batch-arrow-columns (arrow/get-columns batch-out)]
+        ;; arrow pathway
+        (do (set! arrow? true)
+            (set! arrow-columns batch-arrow-columns)
+            (set! file (doto (File/createTempFile "jdbc-query-data" ".arrow")
+                         (.deleteOnExit)))
+            (set! writer (collet.arrow/make-writer file arrow-columns)))
+        ;; json pathway
+        (do (set! arrow? false)
+            (set! file (doto (File/createTempFile "jdbc-query-data" ".json")
+                         (.deleteOnExit)))
+            (set! writer (io/writer file :append true)))))
+   ;; write to file (arrow or json) based on the previous check
+    (if arrow?
+      (collet.arrow/write writer batch-out)
+      (doseq [record batch-out]
+        (append-row-to-file writer record)))
+   ;; clear the batch
+    (set! size 0)
+    (^[Object/1 Object] Arrays/fill batch nil))
+
+  Closeable
+  (close [this]
+    (when (some? writer)
+      (flush-batch this (take size batch))
+      (.close ^Closeable writer)))
+
+  ILookup
+  (valAt [this k]
+    (.valAt this k nil))
+
+  (valAt [this k not-found]
+    (case k
+      :batch batch
+      :size size
+      :arrow? arrow?
+      :arrow-columns arrow-columns
+      :file file
+      :column-types column-types
+      not-found)))
+
+
+(defn ->batch-result
+  ^BatchResult [batch-size prefix-table?]
+  (->BatchResult
+   (object-array batch-size) prefix-table? 0 nil nil nil nil nil))
+
+
 (def query-params-spec
   [:map
    [:connection
@@ -163,20 +250,13 @@
     :or   {options         {}
            prefix-table?   true
            preserve-types? false
-           fetch-size      10000
+           fetch-size      5000
            concurrency     :read-only
            cursors         :close
            result-type     :forward-only}}]
-  (let [result-file ^File (File/createTempFile "jdbc-query-data" ".json")
-        rs-types    (atom {})]
-    (.deleteOnExit result-file)
-    (with-open [writer ^Writer (io/writer result-file :append true)
-                conn   ^Connection (prep-connection connection)]
-      (let [append-row   (fn [row]
-                           (append-row-to-file writer row)
-                           (when (and preserve-types? (empty? @rs-types))
-                             (swap! rs-types merge (get-columns-types row prefix-table?))))
-            query-string (if (map? query)
+  (let [batch (->batch-result fetch-size prefix-table?)]
+    (with-open [conn ^Connection (prep-connection connection)]
+      (let [query-string (if (map? query)
                            (sql/format query options)
                            query)
             options      (utils/assoc-some
@@ -187,18 +267,30 @@
                             :builder-fn  (if (not prefix-table?)
                                            rs/as-unqualified-lower-maps
                                            rs/as-lower-maps)}
-                           :timeout (when (some? timeout)
-                                      timeout))]
+                           :timeout timeout)]
         (->> (jdbc/plan conn query-string options)
-             (run! append-row))))
-    (let [reader         (io/reader result-file)
-          lines          (line-seq reader)
-          row-mapping-fn (if preserve-types?
-                           (partial convert-values @rs-types)
-                           identity)
-          cleanup-fn     #(do (.close reader)
-                              (.delete result-file))]
-      (->rows-seq lines row-mapping-fn cleanup-fn))))
+             (run! #(append batch %)))))
+
+    ;; cleanup batch resources
+    (.close batch)
+
+    (cond
+      ;; no files were written, return the result set as a sequence of maps
+      (nil? (:file batch))
+      (take (:size batch) (:batch batch))
+
+      (:arrow? batch)
+      (collet.arrow/read-dataset (:file batch) (:arrow-columns batch))
+
+      :otherwise
+      (let [reader         (io/reader (:file batch))
+            lines          (line-seq reader)
+            row-mapping-fn (if preserve-types?
+                             (partial convert-values (:column-types batch))
+                             identity)
+            cleanup-fn     #(do (.close reader)
+                                (.delete ^File (:file batch)))]
+        (->rows-seq lines row-mapping-fn cleanup-fn)))))
 
 
 (defmethod action/action-fn ::query [_]
