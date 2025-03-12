@@ -4,6 +4,7 @@
    [clojure.java.io :as io]
    [clojure.string :as string]
    [wkok.openai-clojure.api :as openai]
+   [malli.json-schema :as json-schema]
    [collet.utils :as utils]
    [collet.action :as action])
   (:import
@@ -35,21 +36,33 @@
 
 (defn tool->function
   "Convert the tool to a function object for the OpenAI API."
-  [tool-var]
-  (let [fn-meta (meta tool-var)
-        args    (into {}
-                      (map
-                       (fn [arg]
-                         (let [arg-meta (meta arg)]
-                           [(keyword arg) {:type        (:type arg-meta)
-                                           :description (:desc arg-meta)}])))
-                      (first (:arglists (meta tool-var))))]
+  [tool-spec]
+  (let [args          (into {}
+                            (map
+                             (fn [{:keys [name type :required desc]}]
+                               [(keyword name) {:type type :description desc}]))
+                            (:args tool-spec))
+        required-args (vec (for [arg (:args tool-spec)
+                                 :when (:required arg)]
+                             (:name arg)))]
     {:type     "function"
-     :function {:name        (name (:name fn-meta))
-                :description (:desc fn-meta)
+     :function {:name        (:name tool-spec)
+                :description (:desc tool-spec)
                 :parameters  {:type       "object"
                               :properties args
-                              :required   (map name (first (:arglists fn-meta)))}}}))
+                              :required   required-args}}}))
+
+
+(defn ->json-schema
+  [{:keys [name schema]}]
+  (let [json-schema (-> schema
+                        (json-schema/transform)
+                        (assoc :additionalProperties false))]
+    {:type "json_schema"
+     :json_schema
+     {:name   name
+      :strict true
+      :schema json-schema}}))
 
 
 (defn chat-completion
@@ -61,10 +74,11 @@
                                :messages (map ->open-ai-message msgs)}
                               :temperature temperature
                               :top_p top-p
-                              :max_completion_tokens max-tokens
-                              :response_format response-format)
+                              :max_completion_tokens max-tokens)
                       (seq tools)
-                      (assoc :tools (map tool->function tools)))
+                      (assoc :tools (map tool->function tools))
+                      (some? response-format)
+                      (assoc :response_format (->json-schema response-format)))
         completions (openai/create-chat-completion
                      params
                      (utils/assoc-some
@@ -93,18 +107,16 @@
   "Select the tool by name."
   [tools function]
   (->> tools
-       (filter #(= (:name function)
-                   (name (:name (meta %)))))
+       (filter #(= (:name function) (:name %)))
        first))
 
 
-(defn- apply-fn
+(defn apply-fn
   "Apply the tool function to the arguments."
-  [tool function]
-  (let [args (first (:arglists (meta tool)))]
-    (->> args
-         (map #(get (:arguments function) (keyword %)))
-         (apply tool))))
+  [{:keys [args func] :as tool} function]
+  (->> args
+       (map #(get (:arguments function) (keyword (:name %))))
+       (apply func)))
 
 
 (defn ask-open-ai
@@ -227,6 +239,40 @@
                  image-urls))}]))
 
 
+(def tool-spec
+  [:map
+   [:name :string]
+   [:desc :string]
+   [:func fn?]
+   [:args {:optional true}
+    [:+
+     [:map
+      [:name :string]
+      [:type :string]
+      [:required {:optional true} :boolean]
+      [:desc :string]]]]])
+
+
+(def openai-params-spec
+  [:map
+   [:question :string]
+   [:vars {:optional true} :map]
+   [:images {:optional true} [:+ :string]]
+   [:model :string]
+   [:api-key :string]
+   [:api-endpoint {:optional true} :string]
+   [:organization {:optional true} :string]
+   [:response-format {:optional true}
+    [:map
+     [:name :string]
+     [:schema :any]]]
+   [:max-tokens {:optional true} :int]
+   [:temperature {:optional true} :number]
+   [:top-p {:optional true} :number]
+   [:tools {:optional true} [:+ tool-spec]]
+   [:as {:optional true} [:enum :values]]])
+
+
 (defn ask-openai
   "Send request to OpenAI chat completions.
    Args:
@@ -248,6 +294,8 @@
    (ask-openai {:question \"What programming language was created by Rich Hickey?\"
                 :api-key  api-token})
    ```"
+  {:malli/schema [:=> [:cat openai-params-spec]
+                  :any]}
   [{:keys [question vars images model
            api-key api-endpoint organization
            response-format max-tokens temperature top-p tools as]}]
@@ -263,9 +311,12 @@
                      :organization organization}
         prompt      (cond-> (prompt question vars)
                       (seq images)
-                      (with-images images))]
-    (-> (ask-open-ai prompt llm-params llm-options)
-        last :ai)))
+                      (with-images images))
+        response    (-> (ask-open-ai prompt llm-params llm-options)
+                        last :ai)]
+    (if (some? response-format)
+      (charred/read-json response :key-fn keyword)
+      response)))
 
 
 (defmethod action/action-fn ::openai [_]

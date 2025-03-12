@@ -51,8 +51,8 @@
     (is (thrown? ExceptionInfo (sut/->open-ai-message {:unknown "type"})))))
 
 
-(defn ^{:desc "Get the current weather in a given location"} get-current-weather
-  [^{:type "string" :desc "The city, e.g. San Francisco"} location]
+(defn get-current-weather
+  [location]
   (case (string/lower-case location)
     "tokyo" {:location "Tokyo" :temperature "10" :unit "fahrenheit"}
     "san francisco" {:location "San Francisco" :temperature "72" :unit "fahrenheit"}
@@ -69,7 +69,14 @@
                                                              :type        "string"}}
                                      :required   ["location"]
                                      :type       "object"}}}
-           (sut/tool->function (var get-current-weather))))))
+           (sut/tool->function
+            {:name "get-current-weather"
+             :func get-current-weather
+             :desc "Get the current weather in a given location"
+             :args [{:name     "location"
+                     :type     "string"
+                     :required true
+                     :desc     "The city, e.g. San Francisco"}]})))))
 
 
 (deftest parse-arguments-test
@@ -81,8 +88,8 @@
 
 (deftest select-tool-by-name-test
   (testing "selects tool by name"
-    (let [func1 (with-meta (fn []) {:name 'func1})
-          func2 (with-meta (fn []) {:name 'func2})
+    (let [func1 {:name "func1"}
+          func2 {:name "func2"}
           tools [func1 func2]]
       (is (= func1 (sut/select-tool-by-name tools {:name "func1"})))
       (is (= func2 (sut/select-tool-by-name tools {:name "func2"})))
@@ -144,4 +151,17 @@
       (let [result (sut/ask-openai {:question "Logo of which programming language is this?"
                                     :images   ["resources/Clojure_logo.png"]
                                     :api-key  api-token})]
-        (is (string/includes? result "Clojure"))))))
+        (is (string/includes? result "Clojure"))))
+
+    (testing "structured output"
+      (let [result (sut/ask-openai {:question        "What is the capital of France?"
+                                    :response-format {:name   "city_info"
+                                                      :schema [:map
+                                                               [:name :string]
+                                                               [:area :double]
+                                                               [:population :int]]}
+                                    :api-key         api-token})]
+        (is (map? result))
+        (is (= "Paris" (:name result)))
+        (is (float? (:area result)))
+        (is (integer? (:population result)))))))
