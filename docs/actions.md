@@ -696,3 +696,52 @@ Options:
                       \"sum\": .a + .b
                     }"}}
 ```
+
+### OpenAI request
+
+`:collet.actions.llm/openai` Perform a request to the OpenAI API.
+
+Options:
+
+- `:question` - the prompt to use. Can include placeholders for the variables
+- `:vars` - a map of variables to use in the prompt
+- `:model` - the model to use
+- `:images` - a map of images to use in the prompt. Image can be a path to local file or a URL
+- `:api-key` - the OpenAI API key
+- `:api-endpoint` - the OpenAI API endpoint
+- `:organization` - the OpenAI organization
+- `:max-tokens` - the maximum number of tokens to generate
+- `:temperature` - the sampling temperature
+- `:top-p` - the nucleus sampling parameter
+- `:response-format` - the format of the response. A map of `:name` and `:schema` keys. Schema should be a malli spec.
+- `:tools` - a vector of tools to use in the prompt. Each tool should have a map with the following keys: `:name`
+  function name,  `:func` ref to the actual function, `:desc` description,  `:args` vector of arguments
+- `:as` - if tools option is used, you can provide a `:as` key with a value `:values` to get the result of the tools
+  usage as json objects
+
+```clojure
+{:name   :openai-action
+ :type   :collet.actions.llm/openai
+ :params {:question        "What is the capital of {country}?"
+          :vars            {:country "France"}
+          :model           "text-davinci-003"
+          :api-key         "XXX"
+          :max-tokens      100
+          :temperature     0.5
+          :top-p           0.9
+          :response-format {:name   "city_info"
+                            :schema [:map
+                                     [:name :string]
+                                     [:country :string]
+                                     [:population :int]
+                                     [:weather :string]]}
+          :tools           [{:name "city_weather"
+                             :func (fn [city]
+                                     (str "The weather in " city " is sunny"))
+                             :desc "Get the weather in the city"
+                             :args [{:name     "city"
+                                     :type     "string"
+                                     :required true
+                                     :desc     "Name of the city"}]}]}
+ :return [:openai-response :choices]}
+```
