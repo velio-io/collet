@@ -8,7 +8,7 @@
    [collet.actions.file :as actions.file]
    [collet.action :as action])
   (:import
-   [java.io ByteArrayInputStream File InputStream]
+   [java.io ByteArrayInputStream InputStream]
    [java.nio.file Files]))
 
 
@@ -122,16 +122,16 @@
        [:hostname :string]
        [:port :int]]]]]
    [:bucket :string]
-   [:format [:enum :json :csv]]
    [:file-name :string]
    [:input
-    [:or utils/dataset?
+    [:or :string
+     utils/input-stream?
+     utils/dataset?
      [:sequential utils/dataset?]
      [:sequential [:or map? [:sequential map?]]]]]
-   [:cat? {:optional true :default false}
-    :boolean]
-   [:csv-header? {:optional true :default false}
-    :boolean]])
+   [:format {:optional true} :keyword]
+   [:cat? {:optional true :default false} :boolean]
+   [:csv-header? {:optional true :default false} :boolean]])
 
 
 (defn upload-file
@@ -139,9 +139,9 @@
    Options:
    :aws-creds   - the AWS credentials (region, key, secret)
    :bucket      - the S3 bucket name
-   :format      - the format of the file (:json or :csv)
+   :format      - the format of the file (makes sense only if you're writing data into :json or :csv)
    :file-name   - the name of the file
-   :input       - the data to write
+   :input       - the data to write or the actual file (input stream or file path)
    :csv-header? - if true, the CSV file will have a header row"
   {:malli/schema [:=> [:cat s3-params-spec]
                   [:map
@@ -149,21 +149,14 @@
                    [:key :string]]]}
   [{:keys [aws-creds bucket format file-name input cat? csv-header?]
     :or   {cat? false}}]
-  (let [ext            (case format
-                         :csv ".csv"
-                         :json ".json")
-        file           ^File (File/createTempFile file-name ext)
-        temp-file-path (.getAbsolutePath file)
-        s3-client      (make-client :s3 aws-creds)]
-    (.deleteOnExit file)
-
-    (actions.file/write-into-file
-     {:input       input
-      :format      format
-      :cat?        cat?
-      :file-name   temp-file-path
-      :csv-header? csv-header?})
-
+  (let [s3-client (make-client :s3 aws-creds)
+        {:keys [path]} (actions.file/write-into-file
+                        {:input       input
+                         :format      format
+                         :cat?        cat?
+                         :file-name   file-name
+                         :csv-header? csv-header?})
+        file      (io/as-file path)]
     (dh/with-retry
       {:retry-on        Exception
        :delay-ms        1000

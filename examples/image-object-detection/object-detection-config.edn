@@ -1,0 +1,7 @@
+{:openai-api-key #env "OPENAI_API_KEY"
+ :rss-url        "https://www.archiproducts.com/en/products/feed"
+ :jdbc-url       "jdbc:postgresql://localhost:5432/products"
+ :aws-region     "us-east-1"
+ :aws-key        "test"
+ :aws-secret     "test"
+ :s3-bucket      "products"}

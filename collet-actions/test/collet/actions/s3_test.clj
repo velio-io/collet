@@ -47,11 +47,22 @@
       :input       [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
       :csv-header? true})
 
-    (let [file (sut/invoke! s3-client :GetObject
-                 {:Bucket "test-bucket"
-                  :Key    "test/test-file.csv"})]
+    (sut/upload-file
+     {:aws-creds aws-creds
+      :bucket    "test-bucket"
+      :file-name "test/test-image.png"
+      :input     "resources/Clojure_logo.png"})
+
+    (let [file  (sut/invoke! s3-client :GetObject
+                  {:Bucket "test-bucket"
+                   :Key    "test/test-file.csv"})
+          image (sut/invoke! s3-client :GetObject
+                  {:Bucket "test-bucket"
+                   :Key    "test/test-image.png"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
-             (charred/read-csv (io/reader (:Body file))))))
+             (charred/read-csv (io/reader (:Body file)))))
+      (is (= (slurp "resources/Clojure_logo.png")
+             (slurp (:Body image)))))
 
     (tc/stop! container)))
 
