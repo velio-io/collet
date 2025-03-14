@@ -32,7 +32,7 @@
                       :fn        (fn [page-body]
                                    (let [image-url (-> (enlive/html-resource page-body)
                                                      (enlive/select [:div#product-image :img])
-                                                     (get :data-src-thumb))
+                                                     (get-in [:attrs :data-src-thumb]))
                                          image-name (-> (string/split image-url (re-pattern "/"))
                                                       last)]
                                      {:image-url  image-url
