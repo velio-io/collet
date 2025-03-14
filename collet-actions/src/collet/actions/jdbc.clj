@@ -9,7 +9,8 @@
    [honey.sql :as sql]
    [collet.action :as action]
    [collet.arrow :as arrow]
-   [collet.utils :as utils])
+   [collet.utils :as utils]
+   [tech.v3.dataset :as ds])
   (:import
    [clojure.lang ILookup]
    [java.io Closeable File Writer]
@@ -295,3 +296,59 @@
 
 (defmethod action/action-fn ::query [_]
   make-query)
+
+
+(defn expand-datasets
+  [query-map]
+  (into {}
+        (map (fn [[key value]]
+               (let [value' (cond
+                              (ds/dataset? value) (ds/rows value)
+                              (utils/ds-seq? value) (mapcat ds/rows value)
+                              (map? value) (expand-datasets value)
+                              :otherwise value)]
+                 [key value'])))
+        query-map))
+
+
+(def execute-params-spec
+  [:map
+   [:connection
+    [:or :string
+     [:map
+      [:dbtype {:optional true} :string]
+      [:host {:optional true} :string]
+      [:port {:optional true} :int]
+      [:dbname {:optional true} :string]
+      [:jdbc-url {:optional true} :string]
+      [:user {:optional true} :string]
+      [:password {:optional true} :string]
+      [:auto-commit {:optional true :default false} :boolean]]]]
+   [:statement [:or map? [:cat :string [:* :any]]]]
+   [:options {:optional true} map?]
+   [:prefix-table? {:optional true} :boolean]
+   [:timeout {:optional true} :int]])
+
+
+(defn execute-statement
+  "Execute a query and return the result set as a sequence of maps."
+  {:malli/schema [:=> [:cat execute-params-spec]
+                  [:sequential :any]]}
+  [{:keys [connection statement options prefix-table? timeout]
+    :or   {options       {}
+           prefix-table? true}}]
+  (with-open [conn ^Connection (prep-connection connection)]
+    (let [query-string (if (map? statement)
+                         (-> (expand-datasets statement)
+                             (sql/format options))
+                         statement)
+          options      (utils/assoc-some
+                         {:builder-fn (if (not prefix-table?)
+                                        rs/as-unqualified-lower-maps
+                                        rs/as-lower-maps)}
+                         :timeout timeout)]
+      (jdbc/execute! conn query-string options))))
+
+
+(defmethod action/action-fn ::execute [_]
+  execute-statement)

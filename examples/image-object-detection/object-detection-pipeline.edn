@@ -1,0 +1,113 @@
+{:name  :image-object-detection
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.6-SNAPSHOT"]
+                       [remus/remus "0.2.4"]
+                       [enlive "1.1.6"]]
+         :requires    [[clojure.string :as string]
+                       [remus :as remus]
+                       [net.cgrand.enlive-html :as enlive]]}
+
+ :tasks [;; read RSS feed and parse items
+         {:name    :rss-items
+          :actions [{:name      :parse-rss-feed
+                     :type      :custom
+                     :selectors {url [:config :rss-url]}
+                     :params    [url]
+                     :fn        (fn [url]
+                                  (remus/parse-url url))
+                     :return    [:items]}]}
+
+         ;; get product HTML page, find the product image url and store it locally
+         {:name     :image-objects
+          :inputs   [:rss-items]
+          :parallel {:items   [:inputs :rss-items]
+                     :threads 10}
+          :actions  [{:name      :get-product-page
+                      :type      :collet.actions.http/request
+                      :selectors {page-url [:$parallel/item :guid]}
+                      :params    {:url page-url}
+                      :return    [:body]}
+                     {:name      :get-product-image-url
+                      :type      :custom
+                      :selectors {page-body [:state :get-product-page]}
+                      :fn        (fn [page-body]
+                                   (let [image-url (-> (enlive/html-resource page-body)
+                                                     (enlive/select [:div#product-image :img])
+                                                     (enlive/attr :data-src-thumb))
+                                         image-name (-> (string/split image-url (re-pattern "/"))
+                                                      last)]
+                                     {:image-url  image-url
+                                      :image-name image-name}))}
+                     {:name      :get-product-image
+                      :type      :collet.actions.file/sink
+                      :selectors {image-url  [:state :get-product-image-url :image-url]
+                                  image-name [:state :get-product-image-url :image-name]}
+                      :params    {:format    :jpeg
+                                  :input     image-url
+                                  :file-name image-name}}]
+          :return   [{:guid       [:$parallel/item :guid]
+                      :image-url  [:state :get-product-image-url :image-url]
+                      :image-name [:state :get-product-image-url :image-name]
+                      :local-path [:state :get-product-image :path]}]}
+
+         ;; upload images to S3
+         {:name     :s3-objects
+          :inputs   [:image-objects]
+          :parallel {:items   [:inputs :image-objects]
+                     :threads 4}
+          :actions  [{:name      :save-image-to-s3
+                      :type      :collet.actions.s3/sink
+                      :selectors {image-name [:$parallel/item :image-name]
+                                  local-path [:$parallel/item :local-path]
+                                  aws-region [:config :aws-region]
+                                  aws-key    [:config :aws-key]
+                                  aws-secret [:config :aws-secret]
+                                  bucket     [:config :s3-bucket]}
+                      :params    {:aws-creds {:aws-region aws-region
+                                              :aws-key    aws-key
+                                              :aws-secret aws-secret}
+                                  :bucket    bucket
+                                  :file-name image-name
+                                  :input     local-path}}]
+          :return   [{:guid    [:$parallel/item :guid]
+                      :s3-path [:state :save-image-to-s3 :key]}]}
+
+         ;; generate objects keywords in images and short description
+         {:name     :image-keywords
+          :inputs   [:image-objects]
+          :parallel {:items   [:inputs :image-objects]
+                     :threads 4}
+          :actions  [{:name      :detect-objects
+                      :type      :collet.actions.llm/openai
+                      :selectors {product-image [:$parallel/item :image-url]}
+                      :params    {:api-key         [:config :openai-api-key]
+                                  :question        "Generate a short description of a given image and set of keywords best describing the given image and objects presented."
+                                  :images          [product-image]
+                                  :response-format {:name   "image-description-and-objects"
+                                                    :schema [:map
+                                                             [:description :string]
+                                                             [:keywords [:vector :string]]]}}}]
+          :return   [{:guid        [:$parallel/item :guid]
+                      :description [:state :detect-objects :description]
+                      :keywords    [:state :detect-objects :keywords]}]}
+
+         ;; store image metadata
+         {:name    :store-image-data
+          :inputs  [:s3-objects :image-keywords]
+          :actions [{:name      :prepare-metadata
+                     :type      :slicer
+                     :selectors {s3-objects     [:inputs :s3-objects]
+                                 image-keywords [:inputs :image-keywords]}
+                     :params    {:sequence s3-objects
+                                 :apply    [[:join {:with   image-keywords
+                                                    :source :guid
+                                                    :target :guid}]
+                                            [:select [:guid :s3-path :description :keywords]]]}}
+
+                    {:name      :save-image-metadata
+                     :type      :collet.actions.jdbc/execute
+                     :selectors {products-meta [:state :prepare-metadata]
+                                 jdbc-url      [:config :jdbc-url]}
+                     :params    {:connection jdbc-url
+                                 :statement  {:insert-into [:product-image-meta]
+                                              :columns     [:product :image-path :description :keywords]
+                                              :values      products-meta}}}]}]}

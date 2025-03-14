@@ -73,6 +73,51 @@
         (is (= {:users/id 2 :users/user_name "Bob" :users/age 40}
                (first result)))))
 
+    (testing "execute statement test"
+      (let [result (sut/execute-statement
+                    {:connection connection-map
+                     :statement  ["INSERT INTO users (user_name, age) VALUES (?, ?)" "David" 60]})]
+        (is (= 1 (-> result first :next.jdbc/update-count)))
+
+        (let [result (sut/make-query {:connection connection-map
+                                      :query      {:select   [:*]
+                                                   :from     :users
+                                                   :order-by [:age]}})]
+          (is (= 4 (count result)))
+          (is (= {:users/id 4 :users/user_name "David" :users/age 60}
+                 (last result))))
+
+        (sut/execute-statement
+         {:connection connection-map
+          :statement  {:insert-into :users
+                       :columns     [:user_name :age]
+                       :values      [["Eve" 70]
+                                     ["Frank" 80]]}})
+
+        (let [result (sut/make-query {:connection connection-map
+                                      :query      {:select   [:*]
+                                                   :from     :users
+                                                   :order-by [:age]}})]
+          (is (= 6 (count result)))
+          (is (= {:users/id 6 :users/user_name "Frank" :users/age 80}
+                 (last result))))
+
+        (sut/execute-statement
+         {:connection connection-map
+          :statement  {:insert-into :users
+                       :columns     [:user_name :age]
+                       :values      (ds/->dataset
+                                     [{:user_name "Grace" :age 90}
+                                      {:user_name "Helen" :age 100}])}})
+
+        (let [result (sut/make-query {:connection connection-map
+                                      :query      {:select   [:*]
+                                                   :from     :users
+                                                   :order-by [:age]}})]
+          (is (= 8 (count result)))
+          (is (= {:users/id 8 :users/user_name "Helen" :users/age 100}
+                 (last result))))))
+
     (tc/stop! pg)))
 
 

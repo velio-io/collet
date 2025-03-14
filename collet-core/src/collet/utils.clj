@@ -8,6 +8,7 @@
   (:import
    [clojure.lang Fn PersistentVector]
    [ham_fisted LinkedHashMap]
+   [java.io InputStream]
    [sci.impl.opts Ctx]))
 
 
@@ -81,6 +82,14 @@
     :pred #(instance? LinkedHashMap %)
     :type-properties
     {:error/message "should be an instance of LinkedHashMap"}}))
+
+
+(def input-stream?
+  (m/-simple-schema
+   {:type :input-stream?
+    :pred #(instance? InputStream %)
+    :type-properties
+    {:error/message "should be an instance of InputStream"}}))
 
 
 (def dataset?
