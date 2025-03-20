@@ -5,6 +5,7 @@
    [ham-fisted.lazy-noncaching :as lznc]
    [tech.v3.dataset :as ds]
    [tech.v3.dataset.protocols :as ds-proto]
+   [collet.actions.http :as http]
    [collet.utils :as utils]
    [collet.action :as action])
   (:import
@@ -25,15 +26,16 @@
 
 (defn write-dataset
   "Writes the dataset to a file."
-  [dataset file-name format csv-header?]
+  [dataset file format csv-header?]
   (case format
-    :json (ds/write! dataset file-name)
-    :csv (ds/write! dataset file-name {:headers? csv-header?})))
+    :json (ds/write! dataset file {:file-type :json})
+    :csv (ds/write! dataset file {:headers?  csv-header?
+                                  :file-type :csv})))
 
 
 (defn dataset-seq->csv
   "Writes a sequence of datasets to a CSV file."
-  [input file-name csv-header?]
+  [input file csv-header?]
   (transduce (mapcat (fn [dataset]
                        (let [headers (when csv-header?
                                        (map (comp ->string :name meta) (vals dataset)))
@@ -42,7 +44,7 @@
                          (if (and csv-header? (= dataset (first input)))
                            (lznc/concat [headers] rows)
                            rows))))
-             (charred/write-csv-rf file-name)
+             (charred/write-csv-rf file {:close-writer? true})
              input))
 
 
@@ -65,9 +67,11 @@
      [:sequential utils/dataset?]
      [:sequential [:or map? [:sequential map?]]]]]
    [:file-name :string]
+   [:folder {:optional true} :string]
    [:cat? {:optional true :default false} :boolean]
    [:format {:optional true} :keyword]
-   [:csv-header? {:optional true :default false} :boolean]])
+   [:csv-header? {:optional true :default false} :boolean]
+   [:request-options {:optional true} map?]])
 
 
 (defn write-into-file
@@ -83,32 +87,40 @@
                   [:map
                    [:file-name :string]
                    [:path :string]]]}
-  [{:keys [input format file-name csv-header? cat?]
-    :or   {csv-header? false cat? false}}]
-  (let [file (io/file file-name)]
+  [{:keys [input format file-name folder csv-header? cat? request-options]
+    :or   {csv-header? false cat? false request-options {}}}]
+  (let [file (if (some? folder)
+               (io/file folder file-name)
+               (io/file file-name))]
     (when-not (.exists file)
       (io/make-parents file))
 
     (cond
       (or (instance? InputStream input)
           (and (string? input)
-               (or (.exists (io/file input))
-                   (is-uri? input))))
+               (.exists (io/file input))))
       (with-open [in  ^InputStream (io/input-stream input)
+                  out ^OutputStream (io/output-stream file)]
+        (io/copy in out))
+
+      (and (string? input) (is-uri? input))
+      (with-open [in  ^InputStream (-> (assoc request-options :url input :as :stream)
+                                       (http/make-request)
+                                       :body)
                   out ^OutputStream (io/output-stream file)]
         (io/copy in out))
 
       (utils/ds-seq? input)
       (case format
-        :json (ds/write! (apply utils/parallel-concat input) file-name)
-        :csv (dataset-seq->csv input file-name csv-header?))
+        :json (ds/write! (apply utils/parallel-concat input) file {:file-type :json})
+        :csv (dataset-seq->csv input file csv-header?))
 
       (ds/dataset? input)
-      (write-dataset input file-name format csv-header?)
+      (write-dataset input file format csv-header?)
 
       :otherwise
       (-> (utils/make-dataset input {:cat? cat?})
-          (write-dataset file-name format csv-header?)))
+          (write-dataset file format csv-header?)))
 
     {:file-name file-name
      :path      (.getAbsolutePath file)}))

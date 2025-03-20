@@ -17,7 +17,7 @@
   (testing "simple http request"
     (let [actual (sut/make-request {:url "https://musicbrainz.org/ws/2/genre/all?limit=10"})]
       (is (map? actual))
-      (is (every? #{:opts :body :headers :status} (keys actual)))
+      (is (every? #(some? (val %)) (select-keys actual [:body :headers :status])))
       (is (string? (:body actual)))))
 
   (testing "convert body to Clojure data structure"

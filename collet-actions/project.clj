@@ -21,7 +21,7 @@
    [io.velio/collet-core "0.2.5"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
-   [http-kit "2.8.0"]
+   [hato "1.0.0"]
    [com.cnuernber/charred "1.034"]
    [techascent/tech.ml.dataset "7.032"]
    [com.github.seancorfield/next.jdbc "1.3.955"]
