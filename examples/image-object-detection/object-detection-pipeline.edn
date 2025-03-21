@@ -1,5 +1,5 @@
 {:name  :image-object-detection
- :deps  {:coordinates [[io.velio/collet-actions "0.2.6"]
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.7"]
                        [remus/remus "0.2.4"]
                        [enlive "1.1.6"]]
          :requires    [[clojure.string :as string]
