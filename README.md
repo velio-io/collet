@@ -502,7 +502,7 @@ Add the following dependency to your project:
 For Leiningen:
 
 ```clojure
-[io.velio/collet-core "0.2.5"]
+[io.velio/collet-core "0.2.6"]
 ```
 
 For deps.edn:
