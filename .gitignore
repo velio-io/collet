@@ -21,3 +21,4 @@ local.clj
 .portal
 .collet
 CLAUDE.md
+/examples/image-object-detection/volume

@@ -415,25 +415,29 @@
                                                    (collet.select/select (:items parallel) context'))
                                      executor    (Executors/newVirtualThreadPerTaskExecutor)
                                      semaphore   (Semaphore. (or (:threads parallel) 10))
-                                     submit-task (fn [item]
+                                     submit-task (fn [arrow-columns item]
                                                    (.submit executor
                                                             ^Callable
                                                             (fn []
                                                               ; Block if limit is reached
                                                               (.acquire semaphore)
                                                               (try
-                                                                (-> context'
-                                                                    (assoc-in [:state :$parallel/item] item)
-                                                                    (task-exec-fn)
-                                                                    (extract-data))
+                                                                (let [item (if (some? arrow-columns)
+                                                                             (collet.arrow/prep-record item arrow-columns)
+                                                                             item)]
+                                                                  (-> context'
+                                                                      (assoc-in [:state :$parallel/item] item)
+                                                                      (task-exec-fn)
+                                                                      (extract-data)))
                                                                 (finally
                                                                   ; Release permit
                                                                   (.release semaphore))))))
-                                     items'      (cond
-                                                   (ds/dataset? items) (ds/rows items)
-                                                   (utils/ds-seq? items) (mapcat ds/rows items)
-                                                   :otherwise items)
-                                     futures     (doall (map submit-task items'))]
+                                     [items' arrow-columns] (cond
+                                                              (ds/dataset? items) [(ds/rows items) nil]
+                                                              (utils/ds-seq? items) [(mapcat ds/rows items)
+                                                                                     (-> items meta :arrow-columns)]
+                                                              :otherwise [items nil])
+                                     futures     (doall (map (partial submit-task arrow-columns) items'))]
                                  (try
                                    ;; Collect results in original order by dereferencing futures
                                    (mapv (fn [^Future future]

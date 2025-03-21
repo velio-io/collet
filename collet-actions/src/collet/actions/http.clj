@@ -4,7 +4,7 @@
    [clojure.string :as string]
    [collet.utils :as utils]
    [collet.action :as action]
-   [org.httpkit.client :as http]
+   [hato.client :as hato]
    [charred.api :as charred]
    [diehard.core :as dh]
    [diehard.rate-limiter :as rl])
@@ -51,7 +51,7 @@
    If the status is not unexceptional, throws an exception."
   [func]
   (fn [req]
-    (let [response @(func req)]
+    (let [response (func req)]
       (if (or (some? (:error response))
               (not (unexceptional-request-status? req (:status response))))
         (let [error (or (:error response)
@@ -64,7 +64,7 @@
 
 
 (def http-request
-  (-> http/request
+  (-> hato/request
       (wrap-rate-limiter)
       (wrap-unexceptional-status)))
 
@@ -122,7 +122,7 @@
                         (not (string? body)))
                    (assoc :body (charred/write-json-str body))
 
-                   :always (assoc :method method))
+                   :always (assoc :method method :throw-exceptions false))
         response (http-request request)]
     (cond-> response
       (= as :json) (update :body read-json keywordize))))

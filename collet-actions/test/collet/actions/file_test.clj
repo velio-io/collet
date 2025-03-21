@@ -93,7 +93,22 @@
               (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"] ["7" "8"]]
                      (doall (charred/read-csv rdr)))))))
 
-        (io/delete-file (io/file file-name))))))
+        (io/delete-file (io/file file-name)))))
+
+  (testing "writing a png file"
+    (let [input     "resources/Clojure_logo.png"
+          file-name "./tmp/file-test.png"
+          options   {:input     input
+                     :format    :png
+                     :file-name file-name}]
+      (sut/write-into-file options)
+
+      (is (.exists (io/file file-name)))
+
+      (is (= (slurp input)
+             (slurp file-name)))
+
+      (io/delete-file (io/file file-name)))))
 
 
 (deftest pipeline-file-action

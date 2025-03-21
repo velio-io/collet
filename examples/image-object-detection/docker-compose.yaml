@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: products
+    ports:
+      - "5432:5432"
+
+  localstack:
+    image: localstack/localstack
+    environment:
+      SERVICES: "s3"
+      AWS_ACCESS_KEY_ID: "test"
+      AWS_SECRET_ACCESS_KEY: "test"
+      AWS_DEFAULT_REGION: "eu-west-1"
+    ports:
+      - "4566:4566"
+      - "4510:4510"
+      - "4511:4511"
+      - "4512:4512"
+    volumes:
+      - "./init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh"  # ready hook
+      - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
