@@ -1,4 +1,4 @@
-(defproject io.velio/collet-core "0.2.6-SNAPSHOT"
+(defproject io.velio/collet-core "0.2.6"
   :description "Collet core library"
   :url "https://github.com/velio-io/collet"
   :license
