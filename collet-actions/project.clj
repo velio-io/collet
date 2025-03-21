@@ -18,7 +18,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
-   [io.velio/collet-core "0.2.5"]
+   [io.velio/collet-core "0.2.6"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
    [hato "1.0.0"]
