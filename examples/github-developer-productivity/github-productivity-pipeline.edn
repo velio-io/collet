@@ -1,6 +1,6 @@
 {:name  :devs-productivity-pipeline
  ;; add extra dependencies
- :deps  {:coordinates [[io.velio/collet-actions "0.2.5"]]
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.6"]]
          :imports     [java.lang.Math
                        java.time.LocalDate
                        java.time.LocalDateTime

@@ -122,7 +122,9 @@
                         (not (string? body)))
                    (assoc :body (charred/write-json-str body))
 
-                   :always (assoc :method method :throw-exceptions false))
+                   :always (assoc :method method
+                                  :throw-exceptions false
+                                  :http-client {:redirect-policy :normal}))
         response (http-request request)]
     (cond-> response
       (= as :json) (update :body read-json keywordize))))

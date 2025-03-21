@@ -151,11 +151,12 @@
     :or   {cat? false}}]
   (let [s3-client (make-client :s3 aws-creds)
         {:keys [path]} (actions.file/write-into-file
-                        {:input       input
-                         :format      format
-                         :cat?        cat?
-                         :file-name   file-name
-                         :csv-header? csv-header?})
+                        (utils/assoc-some
+                          {:input     input
+                           :file-name file-name
+                           :cat?      cat?}
+                          :format format
+                          :csv-header? csv-header?))
         file      (io/as-file path)]
     (dh/with-retry
       {:retry-on        Exception
