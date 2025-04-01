@@ -71,6 +71,7 @@
 (defmethod action/prep :enrich [action-spec]
   (enrich action-spec))
 
+;; TODO add option to run enrich in parallel
 
 (defmethod action/expand :enrich [task action]
   ;; Unwraps the enrich bindings and replaces the iterator with the mapper keys

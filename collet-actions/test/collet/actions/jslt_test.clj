@@ -19,7 +19,12 @@
     "{\"key\": \"value\"}" "{\"newKey\": .key}" "{\"newKey\":\"value\"}"
     "{\"key\": \"value\"}" "{\"someKey\": \"value\", \"newKey\": .missingKey}" "{\"someKey\":\"value\"}"
     "{\"key\": {\"nestedKey\": \"nestedValue\"}}" "{\"newKey\": .key.nestedKey}" "{\"newKey\":\"nestedValue\"}"
-    "{\"key\": [1, 2, 3]}" "{\"newKey\": .key[1]}" "{\"newKey\":2}")
+    "{\"key\": [1, 2, 3]}" "{\"newKey\": .key[1]}" "{\"newKey\":2}"
+
+    "[{\"order_id\": 4, \"customer\": {\"name\": \"David\", \"email\": \"david@example.com\"}},
+      {\"order_id\": 7, \"customer\": {\"name\": \"Peter\", \"email\": \"peter@example.com\"}}]"
+    "[for(.) {\"order_id\": .order_id, \"customer_name\": .customer.name}]"
+    "[{\"order_id\":4,\"customer_name\":\"David\"},{\"order_id\":7,\"customer_name\":\"Peter\"}]")
 
   (are [input template expected]
     (let [action-spec {:type   ::sut/apply
