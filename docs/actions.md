@@ -464,6 +464,82 @@ metrics you want to calculate. Available metrics are: `:sum` `:mean` `:median` `
  :quartiles-b [2.0 2.0 4.0 6.0 6.0]}
 ```
 
+### Intervals
+
+The `:intervals` action generates time intervals or sequences of dates based on given parameters. It supports relative dates 
+(like "one week ago" or "one week ahead"), specific date formats, and recurring patterns (like "every Monday" or "every 15th of the month").
+
+Parameters:
+- `:from` - Start date/time (can be a relative date like `[:week :ago]` or `[:month :ahead]`, a string date, or a java-time instant)
+- `:to` - End date/time (can be a keyword like `:today`, `:yesterday`, `:now`, a string date, or a java-time instant)
+- `:format` - Output format for date strings (`:iso`, `:iso-date`, `:timestamp`, `:rfc3339`, `:sql-timestamp`, `:epoch`, or a custom format string)
+- `:interval` - Time interval unit to use when generating multiple intervals (`:days`, `:weeks`, `:months`, `:years`)
+- `:count` - Number of intervals to generate, splitting the time between `:from` and `:to` into equal segments
+- `:pattern` - Pattern for generating recurring dates
+- `:return-as` - Format of returned values (`:strings`, `:objects`, `:instants`, `:dates`)
+
+Simple date range examples:
+```clojure
+;; Past week
+{:name   :past-week
+ :type   :intervals
+ :params {:from [:week :ago]
+          :to   [:today]}}
+
+;; Will result in:
+{:from "2025-03-24", :to "2025-03-31"}
+
+;; Upcoming week
+{:name   :upcoming-week
+ :type   :intervals
+ :params {:from [:today]
+          :to   [:week :ahead]}}
+
+;; Will result in:
+{:from "2025-03-31", :to "2025-04-07"}
+```
+
+Multiple intervals example:
+```clojure
+{:name   :weekly-intervals
+ :type   :intervals
+ :params {:from     "2025-01-01"
+          :to       "2025-01-31"
+          :interval :weeks
+          :count    4}}
+
+;; Will result in:
+[{:from "2025-01-01", :to "2025-01-07"}
+ {:from "2025-01-08", :to "2025-01-14"}
+ {:from "2025-01-15", :to "2025-01-21"}
+ {:from "2025-01-22", :to "2025-01-31"}]
+```
+
+Recurring pattern examples:
+```clojure
+;; Every Monday in January 2025
+{:name   :mondays-in-january
+ :type   :intervals
+ :params {:from    "2025-01-01"
+          :to      "2025-01-31"
+          :pattern {:type  :recurring-day
+                    :value :monday}}}
+
+;; Will result in:
+["2025-01-06" "2025-01-13" "2025-01-20" "2025-01-27"]
+
+;; Every second Monday of each month in 2025
+{:name   :second-mondays-of-2025
+ :type   :intervals
+ :params {:from      "2025-01-01"
+          :to        "2025-12-31"
+          :pattern   {:type  :recurring-week
+                      :value [2 :monday]}
+          :return-as :objects}}
+
+;; Will result in a vector of date objects, one for each second Monday of each month
+```
+
 ## Actions to work with external datasource's
 
 Collet has a separate package with actions to work with external datasource's like third-party APIs, databases, etc.
@@ -517,12 +593,12 @@ The request map can contain the following keys:
 - `:basic-auth` - a vector of username and password for basic authentication
 
 ```clojure
-{:type          :collet.actions.http/oauth2
- :name          :user-token
- :client-id     "XXX"
- :client-secret "XXX"
- :grant-type    "client_credentials"
- :return        [:body :token]}
+{:type   :collet.actions.http/oauth2
+ :name   :user-token
+ :params {:client-id     "XXX"
+          :client-secret "XXX"
+          :grant-type    "client_credentials"}
+ :return [:body :token]}
 ```
 
 ### OData request
