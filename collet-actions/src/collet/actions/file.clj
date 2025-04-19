@@ -110,6 +110,9 @@
                   out ^OutputStream (io/output-stream file)]
         (io/copy in out))
 
+      (string? input)
+      (spit file input)
+
       (utils/ds-seq? input)
       (case format
         :json (ds/write! (apply utils/parallel-concat input) file {:file-type :json})
@@ -128,3 +131,26 @@
 
 (defmethod action/action-fn ::sink [_]
   write-into-file)
+
+
+(def file-read-params-spec
+  [:map
+   [:file-name :string]
+   [:folder {:optional true} :string]])
+
+
+(defn read-file
+  "Reads a file and returns its content.
+   The input data should be a file path or an input stream."
+  {:malli/schema [:=> [:cat file-read-params-spec]
+                  :string]}
+  [{:keys [folder file-name]}]
+  (let [file (if (some? folder)
+               (io/file folder file-name)
+               (io/file file-name))]
+    (when (.exists file)
+      (slurp file))))
+
+
+(defmethod action/action-fn ::read [_]
+  read-file)

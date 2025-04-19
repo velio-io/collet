@@ -12,7 +12,7 @@ Elements in the "path vector" could be a keywords, integers or strings.
 ```
 
 In example above, we're selecting the `:name` key from the `:user` key in the `:state` map.
-In addition select DSL supports some additional functions to make it more powerful:
+In addition, select DSL supports some additional functions to make it more powerful:
 
 - You can use a "map syntax" to select multiple keys at the same time. If element in the "path vector" is a map, it will
   be treated as a map of keys to select. Map keys will be included in the resulting map and keys can be a "path vectors"
@@ -87,4 +87,21 @@ In addition select DSL supports some additional functions to make it more powerf
 
 ;; will return:
 "John"
+```
+
+Of course, you can combine all of these functions together to create more complex queries. For example, you can use
+the following sample to get the last name of the last user who is older than 18.
+The result will be `"Smith"`.
+
+```clojure
+;; let's say your state looks like this:
+{:state {:users [{:first-name "John" :last-name "Doe" :age 15}
+                 {:first-name "Jane" :last-name "Doe" :age 30}
+                 {:first-name "Alice" :last-name "Smith" :age 17}
+                 {:first-name "Bob" :last-name "Smith" :age 40}]}}
+
+{:return [:state :users [:$/cat [:$/cond [:> :age 18]] :last-name] [:$/op :last]]}
+
+;; will return:
+;; "Smith"
 ```

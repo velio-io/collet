@@ -1,6 +1,7 @@
 (ns assistant
   (:require
    [clojure.java.io :as io]
+   [clojure.string :as string]
    [wkok.openai-clojure.api :as openai]))
 
 
@@ -33,11 +34,13 @@
   {:api-key (System/getenv "OPENAI_API_KEY")})
 
 
- (def syntax-doc
-   (slurp (io/file "../docs/syntax.md")))
+ (def docs
+   (->> (rest (file-seq (io/as-file "../docs")))
+        (map slurp)
+        (string/join "\n\n")))
 
- (def actions-doc
-   (slurp (io/file "../docs/actions.md")))
+ (spit "../docs/collet-docs.md" docs)
+
 
  (openai/create-chat-completion
   {:model    "ft:gpt-4o-2024-08-06:personal:collet:BHeHQbLK"
@@ -45,11 +48,10 @@
                :content "You're an expert in building pipelines with Collet library.
                          You will generate Collet actions, tasks and pipelines in EDN format without additional explanations."}
               {:role    "user"
-               :content (format "Take into account this Collet DSL syntax and available Collet actions: %s; %s"
-                                syntax-doc actions-doc)}
+               :content (str "Take into account this Collet DSL syntax and available Collet actions: " docs)}
               {:role    "user"
-               :content "Generate a Collet task to fetch recent Hubspot contacts.
-                         Use the Collet documentation to find the correct action and parameters."}]}
+               :content "Use the Collet documentation to find the correct action and parameters.
+                         Generate a Collet task to fetch recent Hubspot contacts."}]}
   {:api-key (System/getenv "OPENAI_API_KEY")})
 
  {:name    :fetch-hubspot-contacts

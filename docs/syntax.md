@@ -2,10 +2,11 @@
 
 To run a Collet pipeline, you need to provide two things: a pipeline specification and, optionally, a pipeline
 configuration. Let's first discuss the pipeline configuration. Pipeline configuration can be used to store sensitive
-data or dynamic values. The closest analogy is a template and the parameters that fill in the template placeholders. The
-pipeline specification is the template, and the pipeline configuration contains the values to insert into the template.
+data or dynamic values. The closest analogy is a template and the parameters that fill in the template placeholders.
+The pipeline specification is the template, and the pipeline configuration contains the values to insert into the
+template.
 
-It could be a regular Clojure map, e.g.
+Pipeline configuration could be a regular Clojure map, e.g.
 
 ```clojure
 {:db-user "my-user"
@@ -13,7 +14,8 @@ It could be a regular Clojure map, e.g.
 ```
 
 If you're using Collet Docker image or Collet app jar directly, you can provide pipeline configuration as EDN file.
-In this case Collet has a special reader - `#env` for reading environment variables.
+In this case Collet has a special reader - `#env` for reading environment variables. So your configuration file could
+look like
 
 ```clojure
 {:post-id           #uuid "f47ac10b-58cc-4372-a567-0e02b2c3d479"
@@ -24,6 +26,12 @@ In this case Collet has a special reader - `#env` for reading environment variab
  :gc-access-token   #env "GC_ACCESS_TOKEN"
  :s3-bucket         #env "S3_BUCKET"}
 ```
+
+`#env` tag can be a string with the name of the environment variable, or a vector with such elements:
+`[ENV_NAME CAST_TO_TYPE :or DEFAULT_VALUE]`.
+
+Later in the pipeline specification you can refer to these values using `:selectors` key and path to the specific part
+of the configuration map, starting with `:config` key. For example, `[:config :postgres-jdbc-url]`
 
 ### Pipeline specification
 
@@ -109,15 +117,7 @@ If you run the pipeline listed above it will do the following things:
 More of it you can run multiple pipelines in parallel for different posts or even for different databases.
 You just need to run it with different environment variables.
 
-Now you can see some of the benefits of using Collet, it will take care of:
-
-- dependencies management
-- error handling and retries
-- rate limiting
-- connection and interactions with external services, such as databases or APIs
-- large datasets processing (data converted into Apache Arrow format on the fly)
-
-Let's dive in into some pipeline implementation details.
+Let's dive in into more pipeline specification details.
 The basic structure of pipeline spec can be represented as follows:
 
 ```clojure
@@ -128,35 +128,18 @@ The basic structure of pipeline spec can be represented as follows:
 
 - `:name` (required): A keyword representing the pipeline name (something meaningful to distinct logs and results from
   other ones).
-- `:tasks` (required): A vector of task.
+- `:tasks` (required): A vector of task (will cover it later).
 - `:deps` (optional): A map with the coordinates of the pipeline dependencies (from maven or clojars).
-
-One way to think of a pipeline is as a data structure that evolves over time.
-When you initialize a pipeline, it has an internal state shaped like `{:state {} :config {}}`.
-The `state` key is an empty map, and the `config` key is a map with the configuration values provided at startup.
-When the pipeline is running, every task will contribute to the `state` map. The `state` map will contain data returned
-from tasks. If a task is executed multiple times, the `state` map will contain all the iteration data as a sequence of
-discrete results (can be changed with the `:state-format` option).
-Tasks can also refer to each other's data using the `:inputs` key (fulfilled for each task individually).
-
-Collet is designed to work with large datasets, so keeping all task data in memory is not a good idea.
-By default, data returned from tasks will be offloaded to Arrow files. These files will be memory-mapped (not loaded
-into the JVM heap) and represented as tech.ml datasets
-or dataset sequences when data is required for processing.
-
-**Note!** Currently, not all types of data can be offloaded to Arrow. It works for collections with simple types like
-strings, numbers, dates, etc., and for lists with simple values.
-Nested data structures like maps aren't supported yet but will be in future releases. Collections that can't be
-converted to Arrow will be kept in memory.
-
-You can disable this feature by setting the `:use-arrow` key to false in the pipeline specification.
-
-In a nutshell, a task is a logical unit of work that can be executed. Tasks can depend on other tasks, forming a
-Directed Acyclic Graph.
-A task can be executed multiple times based on the `:iterator` property. Every task iteration will contribute to the
-resulting pipeline state.
+- `:use-arrow` (optional): A boolean value that represents whether the pipeline should use the arrow format for data
+  serialization. By default, it is set to true.
+- `:max-parallelism` (optional): A number that represents the maximum number of parallel tasks that can be executed at
+  the same time. By default, it is set to 10.
 
 ### Tasks
+
+In a nutshell, a task is a logical unit of work that can be executed. Tasks can depend on other tasks, forming a
+Directed Acyclic Graph. A task can be executed multiple times based on the `:iterator` property or can be executed in
+parallel (see `:parallel` property). Every task iteration will contribute to the resulting pipeline state.
 
 Each task map can contain the following keys:
 
@@ -169,7 +152,8 @@ Each task map can contain the following keys:
   Otherwise, the pipeline will stop on the first error.
 - `:state-format` (optional): a keyword that represents how task data will be added to the pipeline state. Available
   options are `:latest` `:flatten`. In case of `:latest` value, pipeline state will contain only the last task iteration
-  value. In case of `:flatten` value, pipeline state will contain all task iterations values as a flattened sequence.
+  value. In case of `:flatten` value, pipeline state will contain all task iterations values as a flattened sequence. If
+  not specified, will be returned as is.
 - `:retry` (optional): A map that represents the retry policy. This map can contain the following keys:
     - `:max-retries` - how many times the task should be retried
     - `:backoff-ms` - a vector `[initial-delay-ms max-delay-ms multiplier]` to control the delay between each retry, the
@@ -187,11 +171,10 @@ Each task map can contain the following keys:
   these values will be used to spin up a thread. That sequence can be either a `:range` with `:start`, `:end` and
   `:step` properties or you can provide a path to some collection in the pipeline state - `:items`. In the task itself
   you can refer to that value with the `:$parallel/item` keyword.
-- `:return` (optional): specifies what part of the data should be treated as an task output. You can point it to the
-  specific part of the task state that should be treated as an output.
+- `:return` (optional): specifies what part of the data should be treated as a task output.
 
-The value of the `:return` key should be a "path vector" (think of it as a vector for `get-in` Clojure function).
-It might look like this:
+The value of the `:return` key should be a "path vector" or "Select DSL" (think of it as a vector for `get-in` Clojure
+function). It might look like this:
 
 ```clojure
 ;; Here we're drilling down in the task state
@@ -210,16 +193,16 @@ special syntax is not supported here). If value under this path is `nil` the ite
 
 ```clojure
 ;; here we're using a path vector
-{:next [:state :action-name :nested-key]}
+{:iterator {:next [:state :action-name :nested-key]}}
 ```
 
-For more complex use cases you can provide a `condition vector`, which looks like this:
+For more complex use cases you can provide a `condition vector` (or Condition DSL), which looks like this:
 
 ```clojure
 ;; conditional vector
-{:next [:and
-        [:< [:state :users-count] batch-size]
-        [:not-nil? [:state :next-token]]]}
+{:iterator {:next [:and
+                   [:< [:state :users-count] batch-size]
+                   [:not-nil? [:state :next-token]]]}}
 ```
 
 Here is an example of running task in parallel:
@@ -244,42 +227,6 @@ Using the range property:
             :range   {:start 10 :end 100 :step 5}}}
 ```
 
-One more feature you can use with Collet app is `#include` tag in the pipeline specification.
-It allows you to split the pipeline into multiple files and include them in the main pipeline spec.
-This way you can create reusable tasks or actions and inject them into different pipelines.
-Include path could be a local file (absolute or relative to the main spec file path), HTTP URL or S3 key.
-
-```clojure
-;; ./tasks/common-task.edn
-{:name    :task-2
- :actions [...]}
-
-;; ./my-pipeline.edn
-{:name  :my-pipeline
- :tasks [{:name    :task-1
-          :actions [...]}
-
-         ;; here the task-2 will be injected from the separate file
-         #include "./tasks/common-task.edn"
-
-         {:name    :task-3
-          :actions [...]}]}
-```
-
-If you need to override some parameters in the included block, you can use a vector with two elements.
-First element should be a path to the file and second is a map with the parameters you want to override.
-
-```clojure
-{:actions [{:name :first-action
-            ...}
-
-           #include ["path/to/my-action.edn"
-                     {:params {:some-key "some-value"}}]
-
-           {:name :third-action
-            ...}]}
-```
-
 By default, you can't use regular expressions in EDN files.
 If you need one, you can use `#rgx` tag for parsing regular expressions.
 Notice that you have to double escape special characters.
@@ -297,7 +244,7 @@ Notice that you have to double escape special characters.
 
 Collet has a set of predefined actions, you can think of them as building blocks (functions) for your pipeline tasks.
 Action is defined by its `type`. Type keyword refers to the specific function that will be executed.
-List of predefined actions: `:counter`, `:slicer`, `:mapper`, `:fold`, `:enrich`, `:switch`
+List of predefined actions: `:counter`, `:intervals`, `:stats`, `:slicer`, `:mapper`, `:fold`, `:enrich`, `:switch`
 
 Here's an example of the `:counter` action:
 

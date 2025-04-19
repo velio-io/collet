@@ -5,7 +5,7 @@ You can define conditions using vectors of shape: `[:function-name :value-path :
 Where `:function-name` is one of the following: `:and`, `:or`, `:pos?`, `:neg?`, `:zero?`, `:>`,
 `:>=`, `:<`, `:<=`, `:=`, `:always-true`, `:true?`, `:false?`, `:contains`, `:absent`, `:regex`, `:nil?`, `:not-nil?`,
 `:not=`, `:empty?`, `:not-empty?`.
-These names refers to their analogous functions in the `clojure.core` namespace.
+These names refer to their analogous functions in the `clojure.core` namespace.
 
 `:value-path` it's a vector to some value inside the state data. Think of it as a Clojure `get-in` function path vector.
 

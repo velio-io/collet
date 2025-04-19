@@ -1,0 +1,174 @@
+{:name :pipeline-builder
+ :deps {:coordinates [[io.velio/collet-actions "0.2.8-SNAPSHOT"]]
+        :requires    [[charred.api :as charred]
+                      [clojure.string :as string]]}
+
+ :tasks
+ ;; Get the full pipeline plan as a set of steps
+ [{:name    :pipe-plan
+   :actions [{:name      :gen-pipe-plan
+              :type      :collet.actions.llm/openai
+              :selectors {deepseek-api-key      [:config :deepseek-api-key]
+                          deepseek-api-endpoint [:config :deepseek-api-endpoint]
+                          pipeline-spec         [:config :pipeline-spec]}
+              :params    {:model        "deepseek-reasoner"
+                          :api-key      deepseek-api-key
+                          :api-endpoint deepseek-api-endpoint
+                          :vars         {:pipeline-spec pipeline-spec}
+                          :question     "Generate a detailed execution plan for a given data pipeline.
+                                         Analyze the pipeline specification and identify which external APIs or services should be used (even if they aren't directly mentioned).
+                                         Describe all steps in details, including the data sources, data transformations, and outputs. Don't include any code or implementation details.
+                                         Respond with a valid JSON object (IMPORTANT! don't include additional comments or Markdown formatting like ```json or other, just a valid JSON that can be parsed) with the following structure:
+                                         {\"steps\": [{\"step\": \"step description\", \"service\": \"service or api name if applicable, 'No service' string otherwise\"}]}.
+                                         Steps should be in the same order as they appear in the pipeline.
+                                         Step should be a minimal but meaningful logical task to perform, something that can be achieved in one or few function calls or API calls or DB queries, etc.
+                                         Step should bring or transform or push some part of the data required to complete the pipeline. If some data transformation/aggregation is involved describe how exactly it should be done.
+                                         Step description should be up to 5 sentences long.
+                                         The final point in pipeline should be any kind of data storage suitable for the task, suggest the best storage and format if it's not provided directly.
+                                         Here's a data pipeline specification: {{pipeline-spec}}"}}
+             {:name      :parse-pipe-plan
+              :type      :custom
+              :selectors {pipe-json [:state :gen-pipe-plan]}
+              :params    [pipe-json]
+              :fn        (fn [json]
+                           (charred/read-json json :key-fn keyword))}]}
+
+  ;; Enrich every step with details about the task
+  {:name     :pipe-steps
+   :inputs   [:pipe-plan]
+   :actions  [{:name      :steps-mapper
+               :type      :mapper
+               :selectors {steps [:inputs :pipe-plan :steps]}
+               :params    {:sequence steps}}
+              {:name      :step-context
+               :type      :custom
+               :selectors {steps   [:state :enriched-steps]
+                           current [:state :steps-mapper :idx]}
+               :params    [steps current]
+               :fn        (fn [steps current]
+                            (if (zero? current)
+                              "This is a very first step of the pipeline. No previous steps."
+                              (->> steps
+                                (take current)
+                                (map (fn [s]
+                                       (str "Step: " (get s :step) "; Output data: " (get s :output-data))))
+                                (string/join "\n"))))}
+              {:name      :step-details
+               :type      :collet.actions.llm/openai
+               :selectors {openai-api-key [:config :openai-api-key]
+                           step           [:$mapper/item :step]
+                           service        [:$mapper/item :service]
+                           prev-steps     [:state :step-context]}
+               :params    {:model           "gpt-4o-search-preview"
+                           :api-key         openai-api-key
+                           :vars            {:step       step
+                                             :service    service
+                                             :prev-steps prev-steps}
+                           :question        "Given the following task description, extend it with as much details as possible
+                                             to make it clear and understandable. If this task is about to extract data
+                                             from third party service or API or to send data to third party service or API,
+                                             search for the API documentation first and add the details about the API call,
+                                             authorization, parameters, rate limits, pagination, etc. Prefer the official API documentation.
+                                             Include the API endpoint, method (GET/POST/PUT/DELETE), parameters, headers, etc.
+                                             Include the data format (JSON, XML, etc.), response schema and any other relevant information.
+                                             If the task is about to transform or aggregate data, describe how exactly it should be done.
+                                             Provide necessary formulas, algorithms, or methods to achieve the task.
+                                             Result should be concise and clear, but as much detailed as possible.
+                                             Don't include any text formatting like Markdown or HTML in the response.
+                                             Return result as a valid JSON object with the following structure:
+                                             {\"task-details\": \"task details\", \"output-data\": \"output data\"}.
+                                             IMPORTANT! No Markdown formatting, no additional comments, just a valid JSON object. Values inside the object should be valid JSON strings.
+                                             Include a brief description of the output data structure produced by that task, when applicable.
+                                             Here's the task description: {{step}}. Suggested service to use: {{service}}.
+                                             Take into account that this task is a part of a data pipeline and you can utilize the data provided by previous steps.
+                                             Previous steps: {{prev-steps}}"
+                           :response-format {:name   "task_info"
+                                             :schema [:map
+                                                      [:task-details :string]
+                                                      [:output-data :string]]}}}
+              {:name      :enriched-steps
+               :type      :fold
+               :selectors {step    [:$mapper/item]
+                           details [:state :step-details]}
+               :params    {:item step
+                           :with details}}]
+   :iterator {:next [:true? [:$mapper/has-next-item]]}}
+
+  ;; Generate a Collet task for each pipeline step
+  {:name     :pipeline-tasks
+   :inputs   [:pipe-steps]
+   :parallel {:items   [:inputs :pipe-steps]
+              :threads 4}
+   :setup    [{:name   :collet-docs
+               :type   :collet.actions.file/read
+               :params {:file-name "./collet-docs.md"}}]
+   :actions  [{:name      :collet-task
+               :type      :collet.actions.llm/openai
+               :selectors {deepseek-api-key      [:config :deepseek-api-key]
+                           deepseek-api-endpoint [:config :deepseek-api-endpoint]
+                           docs                  [:state :collet-docs]
+                           task                  [:$parallel/item :step]
+                           details               [:$parallel/item :task-details]}
+               :params    {:model        "deepseek-chat"
+                           :api-key      deepseek-api-key
+                           :api-endpoint deepseek-api-endpoint
+                           :vars         {:collet-docs docs
+                                          :task        task
+                                          :details     details}
+                           :question     "Generate Collet tasks in EDN format without additional explanations.
+                                          Take into account this Collet DSL syntax and available Collet actions: {{collet-docs}}.
+                                          Use the Collet documentation to find the correct action and parameters.
+                                          IMPORTANT! No Markdown formatting, no additional comments, just a valid EDN.
+                                          Generate a Collet task according to this description: {{task}}.
+                                          Use the following details to generate the task: {{details}}.
+                                          Validate the generated task (use validate-task tool function) and iterate over the task to find and fix any errors."
+                           :tools        [{:name "validate-task"
+                                           :desc "Validates a Collet task for correctness and returns the errors if any, otherwise returns true.
+                                              Error will be an object with keys referring to the task keys and values with the error description related to that key.
+                                              e.g. {error: {name: [\"missing required key\"], actions: [\"missing required key\"]}}
+                                              when nested task properties aren't valid, the value will represent a path to the error.
+                                              e.g. {error: {actions: [nil {params: [\"should be a map\" \"invalid type\"]}]}} means that the second (first nil means that first action is valid) action in the actions list has invalid params."
+                                           :func collet.core/validate-task
+                                           :args [{:name     "task"
+                                                   :desc     "Collet task specification in EDN format"
+                                                   :type     "string"
+                                                   :required true}]}]}}]}
+
+  {:name    :pipeline
+   :inputs  [:pipeline-tasks]
+   :actions [{:name   :collet-docs
+              :type   :collet.actions.file/read
+              :params {:file-name "./collet-docs.md"}}
+             {:name      :join-tasks
+              :type      :custom
+              :selectors {tasks [:inputs :pipeline-tasks]}
+              :params    [tasks]
+              :fn        (fn [tasks]
+                           (->> tasks
+                             (map-indexed
+                               (fn [idx task]
+                                 (str "Task " idx ": " task)))
+                             (string/join "\n")))}
+             {:name      :pipeline-spec
+              :type      :collet.actions.llm/openai
+              :selectors {openai-api-key [:config :openai-api-key]
+                          docs           [:state :collet-docs]
+                          pipeline-spec  [:config :pipeline-spec]
+                          tasks          [:state :join-tasks]}
+              :params    {:model    "ft:gpt-4o-2024-08-06:personal:collet:BHeHQbLK"
+                          :api-key  openai-api-key
+                          :vars     {:collet-docs   docs
+                                     :pipeline-spec pipeline-spec
+                                     :tasks         tasks}
+                          :question "Take into account this Collet DSL syntax and available Collet actions: {{collet-docs}}.
+                                     Given a top level pipeline description and a list of Collet tasks, generate a complete Collet pipeline in EDN format
+                                     without additional explanations and formatting. Compose tasks into pipeline taking into account the dataflow and dependencies between tasks.
+                                     Ensure that tasks hava correct inputs and outputs.
+                                     Use the following pipeline description: {{pipeline-spec}}.
+                                     Separate tasks to compose the pipeline: {{tasks}}"}}
+             {:name      :pipeline-file
+              :type      :collet.actions.file/sink
+              :selectors {pipeline      [:state :pipeline-spec]
+                          pipeline-file [:config :pipeline-file]}
+              :params    {:file  pipeline-file
+                          :input pipeline}}]}]}

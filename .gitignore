@@ -21,3 +21,4 @@ local.clj
 .portal
 .collet
 /examples/image-object-detection/volume
+.aider*
