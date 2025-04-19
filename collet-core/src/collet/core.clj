@@ -33,6 +33,12 @@
    [weavejester.dependency MapDependencyGraph]))
 
 
+(defn read-regex
+  "Parse regex strings from the EDN file"
+  [rgx]
+  (re-pattern rgx))
+
+
 (def context-spec
   [:map
    [:config map?]
@@ -245,6 +251,22 @@
         true))]])
 
 
+(defn validate-task
+  "Takes a task spec and validates it.
+   If task spec is valid, returns true, otherwise returns a map with validation error."
+  [task]
+  (try
+    (let [task (if (string? task)
+                 (edn/read-string {:eof nil :readers {'rgx read-regex}} task)
+                 task)]
+      (or (m/validate task-spec task)
+          (->> (m/explain task-spec task)
+               (me/humanize)
+               (hash-map :error))))
+    (catch Exception e
+      {:error "Invalid EDN syntax"})))
+
+
 (defn execute-actions
   "Executes a sequence of actions with the given context."
   [actions context]
@@ -291,12 +313,6 @@
     ;; don't iterate at all
     :otherwise
     (constantly nil)))
-
-
-(defn read-regex
-  "Parse regex strings from the EDN file"
-  [rgx]
-  (re-pattern rgx))
 
 
 (defn read-action

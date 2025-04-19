@@ -32,7 +32,8 @@
    [org.apache.commons/commons-compress "1.21"]
    [org.lz4/lz4-java "1.8.0"]
    [net.java.dev.jna/jna "5.10.0"]
-   [com.github.luben/zstd-jni "1.5.4-1"]]
+   [com.github.luben/zstd-jni "1.5.4-1"]
+   [clojure.java-time "1.4.3"]]
 
   ;; required by Chronicle Queue to work with Java 11, Java 17 or Java 21
   :jvm-opts
@@ -54,7 +55,8 @@
              :dependencies [[eftest "0.6.0"]
                             [vvvvalvalval/scope-capture "0.3.3"]
                             [clj-test-containers "0.7.4"]
-                            [djblue/portal "0.58.2"]]}
+                            [djblue/portal "0.58.2"]
+                            [net.clojars.wkok/openai-clojure "0.22.0"]]}
    :uberjar {:aot :all}}
 
   :deploy-repositories

@@ -113,10 +113,13 @@
 
 (defn apply-fn
   "Apply the tool function to the arguments."
-  [{:keys [args func] :as tool} function]
-  (->> args
-       (map #(get (:arguments function) (keyword (:name %))))
-       (apply func)))
+  [{:keys [args func]} function]
+  (let [tool-func (if (symbol? func)
+                    (resolve func)
+                    func)]
+    (->> args
+         (map #(get (:arguments function) (keyword (:name %))))
+         (apply tool-func))))
 
 
 (defn ask-open-ai
@@ -172,30 +175,23 @@
       (conj (vec msgs) {:ai (:content result)}))))
 
 
+(defn get-value [ctx k]
+  (if-let [v (get ctx (keyword k))]
+    v
+    (throw (ex-info (str "key not found: " k) {:key k}))))
+
+
 (defn prompt
   "Python-like f-string
    Example:
    ```clojure
-   (f-string \"Hello, {name}!\" {:name \"world\"})
+   (f-string \"Hello, {{name}}!\" {:name \"world\"})
    ;; => \"Hello, world!\"
    ```
    "
   [s ctx]
-  (let [get-value (fn [k]
-                    (if-let [v (get ctx (keyword k))]
-                      v
-                      (throw (ex-info (str "key not found: " k) {:key k}))))]
-    (loop [s      s
-           result ""
-           k      nil]
-      (if-let [c (first s)]
-        (cond
-          (and (= c \{) k) (recur (rest s) (str result c) "")
-          (= c \{) (recur (rest s) (str result) "")
-          (and (= c \}) k) (recur (rest s) (str result (get-value (string/trim k))) nil)
-          k (recur (rest s) result (str k c))
-          :else (recur (rest s) (str result c) nil))
-        result))))
+  (string/replace s #"\{\{([^}]+)\}\}"
+                  (fn [m] (get-value ctx (second m)))))
 
 
 (defn file->bytes
@@ -243,7 +239,7 @@
   [:map
    [:name :string]
    [:desc :string]
-   [:func fn?]
+   [:func [:or fn? :qualified-symbol]]
    [:args {:optional true}
     [:+
      [:map

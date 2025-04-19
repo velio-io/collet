@@ -115,4 +115,12 @@
 
     (let [actual (sut/select [:a [:$/op :no-op] :b]
                              {:a [{:b 1} {:b 2}]})]
-      (is (nil? actual)))))
+      (is (nil? actual))))
+
+  (testing "Combine multiple functions"
+    (let [actual (sut/select [:state :users [:$/cat [:$/cond [:> :age 18]] :last-name] [:$/op :last]]
+                             {:state {:users [{:first-name "John" :last-name "Doe" :age 15}
+                                              {:first-name "Jane" :last-name "Doe" :age 30}
+                                              {:first-name "Alice" :last-name "Smith" :age 17}
+                                              {:first-name "Bob" :last-name "Smith" :age 40}]}})]
+      (is (= "Smith" actual)))))

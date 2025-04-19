@@ -61,13 +61,16 @@
           (case op
             :$/cat
             (when (sequential? result)
-              (reduce
-               (fn [r item]
-                 (let [value (if (not-empty args) (select args item) item)]
-                   (if (some? value)
-                     (conj r value)
-                     r)))
-               [] result))
+              (let [cat-result (reduce
+                                (fn [r item]
+                                  (let [value (if (not-empty args) (select args item) item)]
+                                    (if (some? value)
+                                      (conj r value)
+                                      r)))
+                                [] result)]
+                (if (seq remaining)
+                  (recur cat-result remaining)
+                  cat-result)))
 
             :$/cond
             (let [condition (collet.conds/compile-conditions (first args))]

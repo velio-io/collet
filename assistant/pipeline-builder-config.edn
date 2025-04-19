@@ -1,0 +1,5 @@
+{:pipeline-spec         "I need to prepare data for the Slack activity dashboard showing: Total number of members of a Slack workspace, The evolution of the number of Slack workspace members, Evolution of weekly messages, Evolution of messages per channel, Members per time zone. Also, I want to know the number of messages produced by a person during his work on the specific Jira epic. Person should be assigned to specific epic and number of messages calculated in between epic started and finished."
+ :pipeline-file         "./generated-pipeline-spec.edn"
+ :openai-api-key        #env "OPENAI_API_KEY"
+ :deepseek-api-key      #env "DEEPSEEK_API_KEY"
+ :deepseek-api-endpoint #env ["DEEPSEEK_API_ENDPOINT" Str :or "https://api.deepseek.com"]}
