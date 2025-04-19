@@ -264,7 +264,7 @@ external libraries.
  :type :custom
  ;; you have to provide an implementation of the action
  :fn   (fn []
-         (+1 2))}
+         (+ 1 2))}
 ```
 
 ```clojure
