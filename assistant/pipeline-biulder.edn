@@ -104,35 +104,33 @@
                :params {:file-name "./collet-docs.md"}}]
    :actions  [{:name      :collet-task
                :type      :collet.actions.llm/openai
-               :selectors {deepseek-api-key      [:config :deepseek-api-key]
-                           deepseek-api-endpoint [:config :deepseek-api-endpoint]
-                           docs                  [:state :collet-docs]
-                           task                  [:$parallel/item :step]
-                           details               [:$parallel/item :task-details]}
-               :params    {:model        "deepseek-chat"
-                           :api-key      deepseek-api-key
-                           :api-endpoint deepseek-api-endpoint
-                           :vars         {:collet-docs docs
-                                          :task        task
-                                          :details     details}
-                           :question     "Generate Collet tasks in EDN format without additional explanations.
-                                          Take into account this Collet DSL syntax and available Collet actions: {{collet-docs}}.
-                                          Use the Collet documentation to find the correct action and parameters.
-                                          IMPORTANT! No Markdown formatting, no additional comments, just a valid EDN.
-                                          Generate a Collet task according to this description: {{task}}.
-                                          Use the following details to generate the task: {{details}}.
-                                          Validate the generated task (use validate-task tool function) and iterate over the task to find and fix any errors."
-                           :tools        [{:name "validate-task"
-                                           :desc "Validates a Collet task for correctness and returns the errors if any, otherwise returns true.
+               :selectors {openai-api-key [:config :openai-api-key]
+                           docs           [:state :collet-docs]
+                           task           [:$parallel/item :step]
+                           details        [:$parallel/item :task-details]}
+               :params    {:model    "ft:gpt-4o-2024-08-06:personal:collet:BHeHQbLK"
+                           :api-key  openai-api-key
+                           :vars     {:collet-docs docs
+                                      :task        task
+                                      :details     details}
+                           :question "Generate Collet tasks in EDN format without additional explanations.
+                                      Take into account this Collet DSL syntax and available Collet actions: {{collet-docs}}.
+                                      Use the Collet documentation to find the correct action and parameters.
+                                      IMPORTANT! No Markdown formatting, no additional comments, just a valid EDN.
+                                      Generate a Collet task according to this description: {{task}}.
+                                      Use the following details to generate the task: {{details}}.
+                                      Validate the generated task (use validate-task tool function) and iterate over the task to find and fix any errors."
+                           :tools    [{:name "validate-task"
+                                       :desc "Validates a Collet task for correctness and returns the errors if any, otherwise returns true.
                                               Error will be an object with keys referring to the task keys and values with the error description related to that key.
                                               e.g. {error: {name: [\"missing required key\"], actions: [\"missing required key\"]}}
                                               when nested task properties aren't valid, the value will represent a path to the error.
                                               e.g. {error: {actions: [nil {params: [\"should be a map\" \"invalid type\"]}]}} means that the second (first nil means that first action is valid) action in the actions list has invalid params."
-                                           :func collet.core/validate-task
-                                           :args [{:name     "task"
-                                                   :desc     "Collet task specification in EDN format"
-                                                   :type     "string"
-                                                   :required true}]}]}}]}
+                                       :func collet.core/validate-task
+                                       :args [{:name     "task"
+                                               :desc     "Collet task specification in EDN format"
+                                               :type     "string"
+                                               :required true}]}]}}]}
 
   {:name    :pipeline
    :inputs  [:pipeline-tasks]
