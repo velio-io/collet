@@ -101,153 +101,125 @@
 
 
 (deftest write-vega-into-svg-test
-  (testing "vega-lite"
-    (let [data-file-path "./tmp/vega-lite-test.json"
-          svg-file-path "./tmp/vega-lite-test.svg"]
+  (testing "render plot only"
+    (doseq [:let [svg-file-path "./tmp/vega-plain.svg"]
+            {:keys [name input expected-hash]}
+            [{:name "vega-lite"
+              :input {:vega-lite-spec vega-lite-spec
+                      :svg-file-path svg-file-path}
+              :expected-hash "BC7311FD90D4ECD20A4155C9CCB3D0B6"}
 
-      (testing "render plain data"
-        (sut/write-vega-into-svg
-         {:vega-lite-spec vega-lite-spec
-          :svg-file-path svg-file-path})
+             {:name "vega"
+              :input {:vega-spec vega-spec
+                      :svg-file-path svg-file-path}
+              :expected-hash "CE332F7022C5FDA8504DF9ABC0E85CCF"}
 
+             {:name "vega-lite: render from file"
+              :input {:vega-lite-spec (-> vega-lite-spec
+                                          (dissoc :data)
+                                          (assoc-in [:data :url] "./resources/vega-test.json"))
+                      :svg-file-path svg-file-path}
+              :expected-hash "714ED41EA2AF1020E282A5BDD0DD7E55"}]]
+      (testing name
+        (sut/write-vega-into-svg input)
         (is (file-exists? svg-file-path))
-        (is (= "BC7311FD90D4ECD20A4155C9CCB3D0B6" (file->md5 svg-file-path))))
-
-
-      (testing "render plain data and store it in JSON"
-        (sut/write-vega-into-svg
-         {:vega-lite-spec vega-lite-spec
-          :data {:file-path data-file-path
-                 :format :json}
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "BC7311FD90D4ECD20A4155C9CCB3D0B6" (file->md5 svg-file-path)))
-
-        (is (file-exists? data-file-path))
-        (is (= [{:a "A", :b 28}
-                {:a "B", :b 55}
-                {:a "C", :b 43}
-                {:a "D", :b 91}]
-               (file->edn data-file-path))))
-
-
-      (testing "render dataset"
-        (sut/write-vega-into-svg
-         {:vega-lite-spec
-          (-> vega-lite-spec
-              (dissoc :data)
-              (assoc-in [:data :values]
-                        (seq [(ds/->dataset [{:a 1 :b 2} {:a 3 :b 4}])
-                              (ds/->dataset [{:a 5 :b 6} {:a 7 :b 8}])])))
-          :data {:file-path data-file-path
-                 :format :json}
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "F87E018AA5BE34BB3C3292F8C4B6BBD5" (file->md5 svg-file-path)))
-
-        (is (file-exists? data-file-path))
-        (is (= [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6} {:a 7 :b 8}]
-               (file->edn data-file-path))))
-
-      (io/delete-file (io/file data-file-path))
-      (io/delete-file (io/file svg-file-path)))
-
-
-    (testing "render data from file"
-      (let [svg-file-path "./tmp/vega-lite-test.svg"
-            spec (-> vega-lite-spec
-                     (dissoc :data)
-                     (assoc-in [:data :url] "./resources/vega-test.json"))]
-
-        (sut/write-vega-into-svg
-         {:vega-lite-spec spec
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "714ED41EA2AF1020E282A5BDD0DD7E55" (file->md5 svg-file-path)))
+        (is (= expected-hash (file->md5 svg-file-path)))
 
         (io/delete-file (io/file svg-file-path)))))
 
 
-  (testing "vega"
+  (testing "render plot and store data in JSON"
+    (doseq [:let [data-file-path "./tmp/vega-data.json"
+                  svg-file-path "./tmp/vega-data.svg"]
+            {:keys [name input expected-hash expected-data]}
+            [{:name "vega-lite: plain data"
+              :input {:vega-lite-spec vega-lite-spec
+                      :data {:file-path data-file-path
+                             :format :json}
+                      :svg-file-path svg-file-path}
+              :expected-hash "BC7311FD90D4ECD20A4155C9CCB3D0B6"
+              :expected-data [{:a "A", :b 28}
+                              {:a "B", :b 55}
+                              {:a "C", :b 43}
+                              {:a "D", :b 91}]}
+
+             {:name "vega-lite: render dataset"
+              :input {:vega-lite-spec
+                      (-> vega-lite-spec
+                          (dissoc :data)
+                          (assoc-in [:data :values]
+                                    (seq [(ds/->dataset [{:a 1 :b 2} {:a 3 :b 4}])
+                                          (ds/->dataset [{:a 5 :b 6} {:a 7 :b 8}])])))
+                      :data {:file-path data-file-path
+                             :format :json}
+                      :svg-file-path svg-file-path}
+              :expected-hash "F87E018AA5BE34BB3C3292F8C4B6BBD5"
+              :expected-data [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6} {:a 7 :b 8}]}
+
+             {:name "vega: render plain plot"
+              :input {:vega-spec vega-spec
+                      :data {"table" {:file-path data-file-path
+                                      :format :json}}
+                      :svg-file-path svg-file-path}
+              :expected-hash "CE332F7022C5FDA8504DF9ABC0E85CCF"
+              :expected-data [{:amount 10, :category "A"}
+                              {:amount 55, :category "B"}
+                              {:amount 43, :category "C"}
+                              {:amount 91, :category "D"}
+                              {:category "E", :amount 81}
+                              {:category "F", :amount 53}
+                              {:category "G", :amount 19}
+                              {:category "H", :amount 87}]}
+
+             {:name "vega: render dataset"
+              :input {:vega-spec
+                      (assoc vega-spec
+                             :data [{:name "table"
+                                     :values
+                                     (seq [(ds/->dataset
+                                            [{:category 1 :amount 2}
+                                             {:category 3 :amount 4}])
+                                           (ds/->dataset
+                                            [{:category 5 :amount 6}
+                                             {:category 7 :amount 8}])])}])
+                      :data {"table" {:file-path data-file-path
+                                      :format :json}}
+                      :svg-file-path svg-file-path}
+              :expected-hash "B0C55522B562105BE7BFE710ECAB8D52"
+              :expected-data [{:amount 2, :category 1}
+                              {:amount 4, :category 3}
+                              {:amount 6, :category 5}
+                              {:amount 8, :category 7}]}]]
+      (testing name
+        (sut/write-vega-into-svg input)
+
+        (is (file-exists? svg-file-path))
+        (is (= expected-hash (file->md5 svg-file-path)))
+        (is (file-exists? data-file-path))
+        (is (= expected-data (file->edn data-file-path)))
+
+        (io/delete-file (io/file data-file-path))
+        (io/delete-file (io/file svg-file-path)))))
+
+
+  (testing "vega: render 2 datasets"
     (let [svg-file-path "./tmp/vega-test.svg"
           table-path-json "./tmp/vega-test.json"
-          second-table-json "./tmp/vega-test-2.json"]
+          second-table-json "./tmp/vega-test-2.json"
+          values [{:category 100500 :amount 100501}]]
 
+      (sut/write-vega-into-svg
+       {:vega-spec (-> vega-spec
+                       (update :data conj {:name "second-table"
+                                           :values values}))
+        :data {"table" {:file-path table-path-json :format :json}
+               "second-table" {:file-path second-table-json :format :json}}
+        :svg-file-path svg-file-path})
 
-      (testing "render plain plot"
-        (sut/write-vega-into-svg
-         {:vega-spec vega-spec
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "CE332F7022C5FDA8504DF9ABC0E85CCF" (file->md5 svg-file-path))))
-
-
-      (testing "render plain plot and write data to a file"
-        (sut/write-vega-into-svg
-         {:vega-spec vega-spec
-          :data {"table" {:file-path table-path-json
-                          :format :json}}
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "CE332F7022C5FDA8504DF9ABC0E85CCF" (file->md5 svg-file-path)))
-
-        (is (file-exists? table-path-json))
-        (is (= [{:amount 10, :category "A"}
-                {:amount 55, :category "B"}
-                {:amount 43, :category "C"}
-                {:amount 91, :category "D"}
-                {:category "E", :amount 81}
-                {:category "F", :amount 53}
-                {:category "G", :amount 19}
-                {:category "H", :amount 87}]
-               (file->edn table-path-json))))
-
-
-      (testing "render plot with a dataset"
-        (sut/write-vega-into-svg
-         {:vega-spec (-> vega-spec
-                         (assoc-in [:data 0 :values]
-                                   (seq [(ds/->dataset
-                                          [{:category 1 :amount 2}
-                                           {:category 3 :amount 4}])
-                                         (ds/->dataset
-                                          [{:category 5 :amount 6}
-                                           {:category 7 :amount 8}])])))
-          :data {"table" {:file-path table-path-json :format :json}}
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "B0C55522B562105BE7BFE710ECAB8D52" (file->md5 svg-file-path)))
-
-        (is (file-exists? table-path-json))
-        (is (= [{:amount 2, :category 1}
-                {:amount 4, :category 3}
-                {:amount 6, :category 5}
-                {:amount 8, :category 7}]
-               (file->edn table-path-json))))
-
-
-      (testing "render plot with 2 datasets"
-        (sut/write-vega-into-svg
-         {:vega-spec (-> vega-spec
-                         (update :data conj {:name "second-table"
-                                             :values [{:category 100500 :amount 100501}]}))
-          :data {"table" {:file-path table-path-json :format :json}
-                 "second-table" {:file-path second-table-json :format :json}}
-          :svg-file-path svg-file-path})
-
-        (is (file-exists? svg-file-path))
-        (is (= "CE332F7022C5FDA8504DF9ABC0E85CCF" (file->md5 svg-file-path)))
-
-        (is (file-exists? second-table-json))
-        (is (= [{:category 100500 :amount 100501}]
-               (file->edn second-table-json))))
-
+      (is (file-exists? svg-file-path))
+      (is (= "CE332F7022C5FDA8504DF9ABC0E85CCF" (file->md5 svg-file-path)))
+      (is (file-exists? second-table-json))
+      (is (= values (file->edn second-table-json)))
 
       (io/delete-file (io/file svg-file-path))
       (io/delete-file (io/file table-path-json))
@@ -276,7 +248,7 @@
       (io/delete-file (io/file data-file-path))))
 
 
-  (testing "incorrect spec with clear error message"
+  (testing "vega-lite: incorrect spec with clear error message"
     (is (thrown-with-msg?
          Exception #"vega/lite spec is incorrect: Error: Invalid field type \"INCORRECT_TYPE\"."
          (sut/write-vega-into-svg
@@ -286,7 +258,7 @@
            :svg-file-path "./tmp/vega-test.svg"}))))
 
 
-  (testing "incorrect spec but the message is unclear"
+  (testing "vega-lite: incorrect spec but the message is unclear"
     (is (thrown-with-msg?
          Exception #"vega/lite spec is incorrect: TypeError: Cannot convert undefined or null to object"
          (sut/write-vega-into-svg
