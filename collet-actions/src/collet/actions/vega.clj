@@ -35,15 +35,15 @@
 
    [:map
     [:vega-spec
-     [:map :data
-      [:vector
-       [:or
-        [:map
-         [:values file/input-param-spec]
-         [:name :string]]
-        [:map
-         [:url :string]
-         [:name :string]]]]]]
+     [:map
+      [:data
+       [:vector [:or
+                 [:map
+                  [:values file/input-param-spec]
+                  [:name :string]]
+                 [:map
+                  [:url :string]
+                  [:name :string]]]]]]]
     [:data {:optional true}
      ;; data name to data file
      [:map-of :string data-spec]]
@@ -69,10 +69,10 @@
   (let [[new-spec values] (update-data-spec data-spec data)]
     (when values
       (file/write-into-file
-       {:input values
-        :format format
-        :file-name file-path
-        :csv-header? csv-header?}))
+       (cond-> {:input values
+                :format format
+                :file-name file-path}
+         (some? csv-header?) (assoc :csv-header? csv-header?))))
     new-spec))
 
 
