@@ -121,7 +121,7 @@
                       :svg-file-path svg-file-path}
               :expected-hash "714ED41EA2AF1020E282A5BDD0DD7E55"}]]
       (testing name
-        (sut/write-vega-into-svg input)
+        (sut/render-vega input)
         (is (file-exists? svg-file-path))
         (is (= expected-hash (file->md5 svg-file-path)))
 
@@ -136,6 +136,7 @@
               :input {:vega-lite-spec vega-lite-spec
                       :data {:file-path data-file-path
                              :format :json}
+                      :store-data-files? true
                       :svg-file-path svg-file-path}
               :expected-hash "BC7311FD90D4ECD20A4155C9CCB3D0B6"
               :expected-data [{:a "A", :b 28}
@@ -152,6 +153,7 @@
                                           (ds/->dataset [{:a 5 :b 6} {:a 7 :b 8}])])))
                       :data {:file-path data-file-path
                              :format :json}
+                      :store-data-files? true
                       :svg-file-path svg-file-path}
               :expected-hash "F87E018AA5BE34BB3C3292F8C4B6BBD5"
               :expected-data [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6} {:a 7 :b 8}]}
@@ -160,6 +162,7 @@
               :input {:vega-spec vega-spec
                       :data {"table" {:file-path data-file-path
                                       :format :json}}
+                      :store-data-files? true
                       :svg-file-path svg-file-path}
               :expected-hash "CE332F7022C5FDA8504DF9ABC0E85CCF"
               :expected-data [{:amount 10, :category "A"}
@@ -184,6 +187,7 @@
                                              {:category 7 :amount 8}])])}])
                       :data {"table" {:file-path data-file-path
                                       :format :json}}
+                      :store-data-files? true
                       :svg-file-path svg-file-path}
               :expected-hash "B0C55522B562105BE7BFE710ECAB8D52"
               :expected-data [{:amount 2, :category 1}
@@ -191,7 +195,7 @@
                               {:amount 6, :category 5}
                               {:amount 8, :category 7}]}]]
       (testing name
-        (sut/write-vega-into-svg input)
+        (sut/render-vega input)
 
         (is (file-exists? svg-file-path))
         (is (= expected-hash (file->md5 svg-file-path)))
@@ -208,12 +212,13 @@
           second-table-json "./tmp/vega-test-2.json"
           values [{:category 100500 :amount 100501}]]
 
-      (sut/write-vega-into-svg
+      (sut/render-vega
        {:vega-spec (-> vega-spec
                        (update :data conj {:name "second-table"
                                            :values values}))
         :data {"table" {:file-path table-path-json :format :json}
                "second-table" {:file-path second-table-json :format :json}}
+        :store-data-files? true
         :svg-file-path svg-file-path})
 
       (is (file-exists? svg-file-path))
@@ -226,15 +231,33 @@
       (io/delete-file (io/file second-table-json))))
 
 
+  (testing "vega-lite: specify data files but do not store them"
+    (let [svg-file-path "./tmp/vega-lite-do-not-store-test.svg"
+          data-file-path "./tmp/vega-lite-do-not-store-test.json"
+          values [{:a 14 :b 15}]]
+
+      (sut/render-vega
+       {:vega-lite-spec (assoc vega-lite-spec :data {:values values})
+        :data {:file-path data-file-path :format :json}
+        :svg-file-path svg-file-path})
+
+      (is (file-exists? svg-file-path))
+      (is (= "1DBBF9A1153F22BC37F6D994FFC65FD8" (file->md5 svg-file-path)))
+      (is (not (file-exists? data-file-path)))
+
+      (io/delete-file (io/file svg-file-path))))
+
+
   (testing "vega-lite csv source"
     (let [svg-file-path "./tmp/vega-lite-csv.svg"
           data-file-path "./tmp/vega-lite-csv.csv"]
 
-      (sut/write-vega-into-svg
+      (sut/render-vega
        {:vega-lite-spec vega-lite-spec
         :data {:file-path data-file-path
                :format :csv
                :csv-header? true}
+        :store-data-files? true
         :svg-file-path svg-file-path})
 
       (is (file-exists? svg-file-path))
@@ -250,8 +273,8 @@
 
   (testing "vega-lite: incorrect spec with clear error message"
     (is (thrown-with-msg?
-         Exception #"vega/lite spec is incorrect: Error: Invalid field type \"INCORRECT_TYPE\"."
-         (sut/write-vega-into-svg
+         Exception #"vega-lite spec is incorrect: Error: Invalid field type \"INCORRECT_TYPE\"."
+         (sut/render-vega
           {:vega-lite-spec (assoc-in vega-lite-spec [:encoding :x :type] "INCORRECT_TYPE")
            :data {:file-path "./tmp/vega-lite-test.json"
                   :format :json}
@@ -260,8 +283,8 @@
 
   (testing "vega-lite: incorrect spec but the message is unclear"
     (is (thrown-with-msg?
-         Exception #"vega/lite spec is incorrect: TypeError: Cannot convert undefined or null to object"
-         (sut/write-vega-into-svg
+         Exception #"vega-lite spec is incorrect: TypeError: Cannot convert undefined or null to object"
+         (sut/render-vega
           {:vega-lite-spec (assoc vega-lite-spec :mark "INCORRECT_PLOT_TYPE")
            :data {:file-path "./tmp/vega-lite-test.json"
                   :format :json}
@@ -300,24 +323,19 @@
                                                                       :encoding
                                                                       {:x {:field "users/user_name", :type "nominal", :axis {:labelAngle 0}},
                                                                        :y {:field "users/age", :type "quantitative"}}}
-                                                     :svg-file-path "./tmp/vega-sink-test.svg"
-                                                     :data {:format :json
-                                                            :file-path "./tmp/vega-sink-test.json"}}}]}]})]
+                                                     :svg-file-path "./tmp/vega-sink-test.svg"}}]}]})]
 
       @(pipeline {:connection connection-map})
 
-      (is (= [{"users/id" 1,"users/user_name" "Alice" "users/age" 30},
-              {"users/id" 2 "users/user_name" "Bob" "users/age" 40},
-              {"users/id" 3,"users/user_name" "Charlie" "users/age" 50}]
-             (charred/read-json (slurp "./tmp/vega-sink-test.json"))))
+      (is (= "3A9089DC5AA1150F08417FADCBF358F9" (file->md5 "./tmp/vega-sink-test.svg")))
 
       (tc/stop! pg)
-      (io/delete-file (io/file "./tmp/vega-sink-test.json"))
       (io/delete-file (io/file "./tmp/vega-sink-test.svg")))))
 
 
 (comment
   (md5 (slurp "./tmp/vega-lite-test.svg"))
+  (md5 (slurp "./tmp/vega-sink-test.svg"))
 
   (write-vega-into-svg-test)
   ;;
