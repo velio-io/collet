@@ -1,0 +1,7 @@
+{:remove-consecutive-blank-lines? false
+ :extra-indents {assoc-some [[:inner 0]]
+                 with-meta [[:block 0]]
+                 are [[:inner 0]]
+                 invoke! [[:inner 0]]
+                 deftype [[:inner 0] [:inner 1]]}}
+

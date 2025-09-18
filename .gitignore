@@ -22,3 +22,5 @@ local.clj
 .collet
 CLAUDE.md
 /examples/image-object-detection/volume
+**/.lsp/.cache
+**/.calva
