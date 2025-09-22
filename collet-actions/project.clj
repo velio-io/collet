@@ -10,6 +10,8 @@
 
   :scm {:dir ".."}
 
+  :resource-paths ["resources" "lib/darkstar.jar"]
+
   :global-vars
   {*warn-on-reflection* true}
 
@@ -37,7 +39,9 @@
    [com.cognitect.aws/s3 "869.2.1687.0"]
    [com.schibsted.spt.data/jslt "0.1.14"]
    [net.clojars.wkok/openai-clojure "0.22.0"]
-   [org.apache.tika/tika-core "2.9.2"]]
+   [org.apache.tika/tika-core "2.9.2"]
+   [org.graalvm.polyglot/js "24.2.2" :extension "pom"]
+   [org.graalvm.js/js-scriptengine "24.2.2"]]
 
   ;; required by Chronicle Queue to work with Java 11, Java 17 or Java 21
   :jvm-opts
