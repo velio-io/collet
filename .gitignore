@@ -4,7 +4,7 @@ checkouts
 profiles.clj
 pom.xml
 pom.xml.asc
-*.jar
+target/*.jar
 !jmx_prometheus_javaagent-0.20.0.jar
 *.class
 .lein-*
@@ -24,3 +24,4 @@ CLAUDE.md
 /examples/image-object-detection/volume
 **/.lsp/.cache
 **/.calva
+**snyssfx_fiddle.clj

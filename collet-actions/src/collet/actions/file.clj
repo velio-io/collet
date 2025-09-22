@@ -58,14 +58,18 @@
              false))))
 
 
+(def input-param-spec
+  [:or
+   :string
+   utils/input-stream?
+   utils/dataset?
+   [:sequential utils/dataset?]
+   [:sequential [:or map? [:sequential map?]]]])
+
+
 (def file-params-spec
   [:map
-   [:input
-    [:or :string
-     utils/input-stream?
-     utils/dataset?
-     [:sequential utils/dataset?]
-     [:sequential [:or map? [:sequential map?]]]]]
+   [:input input-param-spec]
    [:file-name :string]
    [:folder {:optional true} :string]
    [:cat? {:optional true :default false} :boolean]
