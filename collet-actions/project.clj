@@ -10,7 +10,7 @@
 
   :scm {:dir ".."}
 
-  :resource-paths ["resources" "lib/darkstar.jar"]
+  :resource-paths ["resources" "lib/darkstar.jar" "lib/lucene-demo-10.3.2.jar"]
 
   :global-vars
   {*warn-on-reflection* true}
@@ -20,6 +20,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.12.0"]
+   [org.clojure/tools.cli "1.1.230"]
    [io.velio/collet-core "0.2.7"]
    [metosin/malli "0.16.4"]
    [diehard "0.11.12"]
@@ -41,7 +42,10 @@
    [net.clojars.wkok/openai-clojure "0.22.0"]
    [org.apache.tika/tika-core "2.9.2"]
    [org.graalvm.polyglot/js "24.2.2" :extension "pom"]
-   [org.graalvm.js/js-scriptengine "24.2.2"]]
+   [org.graalvm.js/js-scriptengine "24.2.2"]
+   [org.apache.lucene/lucene-core "10.3.2"]
+   [org.apache.lucene/lucene-queryparser "10.3.2"]
+   [org.apache.lucene/lucene-analyzers-common "8.11.4"]]
 
   ;; required by Chronicle Queue to work with Java 11, Java 17 or Java 21
   :jvm-opts
