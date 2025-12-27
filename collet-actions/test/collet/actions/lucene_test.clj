@@ -220,3 +220,80 @@
           (.delete temp-csv)
           (doseq [f (reverse (file-seq temp-dir))]
             (.delete f)))))))
+
+(deftest compile-lucene-query-test
+  (testing "Compile lucene query"
+    (are [got compiled] (= compiled (sut/compile-lucene-query got))
+      "data"
+      "\"data\""
+
+      "data and pata"
+      "\"data and pata\""
+
+      "d?ta"
+      "\"d?ta\""
+
+      #"d.*ta"
+      "/d.*ta/"
+
+      [:field "d?ta"]
+      "field:\"d?ta\""
+
+      [:field_name ["something" "some phrase here"]]
+      "field_name:(\"something\" \"some phrase here\")"
+
+      [:range {:exclusive? true} ["50" "100"]]
+      "{\"50\" TO \"100\"}"
+
+      [:field [:range ["50" "100"]]]
+      "field:[\"50\" TO \"100\"]"
+
+      [:field ["a" [:range ["50" "100"]]]]
+      "field:(\"a\" [\"50\" TO \"100\"])"
+
+      [:fuzzy {:ed 0.7} "data"]
+      "\"data\"~0.7"
+
+      [:fuzzy "data"]
+      "\"data\"~0.5"
+
+      [:field [:- "data"]]
+      "field:-\"data\""
+
+      [:prox {:nw 10} "data data2"]
+      "\"data data2\"~10"
+
+      ["a" :not "b"]
+      "(\"a\" NOT \"b\")"
+
+      [:or "a" [:category "electronics"]]
+      "(\"a\" OR category:\"electronics\")"
+
+      [:and
+       [:title "leather jacket"]
+       [:color "gr?y"]
+       [:size "M"]]
+      "(title:\"leather jacket\" AND color:\"gr?y\" AND size:\"M\")"
+
+      [:and
+       [:or "a" [:and "c" "d"]]
+       "a"
+       [:fuzzy "e"]
+       [:- "d"]
+       [:condition [:- "refurbished"]]
+       [:price
+        [:range ["100" "500"]]]
+       ["a" :not "b"]]
+      "((\"a\" OR (\"c\" AND \"d\")) AND \"a\" AND \"e\"~0.5 AND -\"d\" AND condition:-\"refurbished\" AND price:[\"100\" TO \"500\"] AND (\"a\" NOT \"b\"))"
+
+      [:title
+       ["a"
+        [:fuzzy {:ed 1} "smartphone"]
+        [:+ "Samsung"]]]
+      "title:(\"a\" \"smartphone\"~1 +\"Samsung\")"))
+
+  (testing "Throwing errors on invalid states"
+    (is (thrown-with-msg? Exception #"invalid" (sut/compile-lucene-query "d*ata and pata")))
+    (is (thrown-with-msg? Exception #"invalid" (sut/compile-lucene-query "?ata")))
+    (is (thrown-with-msg? Exception #"invalid" (sut/compile-lucene-query [:prox {:nw 10} "data"])))))
+
