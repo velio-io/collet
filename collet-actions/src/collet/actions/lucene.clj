@@ -3,6 +3,8 @@
    [clojure.java.io :as io]
    [clojure.walk :as walk]
    [clojure.string :as string]
+   [collet.action :as action]
+   [collet.utils :as utils]
    [malli.core :as m]
    [tech.v3.dataset :as ds])
   (:import
@@ -644,29 +646,29 @@
                 include-score? true}} opts
 
         ;; Execute search
-        n-docs              ^int (+ limit offset)
-        ^TopDocs top-docs   (.search searcher query n-docs)
+        n-docs            ^int (+ limit offset)
+        ^TopDocs top-docs (.search searcher query n-docs)
 
         ;; Get score docs and apply offset/limit
-        score-docs          (vec (.scoreDocs top-docs))
-        relevant-docs       (cond->> score-docs
-                              (pos? offset) (drop offset)
-                              true (take limit))
+        score-docs        (vec (.scoreDocs top-docs))
+        relevant-docs     (cond->> score-docs
+                            (pos? offset) (drop offset)
+                            true (take limit))
 
         ;; Convert to flat row maps with metadata
-        rows                (for [[idx ^ScoreDoc score-doc] (map-indexed vector relevant-docs)]
-                              (let [doc-id    (.doc score-doc)
-                                    score     (.score score-doc)
-                                    ;; Lucene 10.x API: use storedFields().document()
-                                    doc       (.document (.storedFields searcher) doc-id)
-                                    field-map (doc->map doc fields)
+        rows              (for [[idx ^ScoreDoc score-doc] (map-indexed vector relevant-docs)]
+                            (let [doc-id    (.doc score-doc)
+                                  score     (.score score-doc)
+                                  ;; Lucene 10.x API: use storedFields().document()
+                                  doc       (.document (.storedFields searcher) doc-id)
+                                  field-map (doc->map doc fields)
 
-                                    ;; Build flat row: merge fields + metadata
-                                    row       (cond-> field-map
-                                                include-score? (assoc :score score)
-                                                true (assoc :rank (inc idx))  ; 1-based rank
-                                                true (assoc :doc_id doc-id))]
-                                row))]
+                                  ;; Build flat row: merge fields + metadata
+                                  row       (cond-> field-map
+                                              include-score? (assoc :score score)
+                                              true (assoc :rank (inc idx)) ; 1-based rank
+                                              true (assoc :doc_id doc-id))]
+                              row))]
 
     ;; Convert to dataset
     (ds/->dataset rows)))
@@ -765,7 +767,7 @@
                       e)))
     (catch Exception e
       (if (instance? ExceptionInfo e)
-        (throw e)           ; Re-throw ex-info as-is
+        (throw e)             ; Re-throw ex-info as-is
         (throw (ex-info "Search error"
                         {:opts  opts
                          :error (.getMessage e)}
@@ -791,6 +793,197 @@
 
 
 
+;; the following is got from
+;; https://lucene.apache.org/core/10_3_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package_description
+
+(def registry
+  (merge (m/default-schemas)
+         {::single-term  [:orn
+                          ;; https://regex101.com/r/hgMAvz/1
+                          [:term/single #"^(?<atLeastOneNotStarAndNotQMark>[^\*\?])+(?<noWhitespaces>[^\s]*)$"]]
+          ::fuzzy        [:cat
+                          [:= :fuzzy]
+                          [:? [:map [:ed number?]]]
+                          ::single-term]
+          ::phrase       [:orn
+                          [:term/phrase [:and
+                                         #" " ;; include spaces
+                                         #"^[^\*\?]*$"]]] ;; doesn't include * and ?
+
+          ::prox         [:cat
+                          [:= :prox]
+                          [:map [:nw :int]]
+                          ::phrase]
+          ::boost        [:cat
+                          [:= :boost]
+                          [:map [:bf :double]]
+                          [:or ::phrase ::single-term]]
+          ::+            [:cat
+                          [:= :+]
+                          [:or ::phrase ::single-term]]
+          ::-            [:cat
+                          [:= :-]
+                          [:or ::phrase ::single-term]]
+          ::regex        [:orn
+                          [:term/regex [:fn (fn [s] (instance? Pattern s))]]]
+          ::term         [:or
+                          ::single-term
+                          ::fuzzy
+                          ::phrase
+                          ::prox
+                          ::boost
+                          ::+
+                          ::-
+                          ::regex]
+          ::range        [:cat
+                          [:= :range]
+                          [:? [:map [:exclusive? :boolean]]]
+                          [:tuple
+                           ::term
+                           ::term]]
+          ::field-value  [:or
+                          ::term
+                          ::range]
+          ::field-values [:orn
+                          [:field-values/one ::field-value]
+                          [:field-values/many [:seqable ::field-value]]]
+          ::field        [:orn
+                          [:field/v ::field-values]
+                          [:field/kv [:cat
+                                      :keyword
+                                      ::field-values]]]
+          ::not          [:orn
+                          [:op/not [:cat
+                                    ::field
+                                    [:= :not]
+                                    ::field]]]
+          ::bin          [:orn [:op/bin [:cat
+                                         [:or [:enum :and :or]]
+                                         [:repeat {:min 2} [:or
+                                                            ::field
+                                                            ::not
+                                                            [:ref ::expression]]]]]]
+          ::expression   [:or
+                          ::field
+                          ::not
+                          [:ref ::bin]]}))
+
+(def expression-parser
+  (m/parser ::expression {:registry registry}))
+
+(defn dispatch-fn [x]
+  (cond
+    (sequential? x) (first x)
+    :else :default))
+
+(defmulti stringify
+  "Multi-method to stringify the parsed OData parameters"
+  #'dispatch-fn)
+
+(defmethod stringify :term/single
+  [[_ value]]
+  (str \" value \"))
+
+(defmethod stringify :term/phrase
+  [[_ value]]
+  (str \" value \"))
+
+(defmethod stringify :term/regex
+  [[_ value]]
+  (str \/ value \/))
+
+(defmethod stringify :fuzzy
+  [[_ {:keys [ed] :or {ed 0.5}} value]]
+  (str value "~" ed))
+
+(defmethod stringify :prox
+  [[_ {:keys [nw]} value]]
+  (str value "~" nw))
+
+(defmethod stringify :boost
+  [[_ {:keys [bf]} value]]
+  (str value "^" bf))
+
+(defmethod stringify :+
+  [[_ value]]
+  (str "+" value))
+
+(defmethod stringify :-
+  [[_ value]]
+  (str "-" value))
+
+(defmethod stringify :range
+  [[_ {:keys [exclusive?] :or {exclusive? false}} [from to]]]
+  (str (if exclusive? "{" "[")
+       from
+       " TO "
+       to
+       (if exclusive? "}" "]")))
+
+(defmethod stringify :field-values/one
+  [[_ value]]
+  value)
+
+(defmethod stringify :field-values/many
+  [[_ values]]
+  (str "(" (string/join " " values) ")"))
+
+(defmethod stringify :field/v
+  [[_ value]]
+  value)
+
+(defmethod stringify :field/kv
+  [[_ [key value]]]
+  (str (name key) ":" value))
+
+(defmethod stringify :op/not
+  [[_ [v1 _ v2]]]
+  (str "(" v1 " NOT " v2 ")"))
+
+(defmethod stringify :op/bin
+  [[_ [op args]]]
+  (str "("
+       (string/join
+        (string/upper-case (str " " (name op) " "))
+        args)
+       ")"))
+
+(defmethod stringify :default
+  [x]
+  x)
+
+(defn compile-lucene-query
+  "Given a data structure,
+   it will compile the data structure into a lucene query string."
+  ([data]
+   (let [parsed (expression-parser data)]
+     (if-not (= ::m/invalid parsed)
+       (walk/postwalk stringify parsed)
+       (throw (Exception. "Lucene query is invalid"))))))
+
+
+
+(defmethod action/action-fn ::index
+  [{:keys [index-path docs-path] :as opts}]
+  (index-files! (assoc opts
+                       :index-path index-path
+                       :docs-path  docs-path)))
+
+
+(defmethod action/action-fn ::query
+  [{:keys [index query default analyzer searcher limit offset fields include-score?]}]
+  (let [query-str (compile-lucene-query query)]
+    (-> {:index-path index
+         :query      query-str}
+        (utils/assoc-some
+          :analyzer analyzer
+          :searcher searcher
+          :default-field default
+          :limit limit
+          :offset offset
+          :fields fields
+          :include-score? include-score?)
+        (search))))
 
 
 
@@ -1022,173 +1215,6 @@
    (doseq [{:keys [score fields]} (:results result)]
      (println "Score:" score "Title:" (:title fields)))))
 
-;; the following is got from
-;; https://lucene.apache.org/core/10_3_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package_description
-
-(def registry
-  (merge (m/default-schemas)
-         {::single-term [:orn
-                           ;; https://regex101.com/r/hgMAvz/1
-                         [:term/single #"^(?<atLeastOneNotStarAndNotQMark>[^\*\?])+(?<noWhitespaces>[^\s]*)$"]]
-          ::fuzzy [:cat
-                   [:= :fuzzy]
-                   [:? [:map [:ed number?]]]
-                   ::single-term]
-          ::phrase [:orn
-                    [:term/phrase [:and
-                                   #" " ;; include spaces
-                                   #"^[^\*\?]*$" ;; doesn't include * and ?
-                                   ]]]
-          ::prox [:cat
-                  [:= :prox]
-                  [:map [:nw :int]]
-                  ::phrase]
-          ::boost [:cat
-                   [:= :boost]
-                   [:map [:bf :double]]
-                   [:or ::phrase ::single-term]]
-          ::+   [:cat
-                 [:= :+]
-                 [:or ::phrase ::single-term]]
-          ::- [:cat
-               [:= :-]
-               [:or ::phrase ::single-term]]
-          ::regex [:orn
-                   [:term/regex [:fn (fn [s] (instance? Pattern s))]]]
-          ::term [:or
-                  ::single-term
-                  ::fuzzy
-                  ::phrase
-                  ::prox
-                  ::boost
-                  ::+
-                  ::-
-                  ::regex]
-          ::range   [:cat
-                     [:= :range]
-                     [:? [:map [:exclusive? :boolean]]]
-                     [:tuple
-                      ::term
-                      ::term]]
-          ::field-value [:or
-                         ::term
-                         ::range]
-          ::field-values [:orn
-                          [:field-values/one ::field-value]
-                          [:field-values/many [:seqable ::field-value]]]
-          ::field [:orn
-                   [:field/v ::field-values]
-                   [:field/kv [:cat
-                               :keyword
-                               ::field-values]]]
-          ::not [:orn
-                 [:op/not [:cat
-                           ::field
-                           [:= :not]
-                           ::field]]]
-          ::bin [:orn [:op/bin [:cat
-                                [:or [:enum :and :or]]
-                                [:repeat {:min 2} [:or
-                                                   ::field
-                                                   ::not
-                                                   [:ref ::expression]]]]]]
-          ::expression [:or
-                        ::field
-                        ::not
-                        [:ref ::bin]]}))
-
-(def expression-parser
-  (m/parser ::expression {:registry registry}))
-
-(defn dispatch-fn [x]
-  (cond
-    (sequential? x) (first x)
-    :else :default))
-
-(defmulti stringify
-  "Multi-method to stringify the parsed OData parameters"
-  #'dispatch-fn)
-
-(defmethod stringify :term/single
-  [[_ value]]
-  (str \" value \"))
-
-(defmethod stringify :term/phrase
-  [[_ value]]
-  (str \" value \"))
-
-(defmethod stringify :term/regex
-  [[_ value]]
-  (str \/ value \/))
-
-(defmethod stringify :fuzzy
-  [[_ {:keys [ed] :or {ed 0.5}} value]]
-  (str value "~" ed))
-
-(defmethod stringify :prox
-  [[_ {:keys [nw]} value]]
-  (str value "~" nw))
-
-(defmethod stringify :boost
-  [[_ {:keys [bf]} value]]
-  (str value "^" bf))
-
-(defmethod stringify :+
-  [[_ value]]
-  (str "+" value))
-
-(defmethod stringify :-
-  [[_ value]]
-  (str "-" value))
-
-(defmethod stringify :range
-  [[_ {:keys [exclusive?] :or {exclusive? false}} [from to]]]
-  (str (if exclusive? "{" "[")
-       from
-       " TO "
-       to
-       (if exclusive? "}" "]")))
-
-(defmethod stringify :field-values/one
-  [[_ value]]
-  value)
-
-(defmethod stringify :field-values/many
-  [[_ values]]
-  (str "(" (string/join " " values) ")"))
-
-(defmethod stringify :field/v
-  [[_ value]]
-  value)
-
-(defmethod stringify :field/kv
-  [[_ [key value]]]
-  (str (name key) ":" value))
-
-(defmethod stringify :op/not
-  [[_ [v1 _ v2]]]
-  (str "(" v1 " NOT " v2 ")"))
-
-(defmethod stringify :op/bin
-  [[_ [op args]]]
-  (str "("
-       (string/join
-        (string/upper-case (str " " (name op) " "))
-        args)
-       ")"))
-
-(defmethod stringify :default
-  [x]
-  x)
-
-(defn compile-lucene-query
-  "Given a data structure,
-   it will compile the data structure into a lucene query string."
-  ([data]
-   (let [parsed (expression-parser data)]
-     (if-not (= ::m/invalid parsed)
-       (walk/postwalk stringify parsed)
-       (throw (Exception. "Lucene query is invalid"))))))
 
 (comment
  ;; ========================================
@@ -1199,21 +1225,25 @@
 
  ;; term
  "something"
+ (compile-lucene-query "something")
 
  ;; modifiers
  "te*t"                       ;; wildcard
  "te?t"                       ;; single character wildcard
 
+ (compile-lucene-query "te*t")
  ;; phrase
  "some phrase here"
 
  ;; regex
  #"[mb]oat"
+ (compile-lucene-query #"[mb]oat")
 
  ;; field
  [:field_name [...]]          ;; search within specific field
  [:field_name "something"]
- [:field_name ["something" "some phrase here"]]
+ (compile-lucene-query [:field_name "something"])
+ (compile-lucene-query [:field_name ["something" "some phrase here"]])
 
 
  ;; boolean operators
@@ -1245,15 +1275,24 @@
   [:size "M"]]
 
  ;; (category:electronics OR category:gadgets) AND title:(phone OR tablet) AND price:[100 TO 500] AND -condition:refurbished
- [:and
-  [:or
-   [:category "electronics"]
-   [:category "gadgets"]]
-  [:title
-   [:or "phone" "tablet"]]
-  [:price
-   [:range [100 500]]]
-  [:- [:condition "refurbished"]]]
+ (compile-lucene-query
+  [:and
+   [:or
+    [:category "electronics"]
+    [:category "gadgets"]]
+   [:title ["phone" "tablet"]]
+   [:price
+    [:range [100 500]]]])
+
+ (compile-lucene-query
+  [:and
+   [:or
+    [:category "electronics"]
+    [:category "gadgets"]]
+   [:title ["phone" "tablet"]]
+   [:price
+    [:range [100 500]]]
+   [:condition [:- "refurbished"]]])
 
  ;; title:(+smartphone +Samsung~1)
  [:title
@@ -1261,11 +1300,18 @@
   [:+ [:fuzzy {:ed 1} "Samsung"]]]
 
  ;; symptoms:(+fever +"sore throat") AND -diagnosis:"COVID-19"
- [:and
+ (compile-lucene-query
   [:symptoms
    [:+ "fever"]
-   [:+ "sore throat"]]
-  [:- [:diagnosis "COVID-19"]]]
+   [:+ "sore throat"]])
+
+ (compile-lucene-query
+  [:and
+   [:symptoms
+    [:and
+     [:+ "fever"]
+     [:+ "sore throat"]]]
+   [:diagnosis [:- "COVID-19"]]])
 
  ;; text:bankrupt* AND text:fraud AND -text:discharge
  [:and
