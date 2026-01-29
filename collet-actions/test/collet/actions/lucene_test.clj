@@ -239,11 +239,14 @@
       [:field "d?ta"]
       "field:\"d?ta\""
 
-      [:field_name ["something" "some phrase here"]]
+      [:field_name "something" "some phrase here"]
       "field_name:(\"something\" \"some phrase here\")"
 
       [:range {:exclusive? true} ["50" "100"]]
       "{\"50\" TO \"100\"}"
+
+      [:range [50 100]]
+      "[50 TO 100]"
 
       [:field [:range ["50" "100"]]]
       "field:[\"50\" TO \"100\"]"
@@ -263,7 +266,7 @@
       [:prox {:nw 10} "data data2"]
       "\"data data2\"~10"
 
-      ["a" :not "b"]
+      ["a" [:not "b"]]
       "(\"a\" NOT \"b\")"
 
       [:or "a" [:category "electronics"]]
@@ -283,14 +286,21 @@
        [:condition [:- "refurbished"]]
        [:price
         [:range ["100" "500"]]]
-       ["a" :not "b"]]
+       ["a" [:not "b"]]]
       "((\"a\" OR (\"c\" AND \"d\")) AND \"a\" AND \"e\"~0.5 AND -\"d\" AND condition:-\"refurbished\" AND price:[\"100\" TO \"500\"] AND (\"a\" NOT \"b\"))"
 
       [:title
        ["a"
         [:fuzzy {:ed 1} "smartphone"]
         [:+ "Samsung"]]]
-      "title:(\"a\" \"smartphone\"~1 +\"Samsung\")"))
+      "title:(\"a\" \"smartphone\"~1 +\"Samsung\")"
+
+      [:and
+       [:headline
+        [:or "climate change" "global warming"]]
+       [:date
+        [:range [20250101 20251231]]]]
+      "(headline:(\"climate change\" OR \"global warming\") AND date:[20250101 TO 20251231])"))
 
   (testing "Throwing errors on invalid states"
     (is (thrown-with-msg? Exception #"invalid" (sut/compile-lucene-query "d*ata and pata")))
