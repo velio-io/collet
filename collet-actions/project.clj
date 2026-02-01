@@ -10,7 +10,7 @@
 
   :scm {:dir ".."}
 
-  :resource-paths ["resources" "lib/darkstar.jar" "lib/lucene-demo-10.3.2.jar"]
+  :resource-paths ["resources" "lib/darkstar.jar"]
 
   :global-vars
   {*warn-on-reflection* true}
