@@ -295,12 +295,12 @@
       (if (:fail-fast? opts)
         (throw e)
         ;; Log error and continue
-        (-> stats-atom
-            (swap! update :failed inc)
-            (swap! update :errors conj
-                   {:file  file-path
-                    :error (.getMessage e)
-                    :type  (.getName (.getClass e))}))))))
+        (doto stats-atom
+          (swap! update :failed inc)
+          (swap! update :errors conj
+                 {:file  file-path
+                  :error (.getMessage e)
+                  :type  (.getName (.getClass e))}))))))
 
 
 (defn- should-index-file?
@@ -333,6 +333,49 @@
                                    files)]
         (doseq [file matching-files]
           (index-file! writer (.getAbsolutePath ^File file) opts stats-atom))))))
+
+
+(defn- make-default-metadata
+  "Creates default metadata for in-memory data sources"
+  [{:keys [source-id]}]
+  {:path        (or source-id (str "memory://" (java.util.UUID/randomUUID)))
+   :modified    (System/currentTimeMillis)
+   :size        0
+   :extension   :memory
+   :compressed? false})
+
+
+(defn- index-dataset!
+  "Indexes a single dataset into the writer"
+  [^IndexWriter writer dataset opts stats-atom]
+  (let [{:keys [commit-every-n progress-fn source-id]} opts
+        metadata (make-default-metadata {:source-id source-id})
+        rows     (ds/mapseq-reader dataset)]
+    (doseq [[idx row] (map-indexed vector rows)]
+      (let [doc (row->document row idx metadata opts)]
+        (.addDocument writer doc)
+        (swap! stats-atom update :indexed inc)
+        (when (and commit-every-n
+                   (zero? (mod (:indexed @stats-atom) commit-every-n)))
+          (.commit writer)
+          (when progress-fn
+            (progress-fn @stats-atom)))))))
+
+
+(defn- index-collection!
+  "Indexes a collection of maps into the writer"
+  [^IndexWriter writer coll opts stats-atom]
+  (let [dataset (ds/->dataset coll)]
+    (index-dataset! writer dataset opts stats-atom)))
+
+
+(defn- index-datasets!
+  "Indexes a sequence of datasets into the writer"
+  [^IndexWriter writer datasets opts stats-atom]
+  (doseq [[batch-idx dataset] (map-indexed vector datasets)]
+    (let [batch-opts (assoc opts :source-id
+                           (or (:source-id opts) (str "batch-" batch-idx)))]
+      (index-dataset! writer dataset batch-opts stats-atom))))
 
 
 ;; ========================================
@@ -390,6 +433,15 @@
    [:errors [:vector error-map-spec]]])
 
 
+(def index-input-spec
+  "Specification for indexable input data"
+  [:or
+   :string                              ;; File path/directory
+   utils/dataset?                       ;; Single dataset
+   [:sequential utils/dataset?]         ;; Sequence of datasets
+   [:sequential map?]])                 ;; Collection of maps
+
+
 (def search-params-spec
   [:map
    ;; Required
@@ -432,6 +484,72 @@
    [:offset nat-int?]
    [:limit pos-int?]
    [:max-score {:optional true} number?]])
+
+
+(defn index!
+  "Indexes data into a Lucene index. Supports multiple input types:
+   - File path (string) - Index files from path/directory
+   - Dataset - Index a tech.v3.dataset directly
+   - Collection of maps - Index [{:a 1} {:a 2}]
+   - Sequence of datasets - Index multiple datasets
+
+   Parameters:
+   :index-path  - Path to Lucene index directory (required)
+   :input       - Data to index (required, see types above)
+   :docs-path   - DEPRECATED: Alias for :input when string
+   :source-id   - Custom identifier for in-memory data (default: memory://uuid)
+
+   Returns:
+   {:indexed N :failed N :skipped N :duration-ms N :errors [...]}
+
+   Examples:
+   ;; Index a dataset
+   (index! {:index-path \"/tmp/idx\" :input (ds/->dataset [{:name \"Alice\"}])})
+
+   ;; Index collection of maps
+   (index! {:index-path \"/tmp/idx\" :input [{:name \"Alice\"} {:name \"Bob\"}]})
+
+   ;; Index files (same as index-files!)
+   (index! {:index-path \"/tmp/idx\" :input \"/path/to/data\"})"
+  [{:keys [index-path input docs-path] :as opts}]
+  (let [start-time (System/currentTimeMillis)
+        stats-atom (atom {:indexed 0 :failed 0 :skipped 0 :errors []})
+        data       (or input docs-path)
+        index-opts (select-keys opts [:ram-buffer-mb :open-mode :analyzer])]
+
+    (when-not data
+      (throw (ex-info "Missing required parameter: :input or :docs-path" {:opts opts})))
+
+    (with-open [writer ^IndexWriter (create-index (assoc index-opts :index-path index-path))]
+      (cond
+        ;; File path - existing behavior
+        (and (string? data) (.exists (io/file data)))
+        (walk-and-index writer data opts stats-atom)
+
+        ;; Empty collection - no-op
+        (and (sequential? data) (empty? data))
+        @stats-atom
+
+        ;; Sequence of datasets
+        (utils/ds-seq? data)
+        (index-datasets! writer data opts stats-atom)
+
+        ;; Single dataset
+        (ds/dataset? data)
+        (index-dataset! writer data opts stats-atom)
+
+        ;; Collection of maps
+        (and (sequential? data) (map? (first data)))
+        (index-collection! writer data opts stats-atom)
+
+        ;; String path that doesn't exist
+        (string? data)
+        (throw (ex-info "File or directory not found" {:path data}))
+
+        :else
+        (throw (ex-info "Unsupported input type" {:type (type data)})))
+
+      (assoc @stats-atom :duration-ms (- (System/currentTimeMillis) start-time)))))
 
 
 (defn index-files!
@@ -592,8 +710,9 @@
    Returns: Map with field values"
   [^Document doc field-names]
   (let [;; Get all field names if not specified
+        ;; Convert keywords to strings for Lucene API compatibility
         all-fields      (if field-names
-                          field-names
+                          (map #(if (keyword? %) (name %) %) field-names)
                           (->> (.getFields doc)
                                (map #(.name ^IndexableField %))
                                (map (fn [fname]
@@ -605,9 +724,10 @@
 
         ;; Helper to get field value, trying -stored suffix first
         get-field-value (fn [field-name]
-                          (let [stored-name (str field-name "-stored")
+                          (let [field-str   (if (keyword? field-name) (name field-name) field-name)
+                                stored-name (str field-str "-stored")
                                 value       (or (.get doc stored-name)
-                                                (.get doc field-name))]
+                                                (.get doc field-str))]
                             (when value
                               ;; Only coerce metadata fields to numbers
                               ;; Column data fields remain as strings since they're stored via TextField
@@ -821,10 +941,10 @@
                           [:or ::phrase ::single-term]]
           ::+            [:cat
                           [:= :+]
-                          [:or ::phrase ::single-term]]
+                          [:or ::phrase ::single-term [:ref ::field]]]
           ::-            [:cat
                           [:= :-]
-                          [:or ::phrase ::single-term]]
+                          [:or ::phrase ::single-term [:ref ::field]]]
           ::regex        [:orn
                           [:term/regex [:fn (fn [s] (instance? Pattern s))]]]
           ::term         [:or
@@ -891,6 +1011,7 @@
                           ::not
                           [:ref ::bin]
                           ::field]}))
+
 
 (def expression-parser
   (m/parser ::expression {:registry registry}))
@@ -978,6 +1099,7 @@
   [x]
   x)
 
+
 (defn compile-lucene-query
   "Given a data structure,
    it will compile the data structure into a lucene query string."
@@ -988,381 +1110,24 @@
        (throw (Exception. "Lucene query is invalid"))))))
 
 
-(defmethod action/action-fn ::index
-  [{:keys [index-path docs-path] :as opts}]
-  (index-files! (assoc opts
-                       :index-path index-path
-                       :docs-path  docs-path)))
-
-
-(defmethod action/action-fn ::query
-  [{:keys [index query default analyzer searcher limit offset fields include-score?]}]
-  (let [query-str (compile-lucene-query query)]
-    (-> {:index-path index
-         :query      query-str}
-        (utils/assoc-some
-          :analyzer analyzer
-          :searcher searcher
-          :default-field default
-          :limit limit
-          :offset offset
-          :fields fields
-          :include-score? include-score?)
-        (search))))
-
-
-
-(comment
- ;; ========================================
- ;; create-index usage examples
- ;; ========================================
-
- ;; Simple usage (backward compatible)
- (def writer (create-index "/tmp/my-index"))
- (.close writer)
-
- ;; With options map
- (def writer (create-index {:index-path "/tmp/my-index"}))
-
- ;; Performance-tuned for large batch file indexing with KNN vectors
- (def writer (create-index
-              {:index-path         "/tmp/large-index"
-               :ram-buffer-mb      512
-               :open-mode          :create
-               :use-compound-file? false}))
-
- ;; Code/token search with whitespace analyzer
- (def writer (create-index
-              {:index-path "/tmp/code-index"
-               :analyzer   :whitespace}))
-
- ;; Incremental updates with smaller RAM buffer
- (def writer (create-index
-              {:index-path    "/tmp/existing-index"
-               :open-mode     :append
-               :ram-buffer-mb 128}))
-
- ;; Custom analyzer instance
- (def custom-analyzer (StandardAnalyzer.))
- (def writer (create-index
-              {:index-path "/tmp/my-index"
-               :analyzer   custom-analyzer}))
-
- ;; Memory-constrained environment
- (def writer (create-index
-              {:index-path       "/tmp/my-index"
-               :ram-buffer-mb    64
-               :commit-on-close? true}))
-
- ;; Benchmarking - max performance, manual commit control
- (def writer (create-index
-              {:index-path         "/tmp/benchmark-index"
-               :ram-buffer-mb      1024
-               :open-mode          :create
-               :use-compound-file? false
-               :commit-on-close?   false}))
-
-
- ;; ========================================
- ;; index-files! usage examples
- ;; ========================================
-
- (load-dataset
-  "resources/customers-10000.csv"
-  {:format :csv}
-  {})
-
-
- ;; Index CSV files
- (index-files!
-  {:index-path "resources/index"
-   :docs-path  "resources/customers-10000.csv"
-   :extensions #{:csv}})
-
- ;; Index mixed formats with progress
- (index-files!
-  {:index-path  "/tmp/data-index"
-   :docs-path   "/path/to/data"
-   :extensions  #{:csv :jsonld :parquet}
-   :progress-fn (fn [{:keys [indexed failed]}]
-                  (println (format "Indexed %d rows, %d files failed" indexed failed)))})
-
- ;; With KNN vectors for semantic search
- (defn row->vector [row]
-   ;; Example: combine title and description columns
-   (let [text (str (:title row) " " (:description row))]
-     ;; Call your embedding service/model
-     (get-embedding-vector text)))
-
- (index-files!
-  {:index-path    "/tmp/semantic-index"
-   :docs-path     "/path/to/products.csv"
-   :knn-vector-fn row->vector})
-
- ;; Performance-tuned for large dataset
- (index-files!
-  {:index-path     "/tmp/large-index"
-   :docs-path      "/path/to/big-data"
-   :ram-buffer-mb  512
-   :commit-every-n 10000
-   :analyzer       :whitespace})
-
- ;; Single file indexing
- (index-files!
-  {:index-path "/tmp/my-index"
-   :docs-path  "/path/to/data.csv"
-   :open-mode  :append})
-
- ;; Load only specific columns (reduces memory usage)
- (index-files!
-  {:index-path   "/tmp/filtered-index"
-   :docs-path    "/path/to/data.csv"
-   :dataset-opts {:column-allowlist ["id" "name" "price"]}})
-
- ;; Default behavior - column names normalized to snake_case
- (index-files!
-  {:index-path "resources/test-index"
-   :docs-path  "resources/customers-10000.csv"})
- ;; "First Name" column becomes :first_name field
- ;; Query with: "first_name:Alice"
-
- ;; Disable normalization - use original column names
- (index-files!
-  {:index-path   "/tmp/original-names"
-   :docs-path    "/path/to/data.csv"
-   :dataset-opts {:key-fn identity}})
- ;; "First Name" stays as "First Name" field (not recommended)
-
- ;; Custom transformation - override default with keyword (preserves spaces/case)
- (index-files!
-  {:index-path   "/tmp/keyword-columns"
-   :docs-path    "/path/to/data"
-   :dataset-opts {:key-fn keyword}})
- ;; "First Name" becomes :'First Name' keyword
-
- ;; Custom CSV separator and limit rows
- (index-files!
-  {:index-path   "/tmp/tsv-index"
-   :docs-path    "/path/to/data.tsv"
-   :dataset-opts {:separator \tab
-                  :num-rows  10000}})
-
- ;; Custom parser for specific columns
- (index-files!
-  {:index-path   "/tmp/custom-parse"
-   :docs-path    "/path/to/data.csv"
-   :dataset-opts {:parser-fn {"date"   parse-date-fn
-                              "amount" parse-currency-fn}}})
-
- ;; ========================================
- ;; search usage examples
- ;; ========================================
-
- ;; Simple full-text search
- (-> (search {:index-path "resources/index"
-              :query      "city:East AND country:J*"})
-     :email)
-
- ;; Field-specific search
- (search {:index-path "/tmp/my-index"
-          :query      "title:laptop"
-          :limit      20})
-
- ;; Complex boolean query
- (search {:index-path "/tmp/my-index"
-          :query      "(category:electronics OR category:computers) AND price:[500 TO 1500]"})
-
- ;; Range query
- (search {:index-path "/tmp/my-index"
-          :query      "price:[100 TO 500]"
-          :limit      50})
-
- ;; Fuzzy search (typo-tolerant)
- (search {:index-path "/tmp/my-index"
-          :query      "loptop~2"}) ; Edit distance 2
-
- ;; Wildcard search
- (search {:index-path "/tmp/my-index"
-          :query      "lap*"})
-
- ;; Phrase search
- (search {:index-path "/tmp/my-index"
-          :query      "\"high quality laptop\""})
-
- ;; Pagination
- (search {:index-path "/tmp/my-index"
-          :query      "laptop"
-          :offset     20
-          :limit      10})    ; Results 21-30
-
- ;; Select specific fields only
- (search {:index-path "/tmp/my-index"
-          :query      "laptop"
-          :fields     [:title :price :category]})
-
- ;; Search without scores (faster)
- (search {:index-path     "/tmp/my-index"
-          :query          "laptop"
-          :include-score? false})
-
- ;; Custom analyzer
- (search {:index-path "/tmp/my-index"
-          :query      "some_function_name"
-          :analyzer   :whitespace})
-
- ;; Filter by file metadata
- (search {:index-path "/tmp/my-index"
-          :query      "laptop AND source-path:\"/data/products.csv\""})
-
- ;; Search with Query object (advanced)
- (import '[org.apache.lucene.search TermQuery BooleanQuery BooleanClause]
-         '[org.apache.lucene.index Term])
-
- (def my-query
-   (doto (BooleanQuery$Builder.)
-     (.add (TermQuery. (Term. "category" "electronics")) BooleanClause$Occur/MUST)
-     (.add (TermQuery. (Term. "brand" "Apple")) BooleanClause$Occur/MUST)
-     (.build)))
-
- (search {:index-path "/tmp/my-index"
-          :query      my-query})
-
- ;; Search for single document
- (search-one {:index-path "/tmp/my-index"
-              :query      "id:12345"})
-
- ;; Process results
- (let [result (search {:index-path "/tmp/my-index"
-                       :query      "laptop"
-                       :limit      100})]
-   (println "Found" (:total-hits result) "total matches")
-   (println "Took" (:took-ms result) "ms")
-   (doseq [{:keys [score fields]} (:results result)]
-     (println "Score:" score "Title:" (:title fields)))))
-
-
-(comment
- ;; ========================================
- ;; Query DSL examples
- ;; ========================================
-
-  [...]                        ;; is a placeholder for nested expression or terms
-
- ;; term
-  "something"
-  (compile-lucene-query "something")
-
- ;; modifiers
-  "te*t"                       ;; wildcard
-  "te?t"                       ;; single character wildcard
-
-  (compile-lucene-query "te*t")
- ;; phrase
-  "some phrase here"
-
- ;; regex
-  #"[mb]oat"
-  (compile-lucene-query #"[mb]oat")
-
- ;; field
-  [:field_name [...]]          ;; search within specific field
-  [:field_name "something"]
-  (compile-lucene-query [:field_name "something"])
-  (compile-lucene-query [:field_name ["something" "some phrase here"]])
-  (compile-lucene-query [:field_name "something" "some phrase here"])
-
-
- ;; boolean operators
-  [:and [...] [...]]
-  [:or [...] [...]]
-  [:not [...]]
-
- ;; required
-  [:+ [...]]                   ;; required
-
- ;; excludes
-  [:- [...]]                   ;; excludes
-
-  [:fuzzy {:ed 0.7} [...]]     ;; fuzzy search :ed - edit distance or similarity
-  [:prox {:nw 10} [...]]       ;; proximity search :nw - number of words
-  [:boost {:bf 4} [...]]       ;; boosting :bf - boost factor
-
- ;; range search
-  (compile-lucene-query [:range [100 200]])           ;; inclusive range
-  (compile-lucene-query  [:range {:exclusive? true} [100 200]]) ;; exclusive range
-
-
- ;; Examples
-
- ;; title:"leather jacket" AND color:gr?y AND size:M
-  (compile-lucene-query [:and
-                         [:title "leather jacket"]
-                         [:color "gr?y"]
-                         [:size "M"]])
-
- ;; (category:electronics OR category:gadgets) AND title:(phone OR tablet) AND price:[100 TO 500] AND -condition:refurbished
-  (compile-lucene-query
-   [:and
-    [:category [:or [:and
-                     "electronics"
-                     "electronics2"]
-                "gadgets"]]
-    [:title ["phone" "tablet"]]
-    [:price
-     [:range [100 500]]]])
-
-  (compile-lucene-query
-   [:and
-    [:or
-     [:category "electronics"]
-     [:category "gadgets"]]
-    [:title ["phone" "tablet"]]
-    [:price
-     [:range [100 500]]]
-    [:condition [:- "refurbished"]]])
-
- ;; title:(+smartphone +Samsung~1)
-  (compile-lucene-query [:title
-                         [:+ "smartphone"]
-                         [:fuzzy {:ed 1} [:+ "Samsung"]]])
-
- ;; symptoms:(+fever +"sore throat") AND -diagnosis:"COVID-19"
-  (compile-lucene-query
-   [:symptoms
-    [:+ "fever"]
-    [:+ "sore throat"]])
-
-  (compile-lucene-query
-   [:and
-    [:symptoms
-     [:and
-      [:+ "fever"]
-      [:+ "sore throat"]]]
-    [:diagnosis [:- "COVID-19"]]])
-
- ;; text:bankrupt* AND text:fraud AND -text:discharge
-  (compile-lucene-query [:and
-                         [:text "bankrupt*"]
-                         [:text "fraud"]
-                         [:- [:text "discharge"]]])
-
- ;; headline:("climate change" OR "global warming") AND date:[20250101 TO 20251231]
-  (compile-lucene-query [:and
-                         [:headline
-                          [:or "climate change" "global warming"]]
-                         [:date
-                          [:range [20250101 20251231]]]])
-
- ;; content:("artificial intelligence"^3 OR AI)
-  [:content
-   [:or
-    [:boost {:bf 3} "artificial intelligence"]
-    "AI"]]
-
- ;; title:(+deep +learning) AND year:[2015 TO 2025]
-  [:and
-   [:title
-    [:+ "deep"]
-    [:+ "learning"]]
-   [:year
-    [:range [2015 2025]]]])
+(defmethod action/action-fn ::index [_]
+  (fn [{:keys [index-path input docs-path] :as opts}]
+    (index! (assoc opts
+                   :index-path index-path
+                   :input (or input docs-path)))))
+
+
+(defmethod action/action-fn ::query [_]
+  (fn [{:keys [index query default analyzer searcher limit offset fields include-score?]}]
+    (let [query-str (compile-lucene-query query)]
+      (-> {:index-path index
+           :query      query-str}
+          (utils/assoc-some
+            :analyzer analyzer
+            :searcher searcher
+            :default-field default
+            :limit limit
+            :offset offset
+            :fields fields
+            :include-score? include-score?)
+          (search)))))
