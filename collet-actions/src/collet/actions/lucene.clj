@@ -6,6 +6,7 @@
    [collet.action :as action]
    [collet.utils :as utils]
    [malli.core :as m]
+   [malli.error :as me]
    [tech.v3.dataset :as ds])
   (:import
    [clojure.lang ExceptionInfo]
@@ -835,41 +836,65 @@
                           ::+
                           ::-
                           ::regex]
+
           ::range        [:cat
                           [:= :range]
                           [:? [:map [:exclusive? :boolean]]]
                           [:tuple
-                           ::term
-                           ::term]]
-          ::field-value  [:or
-                          ::term
-                          ::range]
-          ::field-values [:orn
-                          [:field-values/one ::field-value]
-                          [:field-values/many [:seqable ::field-value]]]
-          ::field        [:orn
-                          [:field/v ::field-values]
-                          [:field/kv [:cat
-                                      :keyword
-                                      ::field-values]]]
-          ::not          [:orn
-                          [:op/not [:cat
-                                    ::field
-                                    [:= :not]
-                                    ::field]]]
-          ::bin          [:orn [:op/bin [:cat
-                                         [:or [:enum :and :or]]
-                                         [:repeat {:min 2} [:or
-                                                            ::field
-                                                            ::not
-                                                            [:ref ::expression]]]]]]
+                           [:or number? ::term]
+                           [:or number? ::term]]]
+
+          ::field-value [:or ::term ::range]
+
+          ::field
+          [:orn
+           [:field/one ::field-value]
+           [:field/many [:cat
+                         [:? :keyword]
+                         [:alt
+                          [:+ ::field-value]
+                          [:seqable ::field-value]
+                          ::not-terms
+                          ::bin-terms]]]]
+
+          ::not-terms [:orn
+                       [:op/not [:cat
+                                 ::field-value
+                                 [:tuple
+                                  [:= :not]
+                                  ::term]]]]
+
+          ::not [:orn
+                 [:op/not [:cat
+                           ::field
+                           [:tuple
+                            [:= :not]
+                            ::field]]]]
+
+          ::bin-terms
+          [:orn [:op/bin [:cat
+                          [:or [:enum :and :or]]
+                          [:repeat {:min 2} [:or
+                                             ::not-terms
+                                             [:ref ::bin-terms]
+                                             ::field-value]]]]]
+
+          ::bin
+          [:orn [:op/bin [:cat
+                          [:or [:enum :and :or]]
+                          [:repeat {:min 2} [:or
+                                             ::not
+                                             [:ref ::expression]
+                                             ::field]]]]]
+
           ::expression   [:or
-                          ::field
                           ::not
-                          [:ref ::bin]]}))
+                          [:ref ::bin]
+                          ::field]}))
 
 (def expression-parser
   (m/parser ::expression {:registry registry}))
+
 
 (defn dispatch-fn [x]
   (cond
@@ -920,24 +945,25 @@
        to
        (if exclusive? "}" "]")))
 
-(defmethod stringify :field-values/one
-  [[_ value]]
-  value)
+(defmethod stringify :field/one
+  [[_ v]]
+  v)
 
-(defmethod stringify :field-values/many
-  [[_ values]]
-  (str "(" (string/join " " values) ")"))
+(defmethod stringify :field/many
+  [[_ [k vs]]]
+  (str
+   (if (nil? k) "" (str (name k) ":"))
+   (cond
+     (and (sequential? vs)
+          (< 1 (count vs))) (str "(" (string/join " " vs) ")")
 
-(defmethod stringify :field/v
-  [[_ value]]
-  value)
+     (and (sequential? vs)
+          (= 1 (count vs))) (first vs)
 
-(defmethod stringify :field/kv
-  [[_ [key value]]]
-  (str (name key) ":" value))
+     :else vs)))
 
 (defmethod stringify :op/not
-  [[_ [v1 _ v2]]]
+  [[_ [v1 [_ v2]]]]
   (str "(" v1 " NOT " v2 ")"))
 
 (defmethod stringify :op/bin
@@ -960,7 +986,6 @@
      (if-not (= ::m/invalid parsed)
        (walk/postwalk stringify parsed)
        (throw (Exception. "Lucene query is invalid"))))))
-
 
 
 (defmethod action/action-fn ::index
@@ -1221,121 +1246,123 @@
  ;; Query DSL examples
  ;; ========================================
 
- [...]                        ;; is a placeholder for nested expression or terms
+  [...]                        ;; is a placeholder for nested expression or terms
 
  ;; term
- "something"
- (compile-lucene-query "something")
+  "something"
+  (compile-lucene-query "something")
 
  ;; modifiers
- "te*t"                       ;; wildcard
- "te?t"                       ;; single character wildcard
+  "te*t"                       ;; wildcard
+  "te?t"                       ;; single character wildcard
 
- (compile-lucene-query "te*t")
+  (compile-lucene-query "te*t")
  ;; phrase
- "some phrase here"
+  "some phrase here"
 
  ;; regex
- #"[mb]oat"
- (compile-lucene-query #"[mb]oat")
+  #"[mb]oat"
+  (compile-lucene-query #"[mb]oat")
 
  ;; field
- [:field_name [...]]          ;; search within specific field
- [:field_name "something"]
- (compile-lucene-query [:field_name "something"])
- (compile-lucene-query [:field_name ["something" "some phrase here"]])
+  [:field_name [...]]          ;; search within specific field
+  [:field_name "something"]
+  (compile-lucene-query [:field_name "something"])
+  (compile-lucene-query [:field_name ["something" "some phrase here"]])
+  (compile-lucene-query [:field_name "something" "some phrase here"])
 
 
  ;; boolean operators
- [:and [...] [...]]
- [:or [...] [...]]
- [:not [...]]
+  [:and [...] [...]]
+  [:or [...] [...]]
+  [:not [...]]
 
  ;; required
- [:+ [...]]                   ;; required
+  [:+ [...]]                   ;; required
 
  ;; excludes
- [:- [...]]                   ;; excludes
+  [:- [...]]                   ;; excludes
 
- [:fuzzy {:ed 0.7} [...]]     ;; fuzzy search :ed - edit distance or similarity
- [:prox {:nw 10} [...]]       ;; proximity search :nw - number of words
- [:boost {:bf 4} [...]]       ;; boosting :bf - boost factor
+  [:fuzzy {:ed 0.7} [...]]     ;; fuzzy search :ed - edit distance or similarity
+  [:prox {:nw 10} [...]]       ;; proximity search :nw - number of words
+  [:boost {:bf 4} [...]]       ;; boosting :bf - boost factor
 
  ;; range search
- [:range [100 200]]           ;; inclusive range
- [:range {:exclusive true} [100 200]] ;; exclusive range
+  (compile-lucene-query [:range [100 200]])           ;; inclusive range
+  (compile-lucene-query  [:range {:exclusive? true} [100 200]]) ;; exclusive range
 
 
  ;; Examples
 
  ;; title:"leather jacket" AND color:gr?y AND size:M
- [:and
-  [:title "leather jacket"]
-  [:color "gr?y"]
-  [:size "M"]]
+  (compile-lucene-query [:and
+                         [:title "leather jacket"]
+                         [:color "gr?y"]
+                         [:size "M"]])
 
  ;; (category:electronics OR category:gadgets) AND title:(phone OR tablet) AND price:[100 TO 500] AND -condition:refurbished
- (compile-lucene-query
-  [:and
-   [:or
-    [:category "electronics"]
-    [:category "gadgets"]]
-   [:title ["phone" "tablet"]]
-   [:price
-    [:range [100 500]]]])
+  (compile-lucene-query
+   [:and
+    [:category [:or [:and
+                     "electronics"
+                     "electronics2"]
+                "gadgets"]]
+    [:title ["phone" "tablet"]]
+    [:price
+     [:range [100 500]]]])
 
- (compile-lucene-query
-  [:and
-   [:or
-    [:category "electronics"]
-    [:category "gadgets"]]
-   [:title ["phone" "tablet"]]
-   [:price
-    [:range [100 500]]]
-   [:condition [:- "refurbished"]]])
+  (compile-lucene-query
+   [:and
+    [:or
+     [:category "electronics"]
+     [:category "gadgets"]]
+    [:title ["phone" "tablet"]]
+    [:price
+     [:range [100 500]]]
+    [:condition [:- "refurbished"]]])
 
  ;; title:(+smartphone +Samsung~1)
- [:title
-  [:+ "smartphone"]
-  [:+ [:fuzzy {:ed 1} "Samsung"]]]
+  (compile-lucene-query [:title
+                         [:+ "smartphone"]
+                         [:fuzzy {:ed 1} [:+ "Samsung"]]])
 
  ;; symptoms:(+fever +"sore throat") AND -diagnosis:"COVID-19"
- (compile-lucene-query
-  [:symptoms
-   [:+ "fever"]
-   [:+ "sore throat"]])
-
- (compile-lucene-query
-  [:and
+  (compile-lucene-query
    [:symptoms
-    [:and
-     [:+ "fever"]
-     [:+ "sore throat"]]]
-   [:diagnosis [:- "COVID-19"]]])
+    [:+ "fever"]
+    [:+ "sore throat"]])
+
+  (compile-lucene-query
+   [:and
+    [:symptoms
+     [:and
+      [:+ "fever"]
+      [:+ "sore throat"]]]
+    [:diagnosis [:- "COVID-19"]]])
 
  ;; text:bankrupt* AND text:fraud AND -text:discharge
- [:and
-  [:text "bankrupt*"]
-  [:text "fraud"]
-  [:- [:text "discharge"]]]
+  (compile-lucene-query [:and
+                         [:text "bankrupt*"]
+                         [:text "fraud"]
+                         [:- [:text "discharge"]]])
 
  ;; headline:("climate change" OR "global warming") AND date:[20250101 TO 20251231]
- [:and
-  [:headline
-   [:or "climate change" "global warming"]]
-  [:date
-   [:range [20250101 20251231]]]]
+  (compile-lucene-query [:and
+                         [:headline
+                          [:or "climate change" "global warming"]]
+                         [:date
+                          [:range [20250101 20251231]]]])
 
  ;; content:("artificial intelligence"^3 OR AI)
- [:content
-  [:or
-   [:boost {:bf 3} "artificial intelligence"]
-   "AI"]]
+  [:content
+   [:or
+    [:boost {:bf 3} "artificial intelligence"]
+    "AI"]]
 
  ;; title:(+deep +learning) AND year:[2015 TO 2025]
- [:and
-  [:title
-   [:+ "deep"]
-   [:+ "learning"]]
-  [:year
-   [:range [2015 2025]]]])
+  [:and
+   [:title
+    [:+ "deep"]
+    [:+ "learning"]]
+   [:year
+    [:range [2015 2025]]]])
