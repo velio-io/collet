@@ -40,8 +40,7 @@
 
 (defn migrated? [module]
   (let [{:keys [dir]} (module-config module)]
-    (and (fs/exists? (fs/path dir "deps.edn"))
-         (fs/exists? (fs/path dir "build.clj")))))
+    (fs/exists? (fs/path dir "deps.edn"))))
 
 (defn publish? [module]
   (not= false (:publish? (module-config module))))
@@ -67,20 +66,21 @@
     (apply process/shell (nondeployment-process-options {:dir dir})
            "clojure" args)))
 
+(defn- root-build! [module task & args]
+  (println (str "\n==> " (name module) " " task))
+  (apply process/shell (nondeployment-process-options)
+         "clojure" "-T:build" task ":module" (pr-str module) args))
+
 (defn build-library! [module local-repo]
   (module-config module)
   (if local-repo
-    (clojure! module "-T:build" "jar" ":mvn/local-repo" (pr-str local-repo))
-    (clojure! module "-T:build" "jar")))
+    (root-build! module "build" ":mvn/local-repo" (pr-str local-repo))
+    (root-build! module "build")))
 
 (defn install-module-to! [module local-repo]
   (when-not (publish? module)
     (throw (ex-info "Module is not a published Maven artifact" {:module module})))
-  (clojure! module "-T:build" "install"
-            ":mvn/local-repo" (pr-str local-repo)))
-
-(defn- build-task [module]
-  (name (or (:build-task (module-config module)) :jar)))
+  (root-build! module "install" ":mvn/local-repo" (pr-str local-repo)))
 
 (defn- build-output-paths [module]
   (let [{:keys [dir lib version publish? uber-file distribution]}
@@ -102,26 +102,17 @@
                       {:module module :path (str path)})))))
 
 (defn- install-module! [module installed local-repo]
-  (doseq [dependency (:internal-deps (module-config module))]
-    (install-module! dependency installed local-repo))
   (when (and (publish? module)
              (not (contains? @installed module)))
     (if local-repo
-      (clojure! module "-T:build" "install" ":mvn/local-repo" (pr-str local-repo))
-      (clojure! module "-T:build" "install"))
-    (swap! installed conj module)))
+      (root-build! module "install" ":mvn/local-repo" (pr-str local-repo))
+      (root-build! module "install"))
+    ;; The root install includes the complete transitive workspace closure.
+    (swap! installed into
+           (conj (set (:internal-deps (module-config module))) module))))
 
-(defn- build-module! [module installed]
-  (doseq [dependency (:internal-deps (module-config module))]
-    (install-module! dependency installed nil))
-  ;; Deployable modules also publish a library JAR. Install that JAR before
-  ;; building the uberjar so downstream deployables can consume it without a
-  ;; later install wiping the preserved uberjar filename from target/.
-  (when (and (publish? module)
-             (:build-task (module-config module))
-             (not (contains? @installed module)))
-    (install-module! module installed nil))
-  (clojure! module "-T:build" (build-task module))
+(defn- build-module! [module _installed]
+  (root-build! module "build")
   (assert-build-outputs! module))
 
 (defn- run-test! [module test-runner-options build-artifact?]

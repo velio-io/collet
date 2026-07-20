@@ -1,7 +1,0 @@
-{:tasks
- {:requires
-  ([babashka.process :as process])
-
-  build
-  {:doc  "Build the Collet CLI tar file"
-   :task (process/shell "clojure" "-T:build" "dist")}}}

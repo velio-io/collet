@@ -1,29 +1,29 @@
-{:paths []
+{:collet/artifact
+ {:description "Compatibility aggregate for all Collet actions"
+  :public-namespaces [collet.actions.http collet.actions.file
+                      collet.actions.odata collet.actions.jdbc
+                      collet.actions.jdbc-pg collet.actions.s3
+                      collet.actions.queue collet.actions.jslt
+                      collet.actions.llm collet.actions.vega
+                      collet.actions.lucene]
+  :publish? true
+  :kind :library}
+
+ :paths []
  :deps {org.clojure/clojure             {:mvn/version "1.12.0"}
-        io.velio/collet-action-http     {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-file     {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-odata    {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-jdbc     {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-s3       {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-queue    {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-jslt     {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-llm      {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-vega     {:mvn/version "0.2.8-SNAPSHOT"}
-        io.velio/collet-action-lucene   {:mvn/version "0.2.8-SNAPSHOT"}}
+        io.velio/collet-action-http     {:local/root "../collet-action-http"}
+        io.velio/collet-action-file     {:local/root "../collet-action-file"}
+        io.velio/collet-action-odata    {:local/root "../collet-action-odata"}
+        io.velio/collet-action-jdbc     {:local/root "../collet-action-jdbc"}
+        io.velio/collet-action-s3       {:local/root "../collet-action-s3"}
+        io.velio/collet-action-queue    {:local/root "../collet-action-queue"}
+        io.velio/collet-action-jslt     {:local/root "../collet-action-jslt"}
+        io.velio/collet-action-llm      {:local/root "../collet-action-llm"}
+        io.velio/collet-action-vega     {:local/root "../collet-action-vega"}
+        io.velio/collet-action-lucene   {:local/root "../collet-action-lucene"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
-         :override-deps {io.velio/collet-core {:local/root "../collet-core"}
-                         io.velio/collet-action-http {:local/root "../collet-action-http"}
-                         io.velio/collet-action-file {:local/root "../collet-action-file"}
-                         io.velio/collet-action-odata {:local/root "../collet-action-odata"}
-                         io.velio/collet-action-jdbc {:local/root "../collet-action-jdbc"}
-                         io.velio/collet-action-s3 {:local/root "../collet-action-s3"}
-                         io.velio/collet-action-queue {:local/root "../collet-action-queue"}
-                         io.velio/collet-action-jslt {:local/root "../collet-action-jslt"}
-                         io.velio/collet-action-llm {:local/root "../collet-action-llm"}
-                         io.velio/collet-action-vega {:local/root "../collet-action-vega"}
-                         io.velio/collet-action-lucene {:local/root "../collet-action-lucene"}}
          :jvm-opts ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
                     "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
                     "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"
@@ -35,7 +35,4 @@
                     "--add-opens=java.base/java.util=ALL-UNNAMED"
                     "--add-opens=java.base/java.nio=ALL-UNNAMED"
                     "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
-                 io.velio/collet-build {:local/root "../build"}}
-          :ns-default build}}}
+         :main-opts ["-m" "cognitect.test-runner"]}}}

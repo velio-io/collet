@@ -1,4 +1,10 @@
-{:paths ["src" "resources"]
+{:collet/artifact
+ {:description "Collet workflow engine core"
+  :public-namespaces [collet.core]
+  :publish? true
+  :kind :library}
+
+ :paths ["src" "resources"]
  :deps
  {org.clojure/clojure                  {:mvn/version "1.12.0"}
   weavejester/dependency               {:mvn/version "0.2.1"}
@@ -39,8 +45,4 @@
   {:extra-paths ["dev/src"]
    :extra-deps  {eftest/eftest                 {:mvn/version "0.6.0"}
                  vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
-                 djblue/portal                 {:mvn/version "0.58.2"}}}
-  :build
-  {:deps       {io.github.clojure/tools.build   {:mvn/version "0.10.14"}
-                io.velio/collet-build           {:local/root "../build"}}
-   :ns-default build}}}
+                 djblue/portal                 {:mvn/version "0.58.2"}}}}}

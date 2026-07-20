@@ -172,7 +172,9 @@
           (with-redefs [workspace/manifest (fn [] manifest)
                         process/shell
                         (fn [& args]
-                          (when (= "uberjar" (last args))
+                          (when (= ["clojure" "-T:build" "build"
+                                    ":module" ":collet-app"]
+                                   (vec (rest args)))
                             (fs/create-dirs (fs/parent uber))
                             (doseq [path outputs]
                               (spit (str path) "artifact")))
@@ -181,7 +183,6 @@
     (try
       (fs/create-dirs module-dir)
       (spit (str (fs/path module-dir "deps.edn")) "{:deps {}}\n")
-      (spit (str (fs/path module-dir "build.clj")) "(ns build)\n")
       (is (= "Build output is missing"
              (exception-message #(invoke-build [uber]))))
       (is (nil? (exception-message #(invoke-build [thin uber]))))
