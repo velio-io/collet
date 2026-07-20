@@ -1,8 +1,8 @@
 (ns workspace
   (:require
-   [babashka.fs :as fs]
    [babashka.process :as process]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 (def publication-credential-variables
   ["CLOJARS_USERNAME" "CLOJARS_PASSWORD"])
@@ -17,60 +17,15 @@
   ([options]
    (assoc options :env (nondeployment-env))))
 
-(defn manifest []
-  (edn/read-string (slurp "build/modules.edn")))
-
-(defn project-version []
-  (:version (manifest)))
-
 (defn module-key [value]
   (keyword value))
 
-(defn module-config [module]
-  (let [workspace (manifest)]
-    (if-let [config (get-in workspace [:modules module])]
-      (merge {:source-dirs ["src"]
-              :resource-dirs ["resources"]
-              :publish? true}
-             config
-             {:version (:version workspace)})
-      (throw (ex-info (str "Unknown module: " (name module))
-                      {:module module})))))
-
-(defn migrated? [module]
-  (let [{:keys [dir]} (module-config module)]
-    (fs/exists? (fs/path dir "deps.edn"))))
-
-(defn publish? [module]
-  (not= false (:publish? (module-config module))))
-
-(defn modules []
-  (->> (:module-order (manifest))
-       (filter migrated?)
-       vec))
-
-(defn- root-build! [module task & args]
-  (println (str "\n==> " (name module) " " task))
-  (apply process/shell (nondeployment-process-options)
-         "clojure" "-T:build" task ":module" (pr-str module) args))
-
-(defn build-library! [module local-repo]
-  (module-config module)
-  (if local-repo
-    (root-build! module "build" ":mvn/local-repo" (pr-str local-repo))
-    (root-build! module "build")))
-
-(defn install-module-to! [module local-repo]
-  (when-not (publish? module)
-    (throw (ex-info "Module is not a published Maven artifact" {:module module})))
-  (root-build! module "install" ":mvn/local-repo" (pr-str local-repo)))
-
 (defn- artifact-metadata [module]
-  (let [path (fs/path (name module) "deps.edn")]
-    (when-not (fs/regular-file? path)
+  (let [path (io/file (name module) "deps.edn")]
+    (when-not (.isFile path)
       (throw (ex-info (str "Unknown module: " (name module))
                       {:module module})))
-    (:collet/artifact (edn/read-string (slurp (str path))))))
+    (:collet/artifact (edn/read-string (slurp path)))))
 
 (defn unit-test-command []
   ["clojure" "-M:kmono" "run" "--M" ":test" "--" "-e" ":integration"])
@@ -88,6 +43,9 @@
 (defn- kmono! [command]
   (apply process/shell (nondeployment-process-options) command))
 
+(defn kmono [args]
+  (kmono! (into ["clojure" "-M:kmono"] args)))
+
 (defn- build-test-tools! []
   (process/shell (nondeployment-process-options) "clojure" "-T:build-test"))
 
@@ -104,8 +62,7 @@
     (kmono! (module-test-command module (rest args)))))
 
 (def script-test-files
-  ["scripts/workspace_test.clj"
-   "scripts/verify_test.clj"])
+  ["scripts/workspace_test.clj"])
 
 (defn test-scripts []
   (doseq [path script-test-files]
@@ -133,10 +90,10 @@
 (defn install [args]
   (root-build-task! "install" (optional-module-args "install" args)))
 
-(defn install-to! [local-repo]
-  (process/shell (nondeployment-process-options)
-                 "clojure" "-T:build" "install"
-                 ":mvn/local-repo" (pr-str local-repo)))
+(defn verify [args]
+  (when (seq args)
+    (throw (ex-info "Usage: bb verify" {:args args})))
+  (root-build-task! "verify" []))
 
 (defn- root-release! [task args]
   (apply process/shell "clojure" "-T:build" task args))

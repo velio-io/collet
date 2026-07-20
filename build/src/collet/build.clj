@@ -299,6 +299,9 @@
     {:versions (into {} (map (juxt key (comp :version val))) packages)
      :artifacts @results}))
 
+(defn verify [opts]
+  ((requiring-resolve 'collet.verify/verify) opts))
+
 (defn release-plan [opts]
   ((requiring-resolve 'collet.release/plan) opts))
 

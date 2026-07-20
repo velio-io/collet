@@ -138,6 +138,22 @@
                   (is (nil? (get-in basis
                                     [:libs 'example/pkg-a :mvn/version]))))))))))))
 
+(deftest pom-basis-uses-the-exact-independent-dependency-version
+  (with-workspace
+    (fn [root]
+      (fs/delete-tree (fs/path root ".git"))
+      (let [versions {'example/pkg-a "1.7.2"
+                      'example/pkg-b "4.3.1"
+                      'example/pkg-cli "9.0.0"}
+            {:keys [packages] :as context}
+            (build/resolve-workspace-context! root {:versions versions})
+            package (get packages 'example/pkg-b)]
+        (b/with-project-root (:absolute-path package)
+          (let [basis (build/package-basis context package :pom {})]
+            (is (= "1.7.2"
+                   (get-in basis [:libs 'example/pkg-a :mvn/version])))
+            (is (nil? (get-in basis [:libs 'example/pkg-a :local/root])))))))))
+
 (deftest install-hands-tools-build-a-package-relative-jar-path
   (with-workspace
     (fn [root]

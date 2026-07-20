@@ -108,12 +108,32 @@
                    {:module module :matches matches}))
           (first matches)))))
 
+(defn package-order
+  "Return every package once in dependency-first order, or fail on a cycle."
+  [packages]
+  (let [order (vec (mapcat identity
+                           (or (kmono.graph/parallel-topo-sort packages) [])))]
+    (when-not (= (set (keys packages)) (set order))
+      (fail! "Workspace package graph contains a cycle"
+             {:packages (sort (keys packages)) :ordered order}))
+    order))
+
+(defn dependency-closure
+  "Return all transitive workspace dependencies of `fqn`."
+  [packages fqn]
+  (set (kmono.graph/query-dependencies packages fqn)))
+
+(defn dependent-closure
+  "Return all transitive workspace dependents of `fqn`."
+  [packages fqn]
+  (set (kmono.graph/query-dependents packages fqn)))
+
 (defn- release-order [packages selected]
   (let [selected-set (set selected)
         graph (kmono.graph/filter-by
                #(contains? selected-set (:fqn %))
                packages)]
-    (vec (mapcat identity (or (kmono.graph/parallel-topo-sort graph) [])))))
+    (package-order graph)))
 
 (defn select-release-packages
   "Select changed packages related to `module` through dependency edges."
@@ -125,8 +145,8 @@
         initial
         (if-let [fqn (package-fqn packages module)]
           (let [closure (into #{fqn}
-                              (concat (kmono.graph/query-dependencies packages fqn)
-                                      (kmono.graph/query-dependents packages fqn)))]
+                              (concat (dependency-closure packages fqn)
+                                      (dependent-closure packages fqn)))]
             (set (filter closure releases)))
           releases)
         selected

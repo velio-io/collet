@@ -5,6 +5,63 @@
    [clojure.test :refer [deftest is testing]]
    [collet.workspace :as workspace]))
 
+(def expected-collet-edges
+  {'io.velio/collet-core #{}
+   'io.velio/collet-action-http #{'io.velio/collet-core}
+   'io.velio/collet-action-file #{'io.velio/collet-core
+                                  'io.velio/collet-action-http}
+   'io.velio/collet-action-odata #{'io.velio/collet-core
+                                   'io.velio/collet-action-http}
+   'io.velio/collet-action-jdbc #{'io.velio/collet-core}
+   'io.velio/collet-action-s3 #{'io.velio/collet-core
+                                'io.velio/collet-action-file}
+   'io.velio/collet-action-queue #{'io.velio/collet-core}
+   'io.velio/collet-action-jslt #{'io.velio/collet-core}
+   'io.velio/collet-action-llm #{'io.velio/collet-core}
+   'io.velio/collet-action-vega #{'io.velio/collet-core
+                                  'io.velio/collet-action-file}
+   'io.velio/collet-action-lucene #{'io.velio/collet-core}
+   'io.velio/collet-actions
+   #{'io.velio/collet-action-http
+     'io.velio/collet-action-file
+     'io.velio/collet-action-odata
+     'io.velio/collet-action-jdbc
+     'io.velio/collet-action-s3
+     'io.velio/collet-action-queue
+     'io.velio/collet-action-jslt
+     'io.velio/collet-action-llm
+     'io.velio/collet-action-vega
+     'io.velio/collet-action-lucene}
+   'io.velio/collet-app #{'io.velio/collet-core}
+   'io.velio/collet-cli #{'io.velio/collet-app}})
+
+(deftest real-workspace-graph-has-the-supported-edges-and-closures
+  (let [packages (:packages (workspace/resolve-release-plan! nil))
+        order (workspace/package-order packages)
+        positions (zipmap order (range))]
+    (is (= expected-collet-edges
+           (into {} (map (fn [[fqn package]]
+                           [fqn (:depends-on package)]))
+                 packages)))
+    (is (= (set (keys expected-collet-edges)) (set order)))
+    (doseq [[package dependencies] expected-collet-edges
+            dependency dependencies]
+      (is (< (positions dependency) (positions package))
+          (str dependency " must precede " package)))
+    (is (= (set (keys (dissoc expected-collet-edges
+                              'io.velio/collet-actions
+                              'io.velio/collet-app
+                              'io.velio/collet-cli)))
+           (workspace/dependency-closure packages
+                                         'io.velio/collet-actions)))
+    (is (= #{'io.velio/collet-action-file
+             'io.velio/collet-action-odata
+             'io.velio/collet-action-s3
+             'io.velio/collet-action-vega
+             'io.velio/collet-actions}
+           (workspace/dependent-closure packages
+                                        'io.velio/collet-action-http)))))
+
 (defn- write-edn! [path value]
   (fs/create-dirs (fs/parent path))
   (spit (str path) (pr-str value)))

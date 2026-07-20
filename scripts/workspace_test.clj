@@ -30,6 +30,16 @@
           :collet-action-http
           ["--focus" "collet.actions.http-test"]))))
 
+(deftest kmono-command-forwards-arguments-to-the-pinned-root-alias
+  (let [commands (atom [])]
+    (with-redefs [process/shell (fn [& args]
+                                 (swap! commands conj (vec args))
+                                 {:exit 0})]
+      (workspace/kmono ["query" "--parallel"]))
+    (is (= [[{:env (workspace/nondeployment-env)}
+             "clojure" "-M:kmono" "query" "--parallel"]]
+           @commands))))
+
 (deftest only-integration-bearing-modules-declare-an-empty-integration-marker
   (let [module-aliases
         (into {}
@@ -70,11 +80,9 @@
              ":image" "\"local-image\""]]
            (mapv vec @commands)))))
 
-(deftest root-build-and-install-do-not-read-the-legacy-version-manifest
+(deftest root-build-and-install-dispatch-to-root-tools-build
   (let [commands (atom [])]
-    (with-redefs [workspace/manifest
-                  (fn [] (throw (ex-info "legacy manifest was read" {})))
-                  process/shell (fn [& args]
+    (with-redefs [process/shell (fn [& args]
                                   (swap! commands conj (vec args))
                                   {:exit 0})]
       (workspace/build ["collet-app"])
@@ -83,6 +91,16 @@
              "clojure" "-T:build" "build" ":module" ":collet-app"]
             [{:env (workspace/nondeployment-env)}
              "clojure" "-T:build" "install" ":module" ":collet-core"]]
+           @commands))))
+
+(deftest verification-dispatches-to-the-root-build-namespace
+  (let [commands (atom [])]
+    (with-redefs [process/shell (fn [& args]
+                                 (swap! commands conj (vec args))
+                                 {:exit 0})]
+      (workspace/verify []))
+    (is (= [[{:env (workspace/nondeployment-env)}
+             "clojure" "-T:build" "verify"]]
            @commands))))
 
 (let [{:keys [fail error]} (run-tests 'workspace-test)]
