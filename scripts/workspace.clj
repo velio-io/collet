@@ -116,10 +116,11 @@
   (assert-build-outputs! module))
 
 (defn unit-test-command []
-  ["clojure" "-M:kmono" "run" "--M" ":test" "-e" ":integration"])
+  ["clojure" "-M:kmono" "run" "--M" ":test" "--" "-e" ":integration"])
 
 (defn integration-test-command []
-  ["clojure" "-M:kmono" "run" "--M" ":test:integration" "-i" ":integration"])
+  ["clojure" "-M:kmono" "run" "--M" ":test:integration"
+   "--" "-i" ":integration"])
 
 (defn module-test-command [module runner-options]
   (into ["clojure" "-M:kmono" "run" "-F"
@@ -150,8 +151,6 @@
 
 (def script-test-files
   ["scripts/workspace_test.clj"
-   "scripts/versioning_test.clj"
-   "scripts/release_test.clj"
    "scripts/verify_test.clj"])
 
 (defn test-scripts []
@@ -188,3 +187,39 @@
   (let [installed (atom #{})]
     (doseq [module (modules)]
       (install-module! module installed local-repo))))
+
+(defn- root-release! [task args]
+  (apply process/shell "clojure" "-T:build" task args))
+
+(defn- optional-module-args [task args]
+  (when (> (count args) 1)
+    (throw (ex-info (str "Usage: bb " task " [module]") {:args args})))
+  (if-let [module (first args)]
+    [":module" (str ":" (name (module-key module)))]
+    []))
+
+(defn release-plan [args]
+  (root-release! "release-plan" (optional-module-args "release:plan" args)))
+
+(defn release [args]
+  (root-release! "release" (optional-module-args "release" args)))
+
+(defn release-all [args]
+  (when (seq args)
+    (throw (ex-info "Usage: bb release:all" {:args args})))
+  (root-release! "release-all" []))
+
+(defn release-verify-cli [args]
+  (when-not (= 1 (count args))
+    (throw (ex-info "Usage: bb release:verify-cli <coordinate>@<version>"
+                    {:args args})))
+  (root-release! "release-verify-cli" [":tag" (pr-str (first args))]))
+
+(defn release-verify-image [args]
+  (when-not (= 2 (count args))
+    (throw (ex-info
+            "Usage: bb release:verify-image <coordinate>@<version> <local-image>"
+            {:args args})))
+  (root-release! "release-verify-image"
+                 [":tag" (pr-str (first args))
+                  ":image" (pr-str (second args))]))

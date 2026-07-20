@@ -14,14 +14,8 @@ COPY build /build/build
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
-RUN if [ -n "${COLLET_VERSION}" ]; then \
-      clojure -T:build install :module :collet-core \
-        :expected-version "\"${COLLET_VERSION}\"" \
-        :source-revision "\"${COLLET_REVISION}\""; \
-    else \
-      clojure -T:build install :module :collet-core \
-        :source-revision "\"${COLLET_REVISION}\""; \
-    fi
+RUN clojure -T:build install :module :collet-core \
+      :source-revision "\"${COLLET_REVISION}\""
 RUN if [ -n "${COLLET_VERSION}" ]; then \
       clojure -T:build build :module :collet-app \
         :expected-version "\"${COLLET_VERSION}\"" \

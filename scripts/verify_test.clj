@@ -198,8 +198,10 @@
                       "org.opencontainers.image.version"
                       "org.opencontainers.image.revision"]]
       (is (.contains dockerfile fragment) fragment))
-    (is (= 4 (count (re-seq #":source-revision" dockerfile)))
-        "both the core install and app uberjar receive source identity")))
+    (is (= 1 (count (re-seq #":expected-version" dockerfile)))
+        "only the independently versioned app is checked against its image tag")
+    (is (= 3 (count (re-seq #":source-revision" dockerfile)))
+        "the core install and both app build branches receive source identity")))
 
 (deftest docker-build-uses-the-root-kmono-build-only
   (let [dockerfile (slurp "collet-app/Dockerfile")]

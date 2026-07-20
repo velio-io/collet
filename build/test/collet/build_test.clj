@@ -1,6 +1,7 @@
 (ns collet.build-test
   (:require
    [babashka.fs :as fs]
+   [clojure.java.shell :as shell]
    [clojure.test :refer [deftest is testing]]
    [clojure.tools.build.api :as b]
    [collet.build :as build]
@@ -17,6 +18,12 @@
     (catch clojure.lang.ExceptionInfo error
       (boolean (re-find message-pattern (ex-message error))))))
 
+(defn- git! [root & args]
+  (let [{:keys [exit err]}
+        (apply shell/sh "git" "-C" (str root) args)]
+    (when-not (zero? exit)
+      (throw (ex-info "git failed" {:args args :error err})))))
+
 (defn- with-workspace [f]
   (let [root (fs/create-temp-dir {:prefix "collet-build-test-"})]
     (try
@@ -24,7 +31,12 @@
        (fs/path root "deps.edn")
        {:kmono/workspace {:group 'example
                           :packages "pkg-*/*"}
-        :collet/project {:version "1.2.3"}})
+        :collet/project {:url "https://example.test/collet"
+                         :license {:name "Test"
+                                   :url "https://example.test/license"}
+                         :scm {:url "https://example.test/collet"
+                               :connection "scm:git:https://example.test/collet.git"
+                               :developer-connection "scm:git:ssh://example.test/collet.git"}}})
       (write-edn!
        (fs/path root "pkg-a" "deps.edn")
        {:paths ["src"]
@@ -52,6 +64,11 @@
                           :kind :uberjar
                           :main 'example.cli
                           :outputs {:uberjar "target/cli.jar"}}})
+      (git! root "init" "-b" "main")
+      (git! root "add" ".")
+      (git! root "-c" "user.name=Collet Test"
+            "-c" "user.email=collet@example.test"
+            "commit" "-m" "feat: initial workspace")
       (f (str root))
       (finally
         (fs/delete-tree root)))))
@@ -65,7 +82,7 @@
             "the root build exposes its Kmono workspace resolver")
         (when resolve-context
           (let [{:keys [packages version]} (resolve-context root)]
-            (is (= "1.2.3" version))
+            (is (nil? version))
             (is (= #{'example/pkg-a 'example/pkg-b 'example/pkg-cli}
                    (set (keys packages))))
             (is (= #{'example/pkg-a}
@@ -74,7 +91,7 @@
                    (kmono.graph/parallel-topo-sort packages)))
             (is (= :uberjar
                    (get-in packages ['example/pkg-b :artifact :kind])))
-            (is (= "1.2.3"
+            (is (= "0.2.8"
                    (get-in packages ['example/pkg-a :version])))))))))
 
 (deftest chooses-publishable-and-local-build-bases
@@ -93,7 +110,7 @@
                 (let [basis (package-basis context package :pom {})]
                   (is (= :mvn
                          (get-in basis [:libs 'example/pkg-a :deps/manifest])))
-                  (is (= "1.2.3"
+                  (is (= "0.2.8"
                          (get-in basis [:libs 'example/pkg-a :mvn/version])))))
               (testing "uberjars retain the local workspace dependency graph"
                 (let [basis (package-basis context package :uberjar {})]
@@ -114,13 +131,38 @@
            (fn [] context)
            (ns-resolve 'collet.build 'build-jar!)
            (fn [_ _ _]
-             {:jar-file "pkg-a/target/pkg-a-1.2.3.jar"})
+             {:jar-file "pkg-a/target/pkg-a-0.2.8.jar"})
            #'b/install
            (fn [opts]
              (reset! install-opts opts))}
           #(build/install {:module :pkg-a}))
-        (is (= "target/pkg-a-1.2.3.jar" (:jar-file @install-opts)))
+        (is (= "target/pkg-a-0.2.8.jar" (:jar-file @install-opts)))
         (is (= (:fqn package) (:lib @install-opts)))))))
+
+(deftest package-specific-version-drives-scm-build-identity-and-jar-name
+  (let [package {:fqn 'example/pkg-a
+                 :version "2.3.4"
+                 :tag "example/pkg-a@2.3.4"}
+        context {:root "."
+                 :project {:url "https://example.test/collet"
+                           :license {:name "Test"
+                                     :url "https://example.test/license"}
+                           :scm {:url "https://example.test/collet"
+                                 :connection "scm:git:https://example.test/collet.git"
+                                 :developer-connection "scm:git:ssh://example.test/collet.git"}}}
+        pom-data (ns-resolve 'collet.build 'pom-data)
+        jar-file (ns-resolve 'collet.build 'jar-file)
+        identity (ns-resolve 'collet.build 'build-identity)]
+    (is (= "target/pkg-a-2.3.4.jar" (jar-file package)))
+    (is (= "example/pkg-a@2.3.4"
+           (->> (pom-data context package)
+                (filter #(= :scm (first %)))
+                first
+                (filter #(and (vector? %) (= :tag (first %))))
+                first
+                second)))
+    (is (= {:version "2.3.4" :revision "abc123"}
+           (identity package "abc123")))))
 
 (deftest install-rejects-a-nonpublishable-requested-package-before-its-dependencies
   (with-workspace

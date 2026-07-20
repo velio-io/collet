@@ -2,78 +2,36 @@
   "Root-only tools.build entry points for the Collet Kmono workspace."
   (:refer-clojure :exclude [compile])
   (:require
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.tools.build.api :as b]
+   [collet.workspace :as workspace]
    [k16.kmono.build :as kmono.build]
-   [k16.kmono.core.graph :as kmono.graph]
-   [k16.kmono.workspace :as kmono.workspace])
+   [k16.kmono.core.graph :as kmono.graph])
   (:import
    (java.nio.file CopyOption Files StandardCopyOption)
    (java.nio.file.attribute PosixFilePermissions)
    (java.util.regex Pattern)))
 
-(def ^:private default-artifact
-  {:public-namespaces []
-   :publish? true
-   :kind :library})
-
-(defn- read-edn [path]
-  (edn/read-string (slurp path)))
-
-(defn- validate-artifact! [package]
-  (let [{:keys [description kind main outputs] :as artifact}
-        (:artifact package)]
-    (when-not (and (string? description) (not (str/blank? description)))
-      (throw (ex-info "Package artifact description is required"
-                      {:package (:fqn package)})))
-    (when-not (#{:library :uberjar :distribution} kind)
-      (throw (ex-info "Unknown package artifact kind"
-                      {:package (:fqn package) :kind kind})))
-    (when (#{:uberjar :distribution} kind)
-      (when-not (and main (get outputs :uberjar))
-        (throw (ex-info "Executable package requires :main and :outputs/:uberjar"
-                        {:package (:fqn package)}))))
-    (when (= :distribution kind)
-      (when-not (and (get outputs :archive)
-                     (get outputs :root)
-                     (seq (get outputs :files)))
-        (throw (ex-info "Distribution package outputs are incomplete"
-                        {:package (:fqn package)}))))
-    artifact))
-
 (defn resolve-workspace-context!
-  "Resolve the Kmono graph and attach Collet's coordinated artifact metadata."
+  "Resolve the Kmono graph with independently planned package versions."
   ([] (resolve-workspace-context! nil))
   ([dir]
-   (let [{:keys [root packages] :as context}
-         (kmono.workspace/resolve-workspace-context! dir)
-         project (-> (io/file root "deps.edn")
-                     read-edn
-                     :collet/project)
-         version (:version project)]
-     (when (str/blank? version)
-       (throw (ex-info "The workspace :collet/project version is required"
-                       {:root root})))
-     (let [packages
-           (into {}
-                 (map (fn [[fqn package]]
-                        (let [artifact (merge default-artifact
-                                              (get-in package
-                                                      [:deps-edn
-                                                       :collet/artifact]))
-                              package (assoc package
-                                             :artifact artifact
-                                             :version version)]
-                          (validate-artifact! package)
-                          [fqn package])))
-                 packages)]
-       (assoc context
-              :project project
-              :version version
-              :packages packages)))))
+   (workspace/resolve-release-plan! dir)))
+
+(defn- with-version-overrides [{:keys [packages] :as context} versions]
+  (if (seq versions)
+    (assoc context :packages
+           (reduce-kv
+            (fn [packages fqn version]
+              (when-not (contains? packages fqn)
+                (throw (ex-info "Unknown package version override"
+                                {:package fqn})))
+              (assoc-in packages [fqn :version] version))
+            packages
+            versions))
+    context))
 
 (defn- basis-options [{:keys [mvn/local-repo]}]
   (cond-> {:root {:mvn/repos
@@ -123,7 +81,7 @@
       [:url (:url scm)]
       [:connection (:connection scm)]
       [:developerConnection (:developer-connection scm)]
-      [:tag (:tag scm)]]]))
+      [:tag (:tag package)]]]))
 
 (defn- copy-license! [context target]
   (let [source (.toPath (io/file (:root context) "LICENSE"))
@@ -153,19 +111,25 @@
                       {:exit exit :error (str/trim err)})))
     (str/trim out)))
 
+(defn build-identity [package revision]
+  {:version (:version package) :revision revision})
+
 (defn- write-build-identity!
-  [{:keys [root version]} package {:keys [expected-version source-revision]}]
-  (when (and expected-version (not= version expected-version))
+  [{:keys [root]} package {:keys [expected-version source-revision]}]
+  (when (and expected-version (not= (:version package) expected-version))
     (throw (ex-info "Build version does not match the expected release"
-                    {:expected expected-version :actual version})))
+                    {:package (:fqn package)
+                     :expected expected-version
+                     :actual (:version package)})))
   (let [revision (or source-revision (git-revision root))
         path (resolved-file (str (class-dir package)
                                  "/META-INF/collet/build.edn"))]
     (when (str/blank? revision)
       (throw (ex-info "Build source revision must not be blank" {})))
     (io/make-parents path)
-    (spit path (pr-str {:version version :revision revision}))
-    {:version version :revision revision}))
+    (let [identity (build-identity package revision)]
+      (spit path (pr-str identity))
+      identity)))
 
 (defn- patch-pom-extensions! [package pom-file]
   ;; tools.build 0.10.14 drops Maven <type> for :extension coordinates.
@@ -282,21 +246,8 @@
     :uberjar (build-uberjar! context package opts)
     :distribution (build-distribution! context package opts)))
 
-(defn- package-fqn [packages module]
-  (when module
-    (or (when (and (symbol? module) (namespace module) (contains? packages module))
-          module)
-        (let [requested (name module)
-              matches (->> (keys packages)
-                           (filter #(= requested (name %)))
-                           vec)]
-          (when-not (= 1 (count matches))
-            (throw (ex-info "Unknown or ambiguous workspace package"
-                            {:module module :matches matches})))
-          (first matches)))))
-
 (defn- select-packages [packages module]
-  (if-let [fqn (package-fqn packages module)]
+  (if-let [fqn (workspace/package-fqn packages module)]
     (let [selected (conj (kmono.graph/query-dependencies packages fqn) fqn)]
       (kmono.graph/filter-by #(contains? selected (:fqn %)) packages))
     packages))
@@ -314,21 +265,23 @@
 (defn build
   "Build every workspace artifact, or one package and its dependencies."
   [{:keys [module] :as opts}]
-  (let [{:keys [packages] :as context} (resolve-workspace-context!)
+  (let [{:keys [packages] :as context}
+        (with-version-overrides (resolve-workspace-context!) (:versions opts))
         selected (select-packages packages module)
         results (atom {})]
     (kmono.build/for-each-package selected
       (fn [package]
         (swap! results assoc (:fqn package)
                (build-package! context package opts))))
-    {:version (:version context)
+    {:versions (into {} (map (juxt key (comp :version val))) packages)
      :artifacts @results}))
 
 (defn install
   "Build and install publishable workspace packages in dependency order."
   [{:keys [module] :as opts}]
-  (let [{:keys [packages] :as context} (resolve-workspace-context!)
-        requested (package-fqn packages module)
+  (let [{:keys [packages] :as context}
+        (with-version-overrides (resolve-workspace-context!) (:versions opts))
+        requested (workspace/package-fqn packages module)
         selected (select-packages packages module)
         publishable (kmono.graph/filter-by
                      #(get-in % [:artifact :publish?])
@@ -348,5 +301,20 @@
                       :basis basis
                       :jar-file (jar-file package)})
           (swap! results assoc (:fqn package) built))))
-    {:version (:version context)
+    {:versions (into {} (map (juxt key (comp :version val))) packages)
      :artifacts @results}))
+
+(defn release-plan [opts]
+  ((requiring-resolve 'collet.release/plan) opts))
+
+(defn release [opts]
+  ((requiring-resolve 'collet.release/release) opts))
+
+(defn release-all [opts]
+  ((requiring-resolve 'collet.release/release-all) opts))
+
+(defn release-verify-cli [opts]
+  ((requiring-resolve 'collet.release/verify-cli) opts))
+
+(defn release-verify-image [opts]
+  ((requiring-resolve 'collet.release/verify-image) opts))

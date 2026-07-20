@@ -7,9 +7,7 @@
 
  :tasks
  {:requires
-  ([release :as release]
-   [verify :as verify]
-   [versioning :as versioning]
+  ([verify :as verify]
    [workspace :as workspace])
 
   test
@@ -21,7 +19,7 @@
    :task (workspace/test-unit)}
 
   test:scripts
-  {:doc  "Run versioning, release, and artifact policy tests"
+  {:doc  "Run workspace and artifact policy tests"
    :task (workspace/test-scripts)}
 
   test:integration
@@ -44,19 +42,22 @@
   {:doc  "Build and inspect artifacts, dependency trees, and isolated consumers"
    :task (verify/verify)}
 
-  version
-  {:doc "Set the coordinated workspace version: bb version <version>"
-   :override-builtin true
-   :task (versioning/version-command *command-line-args*)}
+  release:plan
+  {:doc "Print the independent package release plan: bb release:plan [module]"
+   :task (workspace/release-plan *command-line-args*)}
 
   release
-  {:doc "Release all Maven artifacts: bb release [:patch|:minor|:major]"
-   :task (release/release-command *command-line-args*)}
+  {:doc "Release a package closure locally: bb release [module]"
+   :task (workspace/release *command-line-args*)}
+
+  release:all
+  {:doc "Release every changed package locally"
+   :task (workspace/release-all *command-line-args*)}
 
   release:verify-cli
-  {:doc "Verify CLI outputs from a detached release-tag checkout"
-   :task (release/verify-cli-command *command-line-args*)}
+  {:doc "Verify CLI outputs from a detached CLI package-tag checkout"
+   :task (workspace/release-verify-cli *command-line-args*)}
 
   release:verify-image
-  {:doc "Verify a local Docker image against a release tag"
-   :task (release/verify-image-command *command-line-args*)}}}
+  {:doc "Verify a local Docker image against an app package tag"
+   :task (workspace/release-verify-image *command-line-args*)}}}

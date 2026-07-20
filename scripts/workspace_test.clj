@@ -1,5 +1,6 @@
 (ns workspace-test
-  (:require [clojure.edn :as edn]
+  (:require [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is run-tests testing]]
             [workspace :as workspace]))
@@ -13,12 +14,13 @@
    "collet-cli"])
 
 (deftest unit-tests-use-kmono-with-the-integration-selector-excluded
-  (is (= ["clojure" "-M:kmono" "run" "--M" ":test" "-e" ":integration"]
+  (is (= ["clojure" "-M:kmono" "run" "--M" ":test"
+          "--" "-e" ":integration"]
          (workspace/unit-test-command))))
 
 (deftest integration-tests-select-the-empty-integration-marker-alias
   (is (= ["clojure" "-M:kmono" "run" "--M" ":test:integration"
-          "-i" ":integration"]
+          "--" "-i" ":integration"]
          (workspace/integration-test-command))))
 
 (deftest module-tests-filter-kmono-to-the-requested-package-and-forward-runner-options
@@ -46,6 +48,27 @@
       (testing module
         (is (contains? aliases :test))
         (is (= {} (:integration aliases)))))))
+
+(deftest release-ux-dispatches-to-root-build-with-package-filters
+  (let [commands (atom [])]
+    (with-redefs [process/shell (fn [& args] (swap! commands conj args))]
+      (workspace/release-plan ["collet-core"])
+      (workspace/release ["collet-core"])
+      (workspace/release-all [])
+      (workspace/release-verify-cli ["io.velio/collet-cli@0.2.8"])
+      (workspace/release-verify-image
+       ["io.velio/collet-app@0.2.8" "local-image"]))
+    (is (= [["clojure" "-T:build" "release-plan"
+             ":module" ":collet-core"]
+            ["clojure" "-T:build" "release"
+             ":module" ":collet-core"]
+            ["clojure" "-T:build" "release-all"]
+            ["clojure" "-T:build" "release-verify-cli"
+             ":tag" "\"io.velio/collet-cli@0.2.8\""]
+            ["clojure" "-T:build" "release-verify-image"
+             ":tag" "\"io.velio/collet-app@0.2.8\""
+             ":image" "\"local-image\""]]
+           (mapv vec @commands)))))
 
 (let [{:keys [fail error]} (run-tests 'workspace-test)]
   (when (pos? (+ fail error))

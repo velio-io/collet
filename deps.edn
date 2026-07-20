@@ -6,8 +6,7 @@
   :ignore-changes ["^test/" "^test-resources/" "^dev/" ".*\\.md$"]}
 
  :collet/project
- {:version "0.2.8-SNAPSHOT"
-  :url "https://github.com/velio-io/collet"
+ {:url "https://github.com/velio-io/collet"
   :license {:name "Apache License, Version 2.0"
             :url "https://www.apache.org/licenses/LICENSE-2.0.txt"}
   :scm {:url "https://github.com/velio-io/collet"
@@ -49,11 +48,13 @@
    :main-opts ["-m" "k16.kmono.cli.main"]}
   :build
   {:deps {com.kepler16/kmono {:mvn/version "4.12.3"}
+          org.clojure/data.xml {:mvn/version "0.2.0-alpha11"}
           io.github.clojure/tools.build {:mvn/version "0.10.14"}}
    :paths ["build/src"]
    :ns-default collet.build}
   :build-test
   {:deps {com.kepler16/kmono {:mvn/version "4.12.3"}
+          org.clojure/data.xml {:mvn/version "0.2.0-alpha11"}
           io.github.clojure/tools.build {:mvn/version "0.10.14"}
           io.github.cognitect-labs/test-runner
           {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
