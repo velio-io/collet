@@ -16,6 +16,7 @@ target/*.jar
 .idea
 *.iml
 .clj-kondo
+.cpcache
 data
 tmp
 local.clj

@@ -9,7 +9,20 @@
  {:requires
   ([babashka.fs :as fs]
    [babashka.process :as ps]
-   [release :as release])
+   [release :as release]
+   [workspace :as workspace])
+
+  test:module
+  {:doc  "Test one migrated module in its own JVM"
+   :task (workspace/test-module *command-line-args*)}
+
+  build
+  {:doc  "Build one migrated module (defaults to every migrated module)"
+   :task (workspace/build *command-line-args*)}
+
+  install
+  {:doc  "Install one migrated module (defaults to every migrated module)"
+   :task (workspace/install *command-line-args*)}
 
   dev-setup
   {:doc  "Create a checkouts folders and symlinks for sub projects"

@@ -1,0 +1,5 @@
+{:paths []
+ :deps  {io.velio/collet-core {:local/root "collet-core"}}
+ :aliases
+ {:dev {:extra-deps {io.velio/collet-test-support
+                     {:local/root "test-support"}}}}}
