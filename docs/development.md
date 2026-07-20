@@ -13,7 +13,10 @@ every public or deployable module owns a thin `build.clj` and `deps.edn`.
 
 `tools.build` is pinned to 0.10.14 in every build alias. Tests use local-root
 overrides for workspace modules, while the base dependency maps use Maven
-coordinates so generated POMs are consumable outside the checkout.
+coordinates so generated POMs are consumable outside the checkout. Build tasks
+generate each POM from that base dependency map; never edit a generated POM or an
+internal `:mvn/version` pin manually. Use `bb version <version>` to update the
+single graph version and every internal pin together.
 Artifact bases ignore user dependencies and use only the module `deps.edn` plus the
 repository's explicit Maven Central/Clojars configuration.
 
@@ -59,8 +62,9 @@ dependencies or module boundaries:
 
 1. Update the module's base Maven coordinate dependencies in its `deps.edn`.
 2. Keep workspace-only `:local/root` entries in test overrides.
-3. Update the central graph if an internal edge, namespace, version, or artifact
-   contract changes.
+3. Update the central graph if an internal edge, namespace, or artifact contract
+   changes. Set a new coordinated development version with `bb version <version>`;
+   do not add module-local `:version` values or update internal pins by hand.
 4. Run `bb test:module <module>`, then `bb test:unit`.
 5. Run Docker integrations when affected and finish with `bb verify`.
 

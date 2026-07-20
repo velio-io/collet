@@ -11,6 +11,9 @@ through transitive dependencies. Namespace names, configuration keys, and action
 types are unchanged. The complete artifact-to-namespace mapping is in the
 [module migration guide](./module-migration.md#module-graph).
 Replace `VERSION` in the examples below with the release version you use.
+All action artifacts use the repository's one coordinated release version and one
+`v<version>` tag. Maven publication is automated by `bb release`; the CLI GitHub
+release and Docker image push are separate manual distribution steps.
 
 For example, an HTTP-only application can use:
 

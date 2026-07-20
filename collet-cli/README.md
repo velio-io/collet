@@ -61,7 +61,10 @@ This produces `collet-cli/target/collet.pod.jar` and
 `collet-cli/target/collet-cli.tar.gz`. The archive contains the `collet-cli/`
 directory with `bb.edn`, executable `collet.bb`, `collet.pod.jar`, and executable
 `gum`. The pod main namespace remains `pod.collet.core`.
-You can upload this file to GitHub releases.
+After a coordinated Maven release creates `v<version>`, create the GitHub release
+from that same tag and upload this file manually. `bb release` publishes Maven
+artifacts only; it neither creates the CLI GitHub release nor pushes the Docker
+image.
 
 ### Development
 

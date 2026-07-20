@@ -56,4 +56,7 @@ docker buildx build \
 ```
 
 Repository release tasks publish Maven artifacts only. Docker pushes remain an
-explicit deployment operation.
+explicit deployment operation: after the coordinated Maven release creates its one
+`v<version>` tag, run the Buildx command above yourself with that version. A Docker
+push failure does not change Maven publication, GitHub release creation, or the
+coordinated version state.

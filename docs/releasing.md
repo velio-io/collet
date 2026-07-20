@@ -9,6 +9,11 @@ Maven publication, GitHub/CLI distribution, and Docker publication are separate
 operations. This keeps credentials and failure recovery isolated while allowing all
 outputs to share the same version and Git tag.
 
+Generated POMs are the Maven metadata shipped with each library. They are produced
+from the module base dependencies so external consumers resolve the exact released
+internal coordinates; contributors never edit generated POMs or internal pins by
+hand.
+
 ## Prerequisites
 
 - JDK 21 or newer, Clojure CLI, and Babashka.
@@ -27,8 +32,9 @@ bb version 0.3.0-SNAPSHOT
 ```
 
 The command validates the requested version, updates the shared graph version and
-every internal Maven pin as one operation, and rejects any stale or unexpected
-internal coordinate. It does not commit, tag, publish, or push.
+every internal Maven pin as one operation, and rejects any stale,
+unexpected, or module-local internal coordinate. It does not commit, tag, publish,
+or push.
 
 ## Maven release
 
@@ -47,7 +53,7 @@ bb release :major
 ```
 
 For a current version of `0.2.8-SNAPSHOT`, every command releases `0.2.8`. The next
-development version is selected as follows:
+development version is selected exactly as follows:
 
 | Level | Next version |
 |---|---|
@@ -74,9 +80,10 @@ the release gate but is not uploaded by `bb release`.
 
 ## Failure recovery
 
-Nothing is published or pushed when a deterministic validation step fails. The
-local release commit remains available so the problem can be fixed and the release
-commit amended before retrying.
+Nothing is published or pushed when a deterministic preflight validation fails.
+After the release commit exists, a failing test, verification, or staging gate still
+stops before publication, tagging, next-snapshot mutation, or pushing; the local
+release commit remains available to fix and amend before retrying.
 
 Publication is irreversible and occurs one Maven coordinate at a time. If Clojars
 or the network fails partway through, the command stops before creating a tag,
@@ -88,8 +95,9 @@ retry the reported atomic Git push without republishing artifacts.
 
 ## GitHub and CLI distribution
 
-After the Maven release succeeds, create the GitHub release explicitly from the
-same tag and attach the preserved CLI archive:
+After the Maven release succeeds, create the CLI GitHub release explicitly from the
+same coordinated tag and attach the preserved CLI archive. This is not performed by
+`bb release`:
 
 ```shell
 bb build collet-cli
@@ -100,7 +108,8 @@ gh release create v0.2.8 \
 
 ## Docker publication
 
-Build and publish the application image separately using the same release version:
+Build and push the application image separately using the same release version.
+`bb release` never pushes Docker images:
 
 ```shell
 docker build -f collet-app/Dockerfile -t <registry>/collet:0.2.8 .

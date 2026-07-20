@@ -6,8 +6,9 @@ entrypoints, and distribution filenames remain compatible.
 
 ## Module graph
 
-All coordinates below use the version declared for the module in
-`build/modules.edn`. New action modules begin at `0.2.8-SNAPSHOT` in source.
+All coordinates below use the one version declared in `build/modules.edn`. New
+action modules begin at `0.2.8-SNAPSHOT` in source as part of that coordinated
+workspace version, not as module-local versions.
 
 | Coordinate | Preserved namespaces | Direct internal dependencies |
 |---|---|---|
@@ -60,7 +61,10 @@ classes. The MySQL driver remains test-only and consumers add their chosen drive
 
 Base module dependencies always use Maven coordinates. Development and tests
 override internal coordinates with `:local/root`; those local paths never appear in
-generated POMs. `bb verify` installs every library into a temporary Maven repository,
+generated POMs. The build generates POMs from the base maps so published consumers
+resolve exact internal Maven coordinates. Do not manually edit those pins; `bb
+version <version>` updates the graph and all internal pins together. `bb verify`
+installs every library into a temporary Maven repository,
 starts a minimal consumer process for each coordinate, requires its promised
 namespaces, and checks forbidden optional dependency families in each dependency
 tree.
@@ -89,10 +93,12 @@ license attribution and provenance under `META-INF`. Graal versions remain pinne
 
 ## Version policy
 
-Versions are per module and are never rewritten during publication. Before release,
-maintainers explicitly replace the target module's snapshot version and update every
-dependent module's exact internal Maven version. Released tags are named
-`<artifact>-v<version>`, such as `collet-action-http-v0.2.8`.
+The graph owns one workspace version, and every internal Maven pin must equal it.
+Use `bb version 0.3.0-SNAPSHOT` to choose the next development target; it rewrites
+all internal pins together and does not publish, tag, or commit.
 
-The aggregate pins exact released action versions. A module cannot be released while
-it or any direct/transitive internal dependency is a snapshot.
+`bb release` releases the current snapshot and creates one `v<version>` tag for all
+Maven artifacts. `:patch`, `:minor`, and `:major` advance the following snapshot
+respectively (for `0.2.8-SNAPSHOT`: `0.2.9-SNAPSHOT`, `0.3.0-SNAPSHOT`, and
+`1.0.0-SNAPSHOT`). Maven publication is automated; the CLI GitHub release and
+Docker push are separate manual operations.

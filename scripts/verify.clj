@@ -315,11 +315,104 @@
              {:files offenders}))
   (println "verified legacy build paths are absent"))
 
+(def ^:private consistency-files
+  ["README.md"
+   "bb.edn"
+   "deps.edn"
+   "collet-app/deploy.md"
+   "collet-cli/README.md"])
+
+(def ^:private obsolete-support-names
+  [(str "build" "-support")
+   (str "test" "-support")])
+
+(def ^:private obsolete-release-command-pattern
+  (re-pattern
+   (str "(?i)" "release" ":all|\\bbb\\s+release\\s+(?:<module>|collet-[a-z-]+)")))
+
+(def ^:private per-artifact-tag-pattern
+  (re-pattern
+   (str "(?i)<artifact>" "-v<version>|[a-z][a-z0-9-]*-v\\d+\\.\\d+\\.\\d+")))
+
+(defn- tracked-files-under [directory]
+  (->> (file-seq (fs/file directory))
+       (filter fs/regular-file?)
+       (map str)))
+
+(defn- consistency-sources []
+  ;; Keep this scope to operational configuration and user documentation. Test
+  ;; fixtures and sample data may legitimately mention historical names.
+  (concat consistency-files
+          (tracked-files-under "build")
+          (tracked-files-under "scripts")
+          (tracked-files-under "docs")
+          (map str (fs/glob "." "collet-*/deps.edn"))
+          (map str (fs/glob "." "collet-*/bb.edn"))
+          (map str (fs/glob "." "collet-*/build.clj"))
+          (map str (fs/glob "." "collet-*/Dockerfile"))))
+
+(defn- matching-files [pattern]
+  (->> (consistency-sources)
+       distinct
+       (remove #{"scripts/verify.clj"})
+       (filter #(re-find pattern (slurp %)))
+       vec))
+
+(defn- verify-repository-consistency! []
+  (let [{:keys [version modules]} (workspace/manifest)
+        internal-libs (set (map :lib (vals modules)))
+        module-versions (->> modules
+                             (keep (fn [[module config]]
+                                     (when (contains? config :version)
+                                       {:module module :version (:version config)})))
+                             vec)
+        stale-pins (->> modules
+                        (mapcat (fn [[module {:keys [dir]}]]
+                                  (let [deps (:deps (edn/read-string
+                                                     (slurp (str (fs/path dir "deps.edn")))))]
+                                    (keep (fn [[lib config]]
+                                            (when (contains? internal-libs lib)
+                                              (when-not (= version (:mvn/version config))
+                                                {:module module
+                                                 :dependency lib
+                                                 :expected version
+                                                 :actual (:mvn/version config)})))
+                                          deps))))
+                        vec)]
+    (ensure! (empty? module-versions)
+             "Modules must use the graph's coordinated version"
+             {:modules module-versions :version version})
+    (ensure! (empty? stale-pins)
+             "Internal Maven pins must match the graph's coordinated version"
+             {:pins stale-pins :version version})
+    (let [obsolete-paths (filter fs/exists? obsolete-support-names)
+          obsolete-names (matching-files
+                          (re-pattern (str "(?i)" (str/join "|" obsolete-support-names))))
+          obsolete-release-commands
+          (matching-files obsolete-release-command-pattern)
+          per-artifact-tags
+          (matching-files per-artifact-tag-pattern)]
+      (ensure! (empty? obsolete-paths)
+               "Obsolete workspace support paths remain"
+               {:paths (vec obsolete-paths)})
+      (ensure! (empty? obsolete-names)
+               "Obsolete workspace support names are referenced"
+               {:files obsolete-names})
+      (ensure! (empty? obsolete-release-commands)
+               "Obsolete release command is documented or configured"
+               {:files obsolete-release-commands})
+      (ensure! (empty? per-artifact-tags)
+               "Documentation must use one coordinated v<version> release tag"
+               {:files per-artifact-tags})))
+  (println "verified repository versioning and release documentation consistency"))
+
 (defn verify-module-artifact! [module]
   (verify-library! module)
   (verify-dependency-tree! module))
 
 (defn verify []
+  (println "\n==> checking repository versioning and release documentation consistency")
+  (verify-repository-consistency!)
   (println "\n==> installing and checking publishable library artifacts")
   (workspace/install [])
   (doseq [module (workspace/modules)

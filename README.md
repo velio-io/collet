@@ -550,14 +550,24 @@ After adding Collet to your project dependencies, you can use it as follows:
 ### Modules and development
 
 The repository is a Clojure CLI workspace built with `tools.build` and orchestrated
-with Babashka. Each public artifact has its own `deps.edn` and can be tested, built,
-installed, and released independently.
+with Babashka. Shared build implementation and the single module graph live in
+`build/`; reusable unpublished test-only code lives in `test-fixtures/`. The graph
+owns one coordinated workspace version. Module `deps.edn` files contain managed
+internal Maven pins for published POMs, so contributors never edit those pins by
+hand; use `bb version 0.3.0-SNAPSHOT` to update the graph and pins together.
+
+`bb release` publishes Maven artifacts as one coordinated release and creates one
+`v<version>` Git tag. Creating the CLI GitHub release and pushing the Docker image
+are separate manual operations; see the release guide for their commands and
+failure boundaries.
 
 ```shell
 bb test:unit
 bb test:module collet-action-http
 bb build collet-app
 bb verify
+bb version 0.3.0-SNAPSHOT
+bb release :patch
 ```
 
 See [development](./docs/development.md), [module migration](./docs/module-migration.md),
