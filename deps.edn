@@ -10,7 +10,9 @@
          io.velio/collet-action-llm    {:local/root "collet-action-llm"}
          io.velio/collet-action-vega   {:local/root "collet-action-vega"}
          io.velio/collet-action-lucene {:local/root "collet-action-lucene"}
-         io.velio/collet-actions       {:local/root "collet-actions"}}
+         io.velio/collet-actions       {:local/root "collet-actions"}
+         io.velio/collet-app           {:local/root "collet-app"}
+         io.velio/collet-cli           {:local/root "collet-cli"}}
  :aliases
  {:dev {:extra-deps {io.velio/collet-test-support
                      {:local/root "test-support"}}}}}

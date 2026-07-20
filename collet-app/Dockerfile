@@ -1,14 +1,15 @@
-FROM clojure:temurin-21-lein AS builder
+FROM clojure:temurin-21-tools-deps AS builder
 
-RUN mkdir -p /build
-COPY project.clj /build/project.clj
-COPY src /build/src
+WORKDIR /build
 
-# for local builds
-#RUN mkdir -p /root/.m2/repository/io
-#ADD velio /root/.m2/repository/io/velio
+COPY LICENSE /build/LICENSE
+COPY build /build/build
+COPY build-support /build/build-support
+COPY collet-core /build/collet-core
+COPY collet-app /build/collet-app
 
-RUN cd /build && lein uberjar
+RUN cd /build/collet-core && clojure -T:build install
+RUN cd /build/collet-app && clojure -T:build uberjar
 
 
 FROM eclipse-temurin:21.0.5_11-jre
@@ -23,11 +24,11 @@ ENV TINI_VERSION=v0.19.0
 #ADD velio /root/.m2/repository/io/velio
 
 RUN mkdir -p /app
-COPY --from=builder /build/target/collet.jar /app/collet.jar
+COPY --from=builder /build/collet-app/target/collet.jar /app/collet.jar
 
 RUN mkdir /app/jmx
-COPY resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
-COPY resources/jmx.yaml /app/jmx/jmx.yaml
+COPY collet-app/resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
+COPY collet-app/resources/jmx.yaml /app/jmx/jmx.yaml
 
 
 ARG TARGETPLATFORM

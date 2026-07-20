@@ -1,14 +1,7 @@
 {:tasks
  {:requires
-  ([babashka.process :as proc]
-   [babashka.fs :as fs])
+  ([babashka.process :as process])
 
   build
   {:doc  "Build the Collet CLI tar file"
-   :task (do (proc/shell "lein" "uberjar")
-             (fs/create-dir "target/collet-cli")
-             (fs/copy "collet-bb-deps.edn" "target/collet-cli/bb.edn")
-             (fs/copy "collet.bb" "target/collet-cli/collet.bb")
-             (fs/copy "target/collet.pod.jar" "target/collet-cli/collet.pod.jar")
-             (fs/copy "gum" "target/collet-cli/gum")
-             (proc/shell "tar" "-czf" "target/collet-cli.tar.gz" "-C" "target" "collet-cli"))}}}
+   :task (process/shell "clojure" "-T:build" "dist")}}}

@@ -4,10 +4,12 @@
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.tools.build.api :as b])
   (:import
    (java.nio.file CopyOption Files StandardCopyOption)
+   (java.nio.file.attribute PosixFilePermissions)
    (java.util.regex Pattern)))
 
 (defn- repo-file [path]
@@ -62,6 +64,15 @@
                              (make-array java.nio.file.attribute.FileAttribute 0))
     (Files/copy source destination
                 (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))))
+
+(defn- copy-project! [{:keys [source-dirs resource-dirs] :as config}]
+  (let [target (class-dir config)
+        dirs (->> (concat source-dirs resource-dirs)
+                  (remove str/blank?)
+                  (filter #(.exists (io/file %))))]
+    (when (seq dirs)
+      (b/copy-dir {:src-dirs (vec dirs) :target-dir target}))
+    (copy-license! target)))
 
 (defn- basis [opts]
   (cond-> (b/create-basis {:project "deps.edn"})
@@ -124,17 +135,11 @@
 (defn jar
   ([module] (jar module {}))
   ([module opts]
-   (let [{:keys [source-dirs resource-dirs] :as config}
-         (merge (module-config module) opts)
+   (let [config (merge (module-config module) opts)
          target (class-dir config)
-         output (jar-file config)
-         dirs (->> (concat source-dirs resource-dirs)
-                   (remove str/blank?)
-                   (filter #(.exists (io/file %))))]
+         output (jar-file config)]
      (clean module opts)
-     (when (seq dirs)
-       (b/copy-dir {:src-dirs (vec dirs) :target-dir target}))
-     (copy-license! target)
+     (copy-project! config)
      (pom module opts)
      (b/jar {:class-dir target :jar-file output})
      {:module module :jar-file output})))
@@ -150,3 +155,58 @@
                  :basis (basis opts)
                  :jar-file jar-file})
      {:module module :lib lib :version version :jar-file jar-file})))
+
+(defn uberjar
+  ([module] (uberjar module {}))
+  ([module opts]
+   (let [{:keys [main source-dirs jvm-opts] :as config}
+         (merge (module-config module) opts)
+         target (class-dir config)
+         output (:uber-file config)
+         project-basis (basis opts)]
+     (when-not (and main output)
+       (throw (ex-info "Module does not define :main and :uber-file"
+                       {:module module})))
+     (clean module opts)
+     (copy-project! config)
+     (pom module opts)
+     (b/compile-clj {:basis project-basis
+                     :class-dir target
+                     :src-dirs source-dirs
+                     :java-opts jvm-opts})
+     (b/uber {:class-dir target
+              :uber-file output
+              :basis project-basis
+              :main main})
+     {:module module :uber-file output :main main})))
+
+(defn- set-mode! [path mode]
+  (Files/setPosixFilePermissions
+   (.toPath (io/file path))
+   (PosixFilePermissions/fromString mode)))
+
+(defn distribution
+  ([module] (distribution module {}))
+  ([module opts]
+   (let [{:keys [distribution]}
+         (merge (module-config module) opts)
+         {:keys [archive root files]} distribution
+         dist-dir (str "target/" root)]
+     (when-not distribution
+       (throw (ex-info "Module does not define a distribution" {:module module})))
+     (b/delete {:path dist-dir})
+     (doseq [{:keys [from to mode]} files]
+       (let [destination (str dist-dir "/" to)]
+         (io/make-parents destination)
+         (Files/copy (.toPath (io/file from))
+                     (.toPath (io/file destination))
+                     (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
+                                             StandardCopyOption/COPY_ATTRIBUTES]))
+         (when mode
+           (set-mode! destination mode))))
+     (let [{:keys [exit err]}
+           (shell/sh "tar" "-czf" archive "-C" "target" root)]
+       (when-not (zero? exit)
+         (throw (ex-info "Failed to create distribution archive"
+                         {:module module :exit exit :error err}))))
+     {:module module :archive archive :root root})))

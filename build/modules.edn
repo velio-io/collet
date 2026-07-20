@@ -99,11 +99,20 @@
    :description "Standalone Collet application", :dir "collet-app"
    :internal-deps [:collet-core]
    :main collet.main
+   :build-task :uberjar
    :uber-file "target/collet.jar"}
   :collet-cli
   {:lib io.velio/collet-cli, :version "0.2.8-SNAPSHOT"
    :description "CLI interface for Collet", :dir "collet-cli"
    :internal-deps [:collet-app]
    :main pod.collet.core
+   :build-task :dist
    :uber-file "target/collet.pod.jar"
+   :distribution
+   {:archive "target/collet-cli.tar.gz"
+    :root "collet-cli"
+    :files [{:from "collet-bb-deps.edn" :to "bb.edn" :mode "rw-r--r--"}
+            {:from "collet.bb" :to "collet.bb" :mode "rwxr-xr-x"}
+            {:from "target/collet.pod.jar" :to "collet.pod.jar" :mode "rw-r--r--"}
+            {:from "gum" :to "gum" :mode "rwxr-xr-x"}]}
    :publish? false}}}

@@ -1,0 +1,7 @@
+.git
+.worktrees
+**/.cpcache
+**/.lsp
+**/target
+checkouts
+tmp

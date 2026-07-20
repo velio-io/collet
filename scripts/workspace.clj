@@ -37,6 +37,24 @@
     (println (str "\n==> " (name module) " " (str/join " " args)))
     (apply process/shell {:dir dir} "clojure" args)))
 
+(defn- publish? [module]
+  (not= false (:publish? (module-config module))))
+
+(defn- build-task [module]
+  (name (or (:build-task (module-config module)) :jar)))
+
+(defn- install-dependencies! [module installed]
+  (doseq [dependency (:internal-deps (module-config module))]
+    (install-dependencies! dependency installed)
+    (when (and (publish? dependency)
+               (not (contains? @installed dependency)))
+      (clojure! dependency "-T:build" "install")
+      (swap! installed conj dependency))))
+
+(defn- build-module! [module installed]
+  (install-dependencies! module installed)
+  (clojure! module "-T:build" (build-task module)))
+
 (defn test-module [args]
   (when-not (seq args)
     (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
@@ -46,12 +64,16 @@
     (when-not (migrated? module)
       (throw (ex-info (str "Module has not migrated yet: " (name module))
                       {:module module})))
+    (when (:build-task (module-config module))
+      (build-module! module (atom #{})))
     (apply clojure! module "-M:test" (rest args))))
 
 (defn build [args]
-  (doseq [module (selected-modules args)]
-    (clojure! module "-T:build" "jar")))
+  (let [installed (atom #{})]
+    (doseq [module (selected-modules args)]
+      (build-module! module installed))))
 
 (defn install [args]
   (doseq [module (selected-modules args)]
-    (clojure! module "-T:build" "install")))
+    (when (publish? module)
+      (clojure! module "-T:build" "install"))))
