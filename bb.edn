@@ -45,9 +45,5 @@
    :task (versioning/version-command *command-line-args*)}
 
   release
-  {:doc  "Test, verify, deploy, and tag one release: bb release <module>"
-   :task (release/release-module *command-line-args*)}
-
-  release:all
-  {:doc  "Release every publishable module in dependency order"
-   :task (release/release-all)}}}
+  {:doc "Release all Maven artifacts: bb release [:patch|:minor|:major]"
+   :task (release/release-command *command-line-args*)}}}
