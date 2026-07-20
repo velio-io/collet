@@ -750,9 +750,13 @@
                                   (swap! commands conj (vec (rest args)))
                                   {:exit 0})]
       (workspace/test-unit))
-    (is (= [["bb" "-cp" "scripts" "scripts/versioning_test.clj"]
+    (is (= [["clojure" "-T:build-test"]
+            ["bb" "-cp" "scripts" "scripts/workspace_test.clj"]
+            ["bb" "-cp" "scripts" "scripts/versioning_test.clj"]
             ["bb" "-cp" "scripts" "scripts/release_test.clj"]
-            ["bb" "-cp" "scripts" "scripts/verify_test.clj"]]
+            ["bb" "-cp" "scripts" "scripts/verify_test.clj"]
+            ["clojure" "-M:kmono" "run" "--M" ":test"
+             "-e" ":integration"]]
            @commands))
     (is (not-any? #(= ["bb" "test"] %) @commands))))
 

@@ -18,4 +18,5 @@
                       com.mysql/mysql-connector-j {:mvn/version "9.0.0"}}
          :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                     "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}}}
+         :main-opts ["-m" "cognitect.test-runner"]}
+  :integration {}}}

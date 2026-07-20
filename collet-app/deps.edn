@@ -32,4 +32,5 @@
                     "--add-opens=java.base/java.util=ALL-UNNAMED"
                     "--add-opens=java.base/java.nio=ALL-UNNAMED"
                     "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}}}
+         :main-opts ["-m" "cognitect.test-runner"]}
+  :integration {}}}

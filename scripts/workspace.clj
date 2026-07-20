@@ -115,24 +115,42 @@
   (root-build! module "build")
   (assert-build-outputs! module))
 
-(defn- run-test! [module test-runner-options build-artifact?]
-  (when build-artifact?
-    (build-module! module (atom #{})))
-  (apply clojure! module "-M:test" test-runner-options))
+(defn unit-test-command []
+  ["clojure" "-M:kmono" "run" "--M" ":test" "-e" ":integration"])
+
+(defn integration-test-command []
+  ["clojure" "-M:kmono" "run" "--M" ":test:integration" "-i" ":integration"])
+
+(defn module-test-command [module runner-options]
+  (into ["clojure" "-M:kmono" "run" "-F"
+         (str ":io.velio/" (name module)) "--M" ":test"]
+        (concat (when (seq runner-options) ["--"])
+                runner-options)))
+
+(defn- kmono! [command]
+  (apply process/shell (nondeployment-process-options) command))
+
+(defn- build-test-tools! []
+  (process/shell (nondeployment-process-options) "clojure" "-T:build-test"))
+
+(declare build)
 
 (defn test-module [args]
   (when-not (seq args)
     (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
                     {:args args})))
-  (let [module (module-key (first args))]
-    (module-config module)
+  (let [module (module-key (first args))
+        config (module-config module)]
     (when-not (migrated? module)
       (throw (ex-info (str "Module has not migrated yet: " (name module))
                       {:module module})))
-    (run-test! module (rest args) (boolean (:build-task (module-config module))))))
+    (when (:build-task config)
+      (build [module]))
+    (kmono! (module-test-command module (rest args)))))
 
 (def script-test-files
-  ["scripts/versioning_test.clj"
+  ["scripts/workspace_test.clj"
+   "scripts/versioning_test.clj"
    "scripts/release_test.clj"
    "scripts/verify_test.clj"])
 
@@ -143,15 +161,14 @@
                    "bb" "-cp" "scripts" path)))
 
 (defn test-unit []
+  (build-test-tools!)
   (test-scripts)
-  (doseq [module (modules)]
-    (run-test! module ["-e" ":integration"] false)))
+  (kmono! (unit-test-command)))
 
 (defn test-integration []
-  (doseq [module (modules)
-          :when (:integration-test? (module-config module))]
-    (run-test! module ["-i" ":integration"]
-               (boolean (:build-task (module-config module))))))
+  (build [:collet-app])
+  (build [:collet-cli])
+  (kmono! (integration-test-command)))
 
 (defn test-all []
   (test-unit)
