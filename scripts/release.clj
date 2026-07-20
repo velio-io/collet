@@ -12,11 +12,16 @@
 
 (defn- command-output [& command]
   (let [{:keys [exit out err]}
-        @(process/process command {:out :string :err :string})]
+        @(process/process command
+                          (workspace/nondeployment-process-options
+                           {:out :string :err :string}))]
     (when-not (zero? exit)
       (fail! "Command failed"
              {:command command :exit exit :error (str/trim err)}))
     (str/trim out)))
+
+(defn- shell! [& command]
+  (apply process/shell (workspace/nondeployment-process-options) command))
 
 (defn- ensure! [condition message data]
   (when-not condition
@@ -35,7 +40,7 @@
              {:status status})))
 
 (defn- ensure-synced-with-origin! []
-  (process/shell "git" "fetch" "origin" "main")
+  (shell! "git" "fetch" "origin" "main")
   (let [head (command-output "git" "rev-parse" "HEAD")
         fetched-head (command-output "git" "rev-parse" "FETCH_HEAD")
         remote-head (command-output "git" "rev-parse" "origin/main")]
@@ -58,7 +63,7 @@
     (versioning/plan-version-update "." actual-version)))
 
 (defn- ensure-credentials! []
-  (doseq [variable ["CLOJARS_USERNAME" "CLOJARS_PASSWORD"]]
+  (doseq [variable workspace/publication-credential-variables]
     (ensure! (not (str/blank? (System/getenv variable)))
              "Clojars credentials are required for release"
              {:missing variable})))
@@ -89,11 +94,11 @@
 (defn- stage-version! [version]
   (let [paths (mapv :path (versioning/set-version! version))]
     (when (seq paths)
-      (apply process/shell "git" "add" "--" paths))
+      (apply shell! "git" "add" "--" paths))
     paths))
 
 (defn- commit! [message]
-  (process/shell "git" "commit" "-m" message)
+  (shell! "git" "commit" "-m" message)
   (command-output "git" "rev-parse" "HEAD"))
 
 (defn- artifact-paths [module]
@@ -124,11 +129,17 @@
       (finally
         (fs/delete-tree staging-repo)))))
 
+(defn- deployment-env []
+  (let [environment (into {} (System/getenv))]
+    (merge (workspace/nondeployment-env environment)
+           (select-keys environment
+                        workspace/publication-credential-variables))))
+
 (defn- deploy-artifacts! [module artifacts]
   (let [{:keys [jar pom]} (ensure-artifacts! module artifacts)
         {:keys [lib version]} (workspace/module-config module)]
     ;; deps-deploy receives the exact files that passed staging verification.
-    (process/shell "clojure" "-X:release"
+    (process/shell {:env (deployment-env)} "clojure" "-X:release"
                    ":installer" ":remote"
                    ":sign-releases?" "false"
                    ":artifact" (pr-str jar)
@@ -136,12 +147,12 @@
     (println "Deployed" lib version)))
 
 (defn- create-tag! [tag release-commit]
-  (process/shell "git" "tag" tag release-commit))
+  (shell! "git" "tag" tag release-commit))
 
 (defn- push-release! [{:keys [remote branch tag atomic?]}]
   (ensure! atomic? "Release push must be atomic" {:atomic? atomic?})
-  (process/shell "git" "push" "--atomic" remote branch
-                 (str "refs/tags/" tag)))
+  (shell! "git" "push" "--atomic" remote branch
+          (str "refs/tags/" tag)))
 
 (def production-ops
   {:preflight! production-preflight!

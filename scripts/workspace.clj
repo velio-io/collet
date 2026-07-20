@@ -5,6 +5,19 @@
    [clojure.edn :as edn]
    [clojure.string :as str]))
 
+(def publication-credential-variables
+  ["CLOJARS_USERNAME" "CLOJARS_PASSWORD"])
+
+(defn nondeployment-env
+  ([] (nondeployment-env (System/getenv)))
+  ([environment]
+   (apply dissoc (into {} environment) publication-credential-variables)))
+
+(defn nondeployment-process-options
+  ([] (nondeployment-process-options {}))
+  ([options]
+   (assoc options :env (nondeployment-env))))
+
 (defn manifest []
   (edn/read-string (slurp "build/modules.edn")))
 
@@ -51,7 +64,8 @@
 (defn- clojure! [module & args]
   (let [{:keys [dir]} (module-config module)]
     (println (str "\n==> " (name module) " " (str/join " " args)))
-    (apply process/shell {:dir dir} "clojure" args)))
+    (apply process/shell (nondeployment-process-options {:dir dir})
+           "clojure" args)))
 
 (defn build-library! [module local-repo]
   (module-config module)
@@ -106,7 +120,19 @@
                       {:module module})))
     (run-test! module (rest args) (boolean (:build-task (module-config module))))))
 
+(def script-test-files
+  ["scripts/versioning_test.clj"
+   "scripts/release_test.clj"
+   "scripts/verify_test.clj"])
+
+(defn test-scripts []
+  (doseq [path script-test-files]
+    (println (str "\n==> " path))
+    (process/shell (nondeployment-process-options)
+                   "bb" "-cp" "scripts" path)))
+
 (defn test-unit []
+  (test-scripts)
   (doseq [module (modules)]
     (run-test! module ["-e" ":integration"] false)))
 

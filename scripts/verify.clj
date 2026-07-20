@@ -195,7 +195,9 @@
 
 (defn- capture! [dir & command]
   (let [{:keys [exit out err]}
-        @(process/process command {:dir dir :out :string :err :string})]
+        @(process/process command
+                          (workspace/nondeployment-process-options
+                           {:dir dir :out :string :err :string}))]
     (when-not (zero? exit)
       (fail! "Command failed" {:command command :dir dir :exit exit :error err}))
     (str out err)))
@@ -275,7 +277,8 @@
              "CLI pod entrypoint changed" {})
     (let [target (fs/create-temp-dir {:prefix "collet-cli-dist-"})]
       (try
-        (process/shell {:dir target} "tar" "-xzf" (str (fs/absolutize archive)))
+        (process/shell (workspace/nondeployment-process-options {:dir target})
+                       "tar" "-xzf" (str (fs/absolutize archive)))
         (let [root (fs/path target "collet-cli")
               expected {"bb.edn" "rw-r--r--"
                         "collet.bb" "rwxr-xr-x"

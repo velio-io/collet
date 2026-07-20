@@ -19,6 +19,10 @@
   {:doc  "Run every module test suite without :integration tests"
    :task (workspace/test-unit)}
 
+  test:scripts
+  {:doc  "Run versioning, release, and artifact policy tests"
+   :task (workspace/test-scripts)}
+
   test:integration
   {:doc  "Run Docker-backed and artifact startup integration tests"
    :task (workspace/test-integration)}

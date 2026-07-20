@@ -1,7 +1,9 @@
 (ns release-test
-  (:require [babashka.process :as process]
+  (:require [babashka.fs :as fs]
+            [babashka.process :as process]
             [clojure.test :refer [deftest is run-tests testing]]
             [release :as release]
+            [verify]
             [workspace :as workspace]))
 
 (def release-input
@@ -48,6 +50,14 @@
     nil
     (catch clojure.lang.ExceptionInfo error
       (ex-message error))))
+
+(defn- private-var [namespace symbol]
+  (ns-resolve namespace symbol))
+
+(defn- credential-free-options? [options]
+  (and (map? (:env options))
+       (not (contains? (:env options) "CLOJARS_USERNAME"))
+       (not (contains? (:env options) "CLOJARS_PASSWORD"))))
 
 (deftest coordinates-a-release-in-graph-order
   (let [events (atom [])]
@@ -151,6 +161,80 @@
            ["git" "rev-parse" "origin/main"] "release-commit"))}
       #(is (= "main must exactly match origin/main"
               (exception-message (fn [] (@sync-var))))))))
+
+(deftest nondeployment-processes-receive-a-credential-free-environment
+  (let [clojure-var (private-var 'workspace 'clojure!)
+        commit-var (private-var 'release 'commit!)
+        capture-var (private-var 'verify 'capture!)
+        shell-options (atom [])
+        process-options (atom [])
+        manifest {:version "0.2.8-SNAPSHOT"
+                  :module-order [:collet-core]
+                  :modules {:collet-core {:dir "collet-core"
+                                          :lib 'io.velio/collet-core}}}]
+    (with-redefs [workspace/manifest (fn [] manifest)
+                  process/shell (fn [& args]
+                                  (swap! shell-options conj (first args))
+                                  {:exit 0})
+                  process/process (fn [_ options]
+                                    (swap! process-options conj options)
+                                    (delay {:exit 0 :out "release-commit\n" :err ""}))]
+      (@clojure-var :collet-core "-M:test")
+      (@commit-var "Release 0.2.8")
+      (@capture-var "." "clojure" "-Stree"))
+    (is (= 2 (count @shell-options)))
+    (is (every? credential-free-options? @shell-options))
+    (is (= 2 (count @process-options)))
+    (is (every? credential-free-options? @process-options))))
+
+(deftest deployment-explicitly-restores-publication-credentials
+  (let [deployment-env-var (private-var 'release 'deployment-env)
+        deploy-var (private-var 'release 'deploy-artifacts!)
+        root (fs/create-temp-dir {:prefix "release-env-test-"})
+        jar (str (fs/path root "artifact.jar"))
+        pom (str (fs/path root "pom.xml"))
+        options (atom nil)]
+    (try
+      (spit jar "jar")
+      (spit pom "pom")
+      (is (some? deployment-env-var)
+          "release defines an injectable deployment-only environment boundary")
+      (when deployment-env-var
+        (with-redefs-fn
+          {deployment-env-var
+           (fn [] {"PATH" "/bin"
+                   "CLOJARS_USERNAME" "not-printed"
+                   "CLOJARS_PASSWORD" "not-printed"})
+           #'workspace/module-config
+           (fn [_] {:lib 'io.velio/example :version "0.2.8"})
+           #'process/shell
+           (fn [& args]
+             (reset! options (first args))
+             {:exit 0})}
+          (fn []
+            (@deploy-var :example {:jar jar :pom pom})))
+        (is (map? (:env @options)))
+        (is (= #{"CLOJARS_USERNAME" "CLOJARS_PASSWORD"}
+               (->> (keys (:env @options))
+                    (filter #(re-find #"^CLOJARS_" %))
+                    set))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest unit-orchestration-runs-all-script-suites-without-recursion
+  (let [commands (atom [])]
+    (with-redefs [workspace/manifest (fn [] {:version "0.2.8-SNAPSHOT"
+                                             :module-order []
+                                             :modules {}})
+                  process/shell (fn [& args]
+                                  (swap! commands conj (vec (rest args)))
+                                  {:exit 0})]
+      (workspace/test-unit))
+    (is (= [["bb" "-cp" "scripts" "scripts/versioning_test.clj"]
+            ["bb" "-cp" "scripts" "scripts/release_test.clj"]
+            ["bb" "-cp" "scripts" "scripts/verify_test.clj"]]
+           @commands))
+    (is (not-any? #(= ["bb" "test"] %) @commands))))
 
 (let [{:keys [fail error]} (run-tests 'release-test)]
   (when (pos? (+ fail error))
