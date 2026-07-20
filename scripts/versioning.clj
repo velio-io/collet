@@ -1,7 +1,9 @@
 (ns versioning
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
-            [rewrite-clj.zip :as z]))
+            [rewrite-clj.zip :as z])
+  (:import (java.nio.file CopyOption Files StandardCopyOption)
+           (java.nio.file.attribute FileAttribute)))
 
 (def ^:private version-pattern
   #"^(\d+)\.(\d+)\.(\d+)(-SNAPSHOT)?$")
@@ -151,14 +153,179 @@
                        :actual (:version graph)})))
     (validate-internal-pins! pins new-version)))
 
+(defn- transaction-state-path [root]
+  (fs/path root "target" ".collet" "version-transaction.edn"))
+
+(defn- sibling-temporary-file [path]
+  (let [path (fs/path path)
+        parent (fs/parent path)
+        prefix (str "." (fs/file-name path) ".collet-")]
+    (fs/create-dirs parent)
+    (Files/createTempFile parent prefix ".tmp" (make-array FileAttribute 0))))
+
+(defn- move-replacing! [source destination]
+  (try
+    (Files/move (fs/path source)
+                (fs/path destination)
+                (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                        StandardCopyOption/REPLACE_EXISTING]))
+    (catch Exception error
+      (if (= "java.nio.file.AtomicMoveNotSupportedException"
+             (.getName (class error)))
+        (Files/move (fs/path source)
+                    (fs/path destination)
+                    (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+        (throw error)))))
+
+(defn- write-state! [root state]
+  (let [path (transaction-state-path root)
+        temporary (sibling-temporary-file path)]
+    (try
+      (spit (str temporary) (pr-str state))
+      (let [written (edn/read-string (slurp (str temporary)))]
+        (when-not (= state written)
+          (throw (ex-info "Version transaction state did not round-trip"
+                          {:path (str path)}))))
+      (move-replacing! temporary path)
+      state
+      (finally
+        (Files/deleteIfExists temporary)))))
+
+(defn- read-state [root]
+  (let [path (transaction-state-path root)]
+    (when (fs/regular-file? path)
+      (edn/read-string (slurp (str path))))))
+
+(defn- delete-state! [root]
+  (Files/deleteIfExists (transaction-state-path root)))
+
+(defn- prepare-change! [{:keys [path after] :as change}]
+  (let [temporary (sibling-temporary-file path)]
+    (spit (str temporary) after)
+    (when-not (= after (slurp (str temporary)))
+      (throw (ex-info "Prepared version source differs from its update plan"
+                      {:path path :temporary (str temporary)})))
+    ;; Every coordinated source is EDN. Parsing the prepared sibling catches a
+    ;; truncated or otherwise invalid write before any live file is replaced.
+    (edn/read-string (slurp (str temporary)))
+    (assoc change :temporary (str temporary))))
+
+(defn- ensure-current-content! [{:keys [path before]}]
+  (let [actual (slurp path)]
+    (when-not (= before actual)
+      (throw (ex-info "Version source changed during transaction"
+                      {:path path :expected before :actual actual})))))
+
+(defn- replace-source-file! [temporary path]
+  (move-replacing! temporary path))
+
+(defn- restore-source-file! [{:keys [path before after]}]
+  (let [actual (slurp path)]
+    (cond
+      (= before actual)
+      :already-restored
+
+      (= after actual)
+      (let [temporary (sibling-temporary-file path)]
+        (try
+          (spit (str temporary) before)
+          (when-not (= before (slurp (str temporary)))
+            (throw (ex-info "Prepared rollback source differs from journal"
+                            {:path path :temporary (str temporary)})))
+          (move-replacing! temporary path)
+          :restored
+          (finally
+            (Files/deleteIfExists temporary))))
+
+      :else
+      (throw (ex-info "Version recovery refused to overwrite unrelated edits"
+                      {:path path :expected-before before
+                       :transaction-after after :actual actual})))))
+
+(defn- cleanup-temporaries! [changes]
+  (doseq [{:keys [temporary]} changes
+          :when temporary]
+    (Files/deleteIfExists (fs/path temporary))))
+
+(defn- rollback-changes! [root state]
+  (let [failures
+        (reduce (fn [errors change]
+                  (try
+                    (restore-source-file! change)
+                    errors
+                    (catch Throwable error
+                      (conj errors {:path (:path change)
+                                    :message (ex-message error)}))))
+                []
+                (reverse (:changes state)))
+        rolled-back (assoc state
+                           :status (if (seq failures)
+                                     :rollback-incomplete
+                                     :rolled-back)
+                           :rollback-failures failures)]
+    (write-state! root rolled-back)
+    rolled-back))
+
+(defn- recover-pending-transaction! [root]
+  (when-let [state (read-state root)]
+    (let [recovered (rollback-changes! root state)]
+      (when (seq (:rollback-failures recovered))
+        (throw (ex-info "Version transaction recovery requires manual reconciliation"
+                        {:state-path (str (transaction-state-path root))
+                         :failures (:rollback-failures recovered)})))
+      (cleanup-temporaries! (:changes recovered))
+      (delete-state! root))))
+
+(defn- apply-version-transaction! [root new-version changes]
+  (let [prepared (mapv prepare-change! changes)
+        state (atom {:status :prepared
+                     :root (str (fs/absolutize root))
+                     :new-version new-version
+                     :changes prepared
+                     :replaced []})]
+    (try
+      ;; Check the complete optimistic snapshot only after every sibling file
+      ;; has been written and validated, but before replacing any live source.
+      (doseq [change prepared]
+        (ensure-current-content! change))
+      (write-state! root @state)
+      (doseq [{:keys [path temporary] :as change} prepared]
+        ;; Recheck immediately before each move so a concurrent edit that lands
+        ;; during the transaction is preserved and forces rollback.
+        (ensure-current-content! change)
+        (replace-source-file! temporary path)
+        (swap! state (fn [current]
+                       (-> current
+                           (assoc :status :applying)
+                           (update :replaced conj path))))
+        (write-state! root @state))
+      (validate-written-versions! root new-version)
+      (cleanup-temporaries! prepared)
+      (delete-state! root)
+      changes
+      (catch Throwable failure
+        (let [failed (assoc @state
+                            :status :failed
+                            :failure (or (ex-message failure)
+                                         (str (class failure))))]
+          (write-state! root failed)
+          (let [rolled-back (rollback-changes! root failed)]
+            (throw (ex-info (or (ex-message failure)
+                                "Version transaction failed")
+                            (merge (or (ex-data failure) {})
+                                   {:state-path (str (transaction-state-path root))
+                                    :rollback-failures
+                                    (:rollback-failures rolled-back)})
+                            failure))))))))
+
 (defn set-version!
   ([new-version] (set-version! "." new-version))
   ([root new-version]
+   (recover-pending-transaction! root)
    (let [changes (plan-version-update root new-version)]
-     (doseq [{:keys [path after]} changes]
-       (spit path after))
-     (validate-written-versions! root new-version)
-     changes)))
+     (if (seq changes)
+       (apply-version-transaction! root new-version changes)
+       changes))))
 
 (defn version-command [args]
   (if (= 1 (count args))

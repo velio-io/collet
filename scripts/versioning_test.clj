@@ -45,6 +45,12 @@
     (catch clojure.lang.ExceptionInfo error
       (boolean (re-find message-pattern (ex-message error))))))
 
+(defn- transaction-state-path [root]
+  (str (fs/path root "target" ".collet" "version-transaction.edn")))
+
+(defn- private-var [symbol]
+  (ns-resolve 'versioning symbol))
+
 (deftest coordinates-version-updates-without-touching-external-dependencies
   (let [{:keys [root graph-path beta-path]}
         (fixture-repository "0.2.8-SNAPSHOT")]
@@ -71,6 +77,109 @@
       (is (thrown-with-message? #"Internal dependency version is stale"
                                 #(versioning/set-version! root "0.2.9-SNAPSHOT")))
       (is (= before (mapv slurp [graph-path alpha-path beta-path])))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest rolls-back-a-partial-replacement-and-retries-safely
+  (let [{:keys [root graph-path alpha-path beta-path]}
+        (fixture-repository "0.2.8-SNAPSHOT")
+        paths [graph-path alpha-path beta-path]
+        before (mapv slurp paths)
+        replace-var (private-var 'replace-source-file!)]
+    (try
+      (is (some? replace-var) "version transactions expose an injectable replacement boundary")
+      (when replace-var
+        (let [replace! @replace-var
+              replacements (atom 0)]
+          (is (thrown-with-message?
+               #"injected replacement failure"
+               #(with-redefs-fn
+                  {replace-var
+                   (fn [temporary path]
+                     (if (= 2 (swap! replacements inc))
+                       (throw (ex-info "injected replacement failure" {:path path}))
+                       (replace! temporary path)))}
+                  (fn []
+                    (versioning/set-version! root "0.2.9-SNAPSHOT")))))
+          (is (= before (mapv slurp paths)))
+          (is (fs/regular-file? (transaction-state-path root)))
+          (is (= [graph-path beta-path]
+                 (mapv :path
+                       (versioning/set-version! root "0.2.9-SNAPSHOT"))))
+          (is (= "0.2.9-SNAPSHOT"
+                 (:version (edn/read-string (slurp graph-path)))))
+          (is (= "0.2.9-SNAPSHOT"
+                 (get-in (edn/read-string (slurp beta-path))
+                         [:deps 'example/alpha :mvn/version])))
+          (is (not (fs/exists? (transaction-state-path root))))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest recovers-a-durable-mixed-state-after-rollback-is-interrupted
+  (let [{:keys [root graph-path beta-path]}
+        (fixture-repository "0.2.8-SNAPSHOT")
+        replace-var (private-var 'replace-source-file!)
+        restore-var (private-var 'restore-source-file!)]
+    (try
+      (is (some? replace-var))
+      (is (some? restore-var))
+      (when (and replace-var restore-var)
+        (let [replace! @replace-var
+              replacements (atom 0)]
+          (is (thrown-with-message?
+               #"injected replacement failure"
+               #(with-redefs-fn
+                  {replace-var
+                   (fn [temporary path]
+                     (if (= 2 (swap! replacements inc))
+                       (throw (ex-info "injected replacement failure" {:path path}))
+                       (replace! temporary path)))
+                   restore-var
+                   (fn [_]
+                     (throw (ex-info "injected rollback interruption" {})))}
+                  (fn []
+                    (versioning/set-version! root "0.2.9-SNAPSHOT")))))
+          (is (= "0.2.9-SNAPSHOT"
+                 (:version (edn/read-string (slurp graph-path)))))
+          (is (= "0.2.8-SNAPSHOT"
+                 (get-in (edn/read-string (slurp beta-path))
+                         [:deps 'example/alpha :mvn/version])))
+          (is (fs/regular-file? (transaction-state-path root)))
+          (versioning/set-version! root "0.2.9-SNAPSHOT")
+          (is (= "0.2.9-SNAPSHOT"
+                 (:version (edn/read-string (slurp graph-path)))))
+          (is (= "0.2.9-SNAPSHOT"
+                 (get-in (edn/read-string (slurp beta-path))
+                         [:deps 'example/alpha :mvn/version])))
+          (is (not (fs/exists? (transaction-state-path root))))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest concurrent-edits-are-preserved-and-block-the-transaction
+  (let [{:keys [root graph-path beta-path]}
+        (fixture-repository "0.2.8-SNAPSHOT")
+        graph-before (slurp graph-path)
+        beta-before (slurp beta-path)
+        beta-edited (str beta-before "\n;; unrelated concurrent edit\n")
+        replace-var (private-var 'replace-source-file!)]
+    (try
+      (is (some? replace-var))
+      (when replace-var
+        (let [replace! @replace-var
+              first-replacement? (atom true)]
+          (is (thrown-with-message?
+               #"Version source changed during transaction"
+               #(with-redefs-fn
+                  {replace-var
+                   (fn [temporary path]
+                     (when (compare-and-set! first-replacement? true false)
+                       (spit beta-path beta-edited))
+                     (replace! temporary path))}
+                  (fn []
+                    (versioning/set-version! root "0.2.9-SNAPSHOT")))))
+          (is (= graph-before (slurp graph-path)))
+          (is (= beta-edited (slurp beta-path)))
+          (is (fs/regular-file? (transaction-state-path root)))))
       (finally
         (fs/delete-tree root)))))
 
