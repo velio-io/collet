@@ -1,4 +1,5 @@
 target
+.worktrees/
 classes
 checkouts
 profiles.clj
