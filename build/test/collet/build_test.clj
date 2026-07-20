@@ -10,6 +10,13 @@
   (fs/create-dirs (fs/parent path))
   (spit (str path) (pr-str value)))
 
+(defn- thrown-with-message? [message-pattern f]
+  (try
+    (f)
+    false
+    (catch clojure.lang.ExceptionInfo error
+      (boolean (re-find message-pattern (ex-message error))))))
+
 (defn- with-workspace [f]
   (let [root (fs/create-temp-dir {:prefix "collet-build-test-"})]
     (try
@@ -35,6 +42,16 @@
                           :kind :uberjar
                           :main 'example.b
                           :outputs {:uberjar "target/b.jar"}}})
+      (write-edn!
+       (fs/path root "pkg-cli" "deps.edn")
+       {:paths ["src"]
+        :deps {'example/pkg-b {:local/root "../pkg-b"}}
+        :collet/artifact {:description "CLI"
+                          :public-namespaces ['example.cli]
+                          :publish? false
+                          :kind :uberjar
+                          :main 'example.cli
+                          :outputs {:uberjar "target/cli.jar"}}})
       (f (str root))
       (finally
         (fs/delete-tree root)))))
@@ -49,10 +66,11 @@
         (when resolve-context
           (let [{:keys [packages version]} (resolve-context root)]
             (is (= "1.2.3" version))
-            (is (= #{'example/pkg-a 'example/pkg-b} (set (keys packages))))
+            (is (= #{'example/pkg-a 'example/pkg-b 'example/pkg-cli}
+                   (set (keys packages))))
             (is (= #{'example/pkg-a}
                    (get-in packages ['example/pkg-b :depends-on])))
-            (is (= [['example/pkg-a] ['example/pkg-b]]
+            (is (= [['example/pkg-a] ['example/pkg-b] ['example/pkg-cli]]
                    (kmono.graph/parallel-topo-sort packages)))
             (is (= :uberjar
                    (get-in packages ['example/pkg-b :artifact :kind])))
@@ -103,3 +121,25 @@
           #(build/install {:module :pkg-a}))
         (is (= "target/pkg-a-1.2.3.jar" (:jar-file @install-opts)))
         (is (= (:fqn package) (:lib @install-opts)))))))
+
+(deftest install-rejects-a-nonpublishable-requested-package-before-its-dependencies
+  (with-workspace
+    (fn [root]
+      (let [{:keys [packages] :as context}
+            (build/resolve-workspace-context! root)
+            built (atom [])
+            installed (atom [])]
+        (with-redefs-fn
+          {(ns-resolve 'collet.build 'resolve-workspace-context!)
+           (fn [] context)
+           (ns-resolve 'collet.build 'build-jar!)
+           (fn [_ package _]
+             (swap! built conj (:fqn package)))
+           #'b/install
+           (fn [opts]
+             (swap! installed conj (:lib opts)))}
+          #(is (thrown-with-message?
+                #"Package is not a publishable Maven artifact"
+                (fn [] (build/install {:module :pkg-cli})))))
+        (is (empty? @built))
+        (is (empty? @installed))))))

@@ -25,17 +25,21 @@
 
 (defn- fixture-repository [internal-version]
   (let [root (fs/create-temp-dir {:prefix "versioning-test-"})
+        root-deps-path (fs/path root "deps.edn")
         graph-path (fs/path root "build" "modules.edn")
         alpha-path (fs/path root "alpha" "deps.edn")
         beta-path (fs/path root "beta" "deps.edn")]
     (fs/create-dirs (fs/parent graph-path))
     (fs/create-dirs (fs/parent alpha-path))
     (fs/create-dirs (fs/parent beta-path))
+    (spit (str root-deps-path)
+          "{:collet/project {:version \"0.2.8-SNAPSHOT\"}}\n")
     (spit (str graph-path) graph-text)
     (spit (str alpha-path) "{:deps {}}\n")
     (spit (str beta-path) (str beta-deps-text))
     (spit (str beta-path) (str/replace beta-deps-text "0.2.8-SNAPSHOT" internal-version))
     {:root (str root)
+     :root-deps-path (str root-deps-path)
      :graph-path (str graph-path)
      :alpha-path (str alpha-path)
      :beta-path (str beta-path)}))
@@ -54,11 +58,14 @@
   (ns-resolve 'versioning symbol))
 
 (deftest coordinates-version-updates-without-touching-external-dependencies
-  (let [{:keys [root graph-path beta-path]}
+  (let [{:keys [root root-deps-path graph-path beta-path]}
         (fixture-repository "0.2.8-SNAPSHOT")]
     (try
-      (is (= [graph-path beta-path]
+      (is (= [root-deps-path graph-path beta-path]
              (mapv :path (versioning/set-version! root "0.2.9-SNAPSHOT"))))
+      (is (= "0.2.9-SNAPSHOT"
+             (get-in (edn/read-string (slurp root-deps-path))
+                     [:collet/project :version])))
       (is (= "0.2.9-SNAPSHOT" (:version (edn/read-string (slurp graph-path)))))
       (is (= "0.2.9-SNAPSHOT"
              (get-in (edn/read-string (slurp beta-path))
@@ -68,6 +75,20 @@
       (is (.contains (slurp beta-path)
                      "nested/lib {:mvn/version \"8.8.8\" :metadata {:version \"leave\"}}"))
       (is (= [] (versioning/set-version! root "0.2.9-SNAPSHOT")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest rejects-a-root-and-build-version-drift-before-writing-any-file
+  (let [{:keys [root root-deps-path graph-path alpha-path beta-path]}
+        (fixture-repository "0.2.8-SNAPSHOT")
+        paths [root-deps-path graph-path alpha-path beta-path]
+        before (mapv slurp paths)]
+    (try
+      (spit root-deps-path "{:collet/project {:version \"0.2.7-SNAPSHOT\"}}\n")
+      (is (thrown-with-message? #"Root and build workspace versions differ"
+                                #(versioning/set-version! root "0.2.9-SNAPSHOT")))
+      (is (= (assoc before 0 (slurp root-deps-path))
+             (mapv slurp paths)))
       (finally
         (fs/delete-tree root)))))
 
@@ -104,9 +125,9 @@
         (fs/delete-tree root)))))
 
 (deftest rolls-back-a-partial-replacement-and-retries-safely
-  (let [{:keys [root graph-path alpha-path beta-path]}
+  (let [{:keys [root root-deps-path graph-path alpha-path beta-path]}
         (fixture-repository "0.2.8-SNAPSHOT")
-        paths [graph-path alpha-path beta-path]
+        paths [root-deps-path graph-path alpha-path beta-path]
         before (mapv slurp paths)
         replace-var (private-var 'replace-source-file!)]
     (try
@@ -126,7 +147,7 @@
                     (versioning/set-version! root "0.2.9-SNAPSHOT")))))
           (is (= before (mapv slurp paths)))
           (is (fs/regular-file? (transaction-state-path root)))
-          (is (= [graph-path beta-path]
+          (is (= [root-deps-path graph-path beta-path]
                  (mapv :path
                        (versioning/set-version! root "0.2.9-SNAPSHOT"))))
           (is (= "0.2.9-SNAPSHOT"
@@ -154,7 +175,7 @@
                #(with-redefs-fn
                   {replace-var
                    (fn [temporary path]
-                     (if (= 2 (swap! replacements inc))
+                     (if (= 3 (swap! replacements inc))
                        (throw (ex-info "injected replacement failure" {:path path}))
                        (replace! temporary path)))
                    restore-var

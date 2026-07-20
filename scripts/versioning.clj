@@ -63,6 +63,17 @@
 (defn- graph-path [root]
   (str (fs/path root "build" "modules.edn")))
 
+(defn- root-deps-path [root]
+  (str (fs/path root "deps.edn")))
+
+(defn- root-project-version [root]
+  (let [version (get-in (read-edn-file (root-deps-path root))
+                        [:collet/project :version])]
+    (when-not (string? version)
+      (throw (ex-info "Root workspace version is required"
+                      {:path (root-deps-path root)})))
+    version))
+
 (defn- module-configs [graph]
   (let [modules (:modules graph)]
     (if (seq (:module-order graph))
@@ -99,10 +110,19 @@
 
 (defn derive-version-update-plan [root new-version]
   (parse-version new-version)
-  (let [graph-path (graph-path root)
+  (let [root-deps-path (root-deps-path root)
+        root-deps-text (slurp root-deps-path)
+        root-version (root-project-version root)
+        graph-path (graph-path root)
         graph-text (slurp graph-path)
         graph (edn/read-string graph-text)
         old-version (:version graph)
+        _ (when-not (= root-version old-version)
+            (throw (ex-info "Root and build workspace versions differ"
+                            {:root-path root-deps-path
+                             :root-version root-version
+                             :build-path graph-path
+                             :build-version old-version})))
         _ (parse-version old-version)
         modules (module-configs graph)
         internal-libs (set (map :lib modules))
@@ -112,7 +132,12 @@
         changes
         (vec (concat
               (when-not (= old-version new-version)
-                [{:path graph-path
+                [{:path root-deps-path
+                  :before root-deps-text
+                  :after (replace-value root-deps-text
+                                        [:collet/project :version]
+                                        new-version)}
+                 {:path graph-path
                   :before graph-text
                   :after (replace-value graph-text [:version] new-version)}])
               (keep (fn [{:keys [path text deps]}]
@@ -143,10 +168,15 @@
    (derive-version-update-plan root new-version)))
 
 (defn- validate-written-versions! [root new-version]
-  (let [graph (read-edn-file (graph-path root))
+  (let [root-version (root-project-version root)
+        graph (read-edn-file (graph-path root))
         modules (module-configs graph)
         internal-libs (set (map :lib modules))
         pins (internal-pins (dependency-files root graph) internal-libs)]
+    (when-not (= new-version root-version)
+      (throw (ex-info "Root workspace version was not written"
+                      {:expected new-version
+                       :actual root-version})))
     (when-not (= new-version (:version graph))
       (throw (ex-info "Workspace version was not written"
                       {:expected new-version

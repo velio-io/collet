@@ -201,6 +201,14 @@
     (is (= 4 (count (re-seq #":source-revision" dockerfile)))
         "both the core install and app uberjar receive source identity")))
 
+(deftest docker-build-uses-the-root-kmono-build-only
+  (let [dockerfile (slurp "collet-app/Dockerfile")]
+    (is (.contains dockerfile "COPY deps.edn /build/deps.edn"))
+    (is (.contains dockerfile "clojure -T:build install :module :collet-core"))
+    (is (.contains dockerfile "clojure -T:build build :module :collet-app"))
+    (is (not (re-find #"(?m)^RUN cd /build/collet-" dockerfile))
+        "Docker builds must not invoke a module-local tools.build alias")))
+
 (deftest ci-pins-exact-clojure-and-babashka-versions
   (let [workflow (slurp ".github/workflows/ci.yml")]
     (is (not (re-find #"(?m)^\s+(?:cli|bb):\s+latest\s*$" workflow)))

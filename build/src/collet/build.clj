@@ -328,12 +328,14 @@
   "Build and install publishable workspace packages in dependency order."
   [{:keys [module] :as opts}]
   (let [{:keys [packages] :as context} (resolve-workspace-context!)
+        requested (package-fqn packages module)
         selected (select-packages packages module)
         publishable (kmono.graph/filter-by
                      #(get-in % [:artifact :publish?])
                      selected)
         results (atom {})]
-    (when (and module (empty? publishable))
+    (when (and requested
+               (not (get-in packages [requested :artifact :publish?])))
       (throw (ex-info "Package is not a publishable Maven artifact"
                       {:module module})))
     (kmono.build/for-each-package publishable

@@ -9,26 +9,25 @@ ARG COLLET_REVISION
 WORKDIR /build
 
 COPY LICENSE /build/LICENSE
+COPY deps.edn /build/deps.edn
 COPY build /build/build
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
-RUN cd /build/collet-core && \
-    if [ -n "${COLLET_VERSION}" ]; then \
-      clojure -T:build install \
+RUN if [ -n "${COLLET_VERSION}" ]; then \
+      clojure -T:build install :module :collet-core \
         :expected-version "\"${COLLET_VERSION}\"" \
         :source-revision "\"${COLLET_REVISION}\""; \
     else \
-      clojure -T:build install \
+      clojure -T:build install :module :collet-core \
         :source-revision "\"${COLLET_REVISION}\""; \
     fi
-RUN cd /build/collet-app && \
-    if [ -n "${COLLET_VERSION}" ]; then \
-      clojure -T:build uberjar \
+RUN if [ -n "${COLLET_VERSION}" ]; then \
+      clojure -T:build build :module :collet-app \
         :expected-version "\"${COLLET_VERSION}\"" \
         :source-revision "\"${COLLET_REVISION}\""; \
     else \
-      clojure -T:build uberjar \
+      clojure -T:build build :module :collet-app \
         :source-revision "\"${COLLET_REVISION}\""; \
     fi
 
