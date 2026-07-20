@@ -166,7 +166,7 @@
 
 (deftest test-read-dataset
   (let [columns (sut/get-columns [{:id 1 :name "Alice" :score (float 95.5) :obj ["1" "2" "3"]}
-                                  {:id 2 :name "Bob" :score (float 85.0) :obj [3 4 5]}])]
+                                  {:id 2 :name "Bob" :score (float 85.0) :obj ["3" "4" "5"]}])]
     (with-open [writer (sut/make-writer "tmp/test.arrow" columns)]
       (sut/write writer [{:id 1 :name "Alice" :score (float 95.5) :obj ["item1" "item2" "item3"]}
                          {:id 2 :name "Bob" :score (float 85.0) :obj ["item3" "item4" "item5"]}])
@@ -185,8 +185,9 @@
 
 (deftest test-read-dataset-all-types
   (let [uuid       (random-uuid)
-        local-time (LocalTime/now)
-        instant    (Instant/now)
+        local-date (LocalDate/of 2025 1 2)
+        local-time (LocalTime/of 12 34 56 789000000)
+        instant    (Instant/ofEpochSecond 123 456000000)
         data       [{:instant            instant
                      :epoch-milliseconds instant
                      :epoch-microseconds instant
@@ -202,8 +203,8 @@
                      :int64              -922337203685477580
                      :float32            3.14
                      :float64            3.141592653589793
-                     :epoch-days         (LocalDate/now)
-                     :local-date         (LocalDate/now)
+                     :epoch-days         local-date
+                     :local-date         local-date
                      :local-time         local-time
                      :time-nanoseconds   local-time
                      :time-microseconds  local-time
@@ -241,8 +242,8 @@
       (is (= (record :uuid) (str uuid)))
       (is (= (record :text) "text"))
       (is (= (record :encoded-text) "encoded"))
-      (is (= (record :epoch-days) (LocalDate/now)))
-      (is (= (record :local-date) (LocalDate/now)))
+      (is (= (record :epoch-days) local-date))
+      (is (= (record :local-date) local-date))
       (is (= (record :local-time) local-time))
       (is (= (record :time-nanoseconds) local-time))
       (is (= (record :time-microseconds) local-time))
