@@ -115,7 +115,7 @@
                   :after (replace-value graph-text [:version] new-version)}])
               (keep (fn [{:keys [path text deps]}]
                       (let [updated-text
-                            (reduce (fn [current-text [lib config]]
+                            (reduce (fn [current-text [lib _]]
                                       (if (contains? internal-libs lib)
                                         (replace-value current-text
                                                        [:deps lib :mvn/version]
