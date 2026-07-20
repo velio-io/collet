@@ -90,7 +90,9 @@
                       ":source-revision"
                       "org.opencontainers.image.version"
                       "org.opencontainers.image.revision"]]
-      (is (.contains dockerfile fragment) fragment))))
+      (is (.contains dockerfile fragment) fragment))
+    (is (= 4 (count (re-seq #":source-revision" dockerfile)))
+        "both the core install and app uberjar receive source identity")))
 
 (deftest ci-pins-exact-clojure-and-babashka-versions
   (let [workflow (slurp ".github/workflows/ci.yml")]

@@ -69,52 +69,94 @@ The release command performs the following workflow:
    `Release <version>`.
 3. Runs the complete unit, Docker integration, build, isolated-consumer, and
    artifact verification gates.
-4. Publishes all Maven artifacts to Clojars in dependency order.
-5. Creates one `v<version>` tag pointing to the release commit.
-6. Changes every module and internal Maven pin to the next snapshot and commits
+4. Rechecks that the worktree is clean, `HEAD` is still the release commit, the
+   graph and pins still have the release version, and every frozen JAR/POM has the
+   captured Maven coordinates and source identity.
+5. Publishes all Maven artifacts to Clojars in dependency order.
+6. Creates one `v<version>` tag pointing to the release commit.
+7. Changes every module and internal Maven pin to the next snapshot and commits
    `Begin <version>-SNAPSHOT`.
-7. Atomically pushes `main` and the release tag.
+8. Atomically pushes `main` and the release tag.
 
 The CLI distribution is not a Maven publication. It is built and verified during
 the release gate but is not uploaded by `bb release`.
 
 ## Failure recovery
 
-Nothing is published or pushed when a deterministic preflight validation fails.
-After the release commit exists, a failing test, verification, or staging gate still
-stops before publication, tagging, next-snapshot mutation, or pushing; the local
-release commit remains available to fix and amend before retrying.
+Nothing is published or pushed when preflight fails. If setting the release version,
+committing, testing, verification, staging, or the final source check fails before
+the first Maven deployment, `bb release` rolls back only its version paths and
+release commit. It preserves unrelated worktree changes. Recovery refuses to move
+`HEAD` when it no longer identifies the release-owned commit, so an unexpected Git
+change is retained for manual inspection instead of being reset.
 
-Publication is irreversible and occurs one Maven coordinate at a time. If Clojars
-or the network fails partway through, the command stops before creating a tag,
-bumping the next snapshot, or pushing. It reports the coordinates that completed
-and the coordinate that failed so the release can be reconciled before continuing.
+The command records recovery state in `target/.collet/release-state.edn` and freezes
+the exact deployable JAR/POM pairs under `target/.collet/release-artifacts/`. Once
+Maven deployment starts, do not delete or edit those files. Rerun the exact same
+command (`bb release`, `bb release :minor`, or `bb release :major`) to resume. The
+command skips coordinates recorded as complete, checks an in-flight coordinate on
+Clojars, recognizes an exact JAR/POM hash match as complete, and deploys only when
+both remote files are absent. Tag, next-snapshot commit, and atomic-push failures
+are resumed from their recorded phase without redeploying completed coordinates.
 
-If only the final atomic push fails, both commits and the release tag remain local;
-retry the reported atomic Git push without republishing artifacts.
+Remote publication is irreversible. A partial coordinate, a remote hash mismatch,
+or an unavailable remote status stops automatic recovery. Inspect `:completed`,
+`:in-flight`, and the frozen `:jar-sha256`/`:pom-sha256` values in the state file;
+compare both remote files with the frozen artifacts, and reconcile the Clojars
+coordinate before rerunning. Do not delete the state file to force a fresh release
+or attempt to overwrite an existing mismatched coordinate. If a published artifact
+cannot be reconciled exactly, stop and choose a new release version with the
+maintainers. Successful completion removes the recovery state and frozen copies.
 
 ## GitHub and CLI distribution
 
-After the Maven release succeeds, create the CLI GitHub release explicitly from the
-same coordinated tag and attach the preserved CLI archive. This is not performed by
-`bb release`:
+After the Maven release succeeds, build the CLI archive from a separate, clean,
+detached worktree of the coordinated tag. Verify its embedded version, Git revision,
+and Maven metadata before uploading it. This is not performed by `bb release`:
 
 ```shell
-bb build collet-cli
+tag=v0.2.8
+cli_worktree=$(mktemp -d)
+git worktree add --detach "$cli_worktree" "$tag"
+cd "$cli_worktree"
 
-gh release create v0.2.8 \
+bb build collet-cli
+bb release:verify-cli "$tag"
+
+gh release create "$tag" \
   collet-cli/target/collet-cli.tar.gz
 ```
 
+Return to the original checkout before removing the temporary worktree with
+`git worktree remove "$cli_worktree"`.
+
 ## Docker publication
 
-Build and push the application image separately using the same release version.
-`bb release` never pushes Docker images:
+Use a new clean detached tag worktree for the application image as well. Pass the
+tag-derived version and exact tag commit into the build, then verify both OCI labels
+and the embedded application JAR identity before pushing. `bb release` never builds
+or pushes Docker images:
 
 ```shell
-docker build -f collet-app/Dockerfile -t <registry>/collet:0.2.8 .
-docker push <registry>/collet:0.2.8
+tag=v0.2.8
+version=${tag#v}
+docker_worktree=$(mktemp -d)
+git worktree add --detach "$docker_worktree" "$tag"
+cd "$docker_worktree"
+revision=$(git rev-parse "$tag^{}")
+registry=registry.example.com/your-team
+image="$registry/collet:$version"
+
+docker build -f collet-app/Dockerfile \
+  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_REVISION="$revision" \
+  -t "$image" .
+bb release:verify-image "$tag" "$image"
+docker push "$image"
 ```
+
+Return to the original checkout before removing this temporary worktree with
+`git worktree remove "$docker_worktree"`.
 
 See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime configuration and
 deployment details.

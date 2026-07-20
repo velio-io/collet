@@ -13,7 +13,15 @@ COPY build /build/build
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
-RUN cd /build/collet-core && clojure -T:build install
+RUN cd /build/collet-core && \
+    if [ -n "${COLLET_VERSION}" ]; then \
+      clojure -T:build install \
+        :expected-version "\"${COLLET_VERSION}\"" \
+        :source-revision "\"${COLLET_REVISION}\""; \
+    else \
+      clojure -T:build install \
+        :source-revision "\"${COLLET_REVISION}\""; \
+    fi
 RUN cd /build/collet-app && \
     if [ -n "${COLLET_VERSION}" ]; then \
       clojure -T:build uberjar \

@@ -50,4 +50,12 @@
 
   release
   {:doc "Release all Maven artifacts: bb release [:patch|:minor|:major]"
-   :task (release/release-command *command-line-args*)}}}
+   :task (release/release-command *command-line-args*)}
+
+  release:verify-cli
+  {:doc "Verify CLI outputs from a detached release-tag checkout"
+   :task (release/verify-cli-command *command-line-args*)}
+
+  release:verify-image
+  {:doc "Verify a local Docker image against a release tag"
+   :task (release/verify-image-command *command-line-args*)}}}
