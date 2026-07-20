@@ -1,70 +1,111 @@
-# Releasing modules
+# Releasing Collet
 
-Release tooling is implemented with Babashka and `deps-deploy` 0.2.5. It publishes
-Maven artifacts only. It does not push commits or tags, create GitHub releases, or
-build/push Docker images.
+Collet uses one coordinated version for every module, application artifact, and CLI
+distribution. The version is declared once in `build/modules.edn`; internal Maven
+coordinates in module `deps.edn` files are synchronized by repository tooling and
+must never be edited individually.
+
+Maven publication, GitHub/CLI distribution, and Docker publication are separate
+operations. This keeps credentials and failure recovery isolated while allowing all
+outputs to share the same version and Git tag.
 
 ## Prerequisites
 
 - JDK 21 or newer, Clojure CLI, and Babashka.
-- Docker when the selected module has integration tests.
-- Clojars credentials in `CLOJARS_USERNAME` and `CLOJARS_PASSWORD` (a Clojars deploy
-  token is used as the password).
-- A clean Git worktree.
+- Docker for the complete integration and artifact verification gates.
+- Clojars credentials in `CLOJARS_USERNAME` and `CLOJARS_PASSWORD`; use a Clojars
+  deploy token as the password.
+- The `main` branch checked out with a clean worktree and no commits ahead of or
+  behind `origin/main`.
 
-## Preparing versions
+## Coordinated versions
 
-`build/modules.edn` is the version authority. Update versions intentionally before
-publication:
-
-1. Replace the target module's `-SNAPSHOT` version with the exact release version.
-2. Update its own base `deps.edn` if it pins changed internal coordinates.
-3. Update every dependent module's central graph version and base Maven coordinate
-   when that dependency will be released.
-4. For `collet-actions`, pin every action module to an exact non-snapshot version.
-5. Commit the version changes and confirm the worktree is clean.
-
-Release tasks never edit a version, dependency, source file, or documentation file.
-
-## Commands
-
-Release one artifact:
+Use `bb version` when changing the development target without publishing:
 
 ```shell
-bb release collet-action-http
+bb version 0.3.0-SNAPSHOT
 ```
 
-Release all publishable Maven artifacts in graph order:
+The command validates the requested version, updates the shared graph version and
+every internal Maven pin as one operation, and rejects any stale or unexpected
+internal coordinate. It does not commit, tag, publish, or push.
+
+## Maven release
+
+Release the current snapshot with the default patch progression:
 
 ```shell
-bb release:all
+bb release
 ```
 
-The CLI is a distribution, not a Maven publication, and is excluded from
-`release:all`.
+The optional level controls the next development snapshot:
 
-For each module, the release task:
+```shell
+bb release :patch
+bb release :minor
+bb release :major
+```
 
-1. Requires a clean worktree and a new tag name.
-2. Rejects snapshot versions in the module's complete internal dependency closure.
-3. Confirms base `deps.edn` pins the graph's exact internal versions.
-4. Runs the module's full tests in an isolated JVM.
-5. Builds and installs its library JAR and verifies POM/JAR/dependency-tree contracts.
-6. Deploys the explicit JAR and POM through `deps-deploy`.
-7. Creates the local tag `<artifact>-v<version>` only after deployment succeeds.
+For a current version of `0.2.8-SNAPSHOT`, every command releases `0.2.8`. The next
+development version is selected as follows:
 
-A single-module release builds against a fresh Maven repository, so every internal
-non-snapshot coordinate must already resolve from the configured remote repositories;
-a same-version artifact installed only in the developer's local cache cannot satisfy
-the gate.
+| Level | Next version |
+|---|---|
+| `:patch` | `0.2.9-SNAPSHOT` |
+| `:minor` | `0.3.0-SNAPSHOT` |
+| `:major` | `1.0.0-SNAPSHOT` |
 
-`release:all` uses a fresh staging repository and prepares modules in graph order. It
-completes version/tag preflight, tests, builds, and artifact verification for the
-entire release set before the first remote deployment. An external repository or
-network failure can still interrupt the later deploy phase, but a deterministic
-failure in a later module cannot cause earlier modules to be published first.
+The release command performs the following workflow:
 
-Inspect and push the resulting tags explicitly after all intended publications have
-been confirmed. Build and publish the Docker image using the separate steps in
-[`collet-app/deploy.md`](../collet-app/deploy.md), and attach the preserved CLI archive
-to a GitHub release only as a separate deliberate operation.
+1. Confirms the branch, worktree, remote synchronization, credentials, versions,
+   internal dependency pins, and absence of the release tag.
+2. Changes every module and internal Maven pin to the release version and commits
+   `Release <version>`.
+3. Runs the complete unit, Docker integration, build, isolated-consumer, and
+   artifact verification gates.
+4. Publishes all Maven artifacts to Clojars in dependency order.
+5. Creates one `v<version>` tag pointing to the release commit.
+6. Changes every module and internal Maven pin to the next snapshot and commits
+   `Begin <version>-SNAPSHOT`.
+7. Atomically pushes `main` and the release tag.
+
+The CLI distribution is not a Maven publication. It is built and verified during
+the release gate but is not uploaded by `bb release`.
+
+## Failure recovery
+
+Nothing is published or pushed when a deterministic validation step fails. The
+local release commit remains available so the problem can be fixed and the release
+commit amended before retrying.
+
+Publication is irreversible and occurs one Maven coordinate at a time. If Clojars
+or the network fails partway through, the command stops before creating a tag,
+bumping the next snapshot, or pushing. It reports the coordinates that completed
+and the coordinate that failed so the release can be reconciled before continuing.
+
+If only the final atomic push fails, both commits and the release tag remain local;
+retry the reported atomic Git push without republishing artifacts.
+
+## GitHub and CLI distribution
+
+After the Maven release succeeds, create the GitHub release explicitly from the
+same tag and attach the preserved CLI archive:
+
+```shell
+bb build collet-cli
+
+gh release create v0.2.8 \
+  collet-cli/target/collet-cli.tar.gz
+```
+
+## Docker publication
+
+Build and publish the application image separately using the same release version:
+
+```shell
+docker build -f collet-app/Dockerfile -t <registry>/collet:0.2.8 .
+docker push <registry>/collet:0.2.8
+```
+
+See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime configuration and
+deployment details.

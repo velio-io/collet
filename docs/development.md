@@ -1,8 +1,8 @@
 # Development
 
-Collet is a Clojure CLI workspace. Shared metadata lives in `build/modules.edn`,
-shared `tools.build` behavior lives in `build-support`, and every public or deployable
-module owns a thin `build.clj` and `deps.edn`.
+Collet is a Clojure CLI workspace. Shared metadata and `tools.build` behavior live
+under `build/`, reusable unpublished test fixtures live in `test-fixtures/`, and
+every public or deployable module owns a thin `build.clj` and `deps.edn`.
 
 ## Prerequisites
 
@@ -30,8 +30,8 @@ Run commands from the repository root:
 | `bb build [module]` | Builds one module or every module in dependency order. |
 | `bb install [module]` | Installs one publishable module and its internal dependencies, or all publishable modules. |
 | `bb verify` | Verifies POMs, JARs, dependency isolation, isolated Maven consumers, uberjars, the CLI archive, and legacy-build removal. |
-| `bb release <module>` | Runs the guarded release workflow for one Maven artifact. |
-| `bb release:all` | Releases publishable modules in topological order. |
+| `bb version <version>` | Updates the coordinated version and every internal Maven pin without committing or publishing. |
+| `bb release [:patch\|:minor\|:major]` | Runs the guarded coordinated Maven release and advances the next snapshot. |
 
 Module names are the keys in `build/modules.edn`, for example `collet-core`,
 `collet-action-http`, `collet-actions`, `collet-app`, and `collet-cli`.
@@ -54,7 +54,7 @@ create and remove their own fixtures; no pre-existing `tmp` directory is require
 ## Changing a module
 
 Keep runtime implementation and module-specific tests/resources in the owning
-directory. Put reusable, unpublished test fixtures in `test-support`. When changing
+directory. Put reusable, unpublished test fixtures in `test-fixtures`. When changing
 dependencies or module boundaries:
 
 1. Update the module's base Maven coordinate dependencies in its `deps.edn`.
