@@ -9,14 +9,16 @@
    [diehard.core :as dh]
    [diehard.rate-limiter :as rl])
   (:import
-   [java.io InputStream]))
+   [java.io StringReader]))
 
 
 (defn read-json
   "Reads a JSON object from an input stream and optionally keywordizes keys."
-  [^InputStream input keywordize]
+  [input keywordize]
   (when (some? input)
-    (with-open [rdr (io/reader input)]
+    (with-open [^java.io.Reader rdr (if (string? input)
+                                      (StringReader. input)
+                                      (io/reader input))]
       (if keywordize
         (charred/read-json rdr :key-fn keyword)
         (charred/read-json rdr)))))

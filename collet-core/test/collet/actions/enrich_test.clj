@@ -3,11 +3,14 @@
    [clojure.test :refer :all]
    [collet.core :as collet]
    [collet.actions.enrich :as sut]
+   [collet.test-http-server :as http]
    [collet.test-fixtures :as tf]
    [collet.utils :as utils]))
 
 
-(use-fixtures :once (tf/instrument! 'collet.actions.enrich))
+(use-fixtures :once
+  http/with-server
+  (tf/instrument! 'collet.actions.enrich))
 
 
 (def test-events-data
@@ -29,10 +32,9 @@
                               :target    [:inputs :area-events]
                               :action    :collet.actions.http/request
                               :selectors {'artist-id [:path :to :artist :id]}
-                              :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
+                              :params    {:url          [(http/musicbrainz-url "/artist/%s") 'artist-id]
                                           :accept       :json
                                           :as           :json
-                                          :rate         0.5
                                           :query-params {:inc "ratings"}}
                               :return    [:body]
                               :fold-in   [:artist]})]
@@ -81,10 +83,9 @@
                                                 :when      [:not-nil? [:$enrich/item :artist :id]]
                                                 :action    :collet.actions.http/request
                                                 :selectors {'artist-id [:$enrich/item :artist :id]}
-                                                :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
+                                                :params    {:url          [(http/musicbrainz-url "/artist/%s") 'artist-id]
                                                             :accept       :json
                                                             :as           :json
-                                                            :rate         0.5
                                                             :query-params {:inc "ratings"}}
                                                 :return    [:body]
                                                 :fold-in   [:artist]}]

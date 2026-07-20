@@ -13,7 +13,7 @@
 
 
 (defn localstack-container []
-  (-> (tc/create {:image-name    "localstack/localstack"
+  (-> (tc/create {:image-name    "localstack/localstack:4.14.0"
                   :exposed-ports [4566 4510]
                   :wait-for      {:wait-strategy :http
                                   :path          "/_localstack/health"

@@ -3,11 +3,14 @@
    [clojure.string :as string]
    [clojure.test :refer :all]
    [collet.core :as collet]
+   [collet.test-http-server :as http]
    [collet.test-fixtures :as tf]
    [collet.actions.odata :as sut]))
 
 
-(use-fixtures :once (tf/instrument! 'collet.actions.odata))
+(use-fixtures :once
+  http/with-server
+  (tf/instrument! 'collet.actions.odata))
 
 
 (deftest odata-segment-parsing-test
@@ -239,7 +242,7 @@
 (deftest odata-request-test
   (testing "request map"
     (let [req-map (sut/make-odata-request-map
-                   {:service-url "http://services.odata.org/V4/TripPinService/"
+                   {:service-url (str (http/odata-url) "/")
                     :segment     [:People]
                     :select      [:FirstName :LastName]
                     :expand      [[:Friends {:select [:UserName]}]]
@@ -248,7 +251,7 @@
                     :order       [{:segment [:length :FirstName]
                                    :dir     :desc}]
                     :count       true})]
-      (is {:url          "http://services.odata.org/V4/TripPinService/People",
+      (is {:url          (str (http/odata-url) "/People"),
            :query-params {:$filter  "AddressInfo/any(x:startswith(x/City/Name, 'B'))",
                           :$select  "FirstName,LastName",
                           :$expand  "Friends($select=UserName)",
@@ -258,7 +261,7 @@
 
   (testing "get the total count of records"
     (let [result (sut/odata-request
-                  {:service-url     "http://services.odata.org/V4/TripPinService/"
+                  {:service-url     (str (http/odata-url) "/")
                    :segment         [:People]
                    :get-total-count true}
                   nil)]
@@ -266,7 +269,7 @@
 
   (testing "performing request"
     (let [result (sut/odata-request
-                  {:service-url "http://services.odata.org/V4/TripPinService/"
+                  {:service-url (str (http/odata-url) "/")
                    :segment     [:People]
                    :select      [:FirstName :LastName :AddressInfo]
                    :expand      [[:Friends {:select [:UserName]}]]
@@ -288,17 +291,18 @@
 
 (deftest odata-pipeline-test
   (let [total-count (:body (sut/odata-request
-                            {:service-url     "http://services.odata.org/V4/TripPinService/"
+                            {:service-url     (str (http/odata-url) "/")
                              :segment         [:Airports]
                              :get-total-count true}
                             nil))]
     (testing "server side pagination"
-      (let [pipeline-spec {:name  :airports-pipeline
+      (let [pipeline-spec {:name      :airports-pipeline
+                           :use-arrow false
                            :tasks [{:name       :airports
                                     :keep-state true
                                     :actions    [{:type   :collet.actions.odata/request
                                                   :name   :airports-request
-                                                  :params {:service-url      "http://services.odata.org/V4/TripPinService/"
+                                                  :params {:service-url      (str (http/odata-url) "/")
                                                            :segment          [:Airports]
                                                            :order            [:IcaoCode]
                                                            :follow-next-link true}}]
@@ -313,7 +317,8 @@
         (is (= total-count (count (flatten airports))))))
 
     (testing "client side pagination"
-      (let [pipeline-spec {:name  :airports-pipeline
+      (let [pipeline-spec {:name      :airports-pipeline
+                           :use-arrow false
                            :tasks [{:name       :airports
                                     :keep-state true
                                     :actions    [{:type      :counter
@@ -324,7 +329,7 @@
                                                   :name      :airports-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}
-                                                  :params    {:service-url "http://services.odata.org/V4/TripPinService/"
+                                                  :params    {:service-url (str (http/odata-url) "/")
                                                               :segment     [:Airports]
                                                               :order       [:IcaoCode]
                                                               :top         'bs
@@ -341,12 +346,13 @@
         (is (= total-count (count (flatten airports))))))
 
     (testing "manual client side pagination"
-      (let [pipeline-spec {:name  :airports-pipeline
+      (let [pipeline-spec {:name      :airports-pipeline
+                           :use-arrow false
                            :tasks [{:name       :airports
                                     :keep-state true
                                     :setup      [{:type   :collet.actions.odata/request
                                                   :name   :total-airports-count
-                                                  :params {:service-url     "http://services.odata.org/V4/TripPinService/"
+                                                  :params {:service-url     (str (http/odata-url) "/")
                                                            :segment         [:Airports]
                                                            :get-total-count true}
                                                   :return [:body]}]
@@ -358,7 +364,7 @@
                                                   :name      :airports-request
                                                   :selectors {'bs   [:config :batch-size]
                                                               'skip [:state :skip]}
-                                                  :params    {:service-url "http://services.odata.org/V4/TripPinService/"
+                                                  :params    {:service-url (str (http/odata-url) "/")
                                                               :segment     [:Airports]
                                                               :order       [:IcaoCode]
                                                               :top         'bs
@@ -381,3 +387,17 @@
                (count airports)))
         (is (= 4 (count (first airports))))
         (is (= total-count (count (flatten airports))))))))
+
+
+(deftest odata-server-pagination-contract-test
+  (let [params   {:service-url      (str (http/odata-url) "/")
+                  :segment          [:Airports]
+                  :order            [:IcaoCode]
+                  :follow-next-link true}
+        first    (sut/odata-request params nil)
+        second   (sut/odata-request params first)
+        first-url (get-in first [:body "@odata.nextLink"])]
+    (is (= 8 (count (get-in first [:body "value"]))))
+    (is (string/starts-with? first-url (http/odata-url)))
+    (is (= 2 (count (get-in second [:body "value"]))))
+    (is (nil? (get-in second [:body "@odata.nextLink"])))))

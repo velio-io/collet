@@ -44,7 +44,9 @@
    "--enable-native-access=ALL-UNNAMED"]
 
   :profiles
-  {:dev     {:dependencies [[clj-test-containers "0.7.4"]]}
+  {:dev     {:test-paths ["test" "../test-support/src"]
+             :dependencies [[clj-test-containers "0.7.4"]
+                            [org.testcontainers/testcontainers "1.21.4"]]}
 
    :uberjar {:uberjar-name "collet.jar"
              :aot          :all}}
@@ -63,4 +65,3 @@
    ["change" "version" "leiningen.release/bump-version"]
    ["vcs" "commit"]
    ["vcs" "push"]])
-

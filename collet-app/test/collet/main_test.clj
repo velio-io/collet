@@ -13,7 +13,7 @@
 
 
 (defn localstack-container []
-  (-> (tc/create {:image-name    "localstack/localstack"
+  (-> (tc/create {:image-name    "localstack/localstack:4.14.0"
                   :exposed-ports [4566 4510]
                   :wait-for      {:wait-strategy :http
                                   :path          "/_localstack/health"
@@ -127,6 +127,6 @@
 
 (deftest pipeline-execution-test
   (let [{:keys [exit out]}
-        (sh "/usr/local/bin/lein" "run" "-s" "configs/sample-pipeline.edn" "-c" "{}")]
+        (sh "lein" "run" "-s" "configs/sample-pipeline.edn" "-c" "{}")]
     (is (zero? exit))
     (is (string/includes? out "Pipeline completed."))))

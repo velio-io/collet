@@ -50,10 +50,12 @@
 
   :profiles
   {:dev     {:source-paths ["dev/src"]
+             :test-paths ["test" "../test-support/src"]
              :repl-options {:init-ns dev}
              :dependencies [[eftest "0.6.0"]
                             [vvvvalvalval/scope-capture "0.3.3"]
                             [clj-test-containers "0.7.4"]
+                            [org.testcontainers/testcontainers "1.21.4"]
                             [djblue/portal "0.58.2"]]}
    :uberjar {:aot :all}}
 

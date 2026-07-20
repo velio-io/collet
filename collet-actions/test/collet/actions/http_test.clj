@@ -3,26 +3,26 @@
    [clojure.test :refer :all]
    [collet.core :as collet]
    [collet.actions.http :as sut]
+   [collet.test-http-server :as http]
    [collet.test-fixtures :as tf]
    [tech.v3.dataset :as ds]))
 
 
-(use-fixtures :once (tf/instrument! 'collet.actions.http))
-
-
-;; API docs https://musicbrainz.org/doc/MusicBrainz_API
+(use-fixtures :once
+  http/with-server
+  (tf/instrument! 'collet.actions.http))
 
 
 (deftest http-request-test
   (testing "simple http request"
-    (let [actual (sut/make-request {:url "https://musicbrainz.org/ws/2/genre/all?limit=10"})]
+    (let [actual (sut/make-request {:url (http/musicbrainz-url "/genre/all?limit=10")})]
       (is (map? actual))
       (is (every? #(some? (val %)) (select-keys actual [:body :headers :status])))
       (is (string? (:body actual)))))
 
   (testing "convert body to Clojure data structure"
     (let [actual (-> (sut/make-request
-                      {:url    "https://musicbrainz.org/ws/2/genre/all?limit=10"
+                      {:url    (http/musicbrainz-url "/genre/all?limit=10")
                        :accept :json
                        :as     :json})
                      :body)]
@@ -32,7 +32,7 @@
 
   (testing "pass query params to the request"
     (let [actual (-> (sut/make-request
-                      {:url          "https://musicbrainz.org/ws/2/artist"
+                      {:url          (http/musicbrainz-url "/artist")
                        :accept       :json
                        :as           :json
                        :query-params {:limit  5
@@ -40,7 +40,15 @@
                                       :query  "artist:fred%20AND%20type:group%20AND%20country:US"}})
                      :body)]
       (is (= (-> actual :artists count) 5))
-      (is (= (-> actual :offset) 10)))))
+      (is (= (-> actual :offset) 10))))
+
+  (testing "exceptional and explicitly accepted statuses"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"unavailable"
+         (sut/make-request {:url (http/url "/status/503")})))
+    (is (= 204
+           (:status (sut/make-request {:url (http/url "/status/204")}))))))
 
 
 (deftest http-pipeline-test
@@ -58,7 +66,7 @@
                                                    {:type      :collet.actions.http/request
                                                     :name      :area-request
                                                     :selectors {'area-query [:state :area-query]}
-                                                    :params    {:url          "https://musicbrainz.org/ws/2/area"
+                                                    :params    {:url          (http/musicbrainz-url "/area")
                                                                 :accept       :json
                                                                 :as           :json
                                                                 :query-params {:limit 1
@@ -75,10 +83,9 @@
                                     :actions      [{:type      :collet.actions.http/request
                                                     :name      :events-request
                                                     :selectors {'events-query [:state :events-query]}
-                                                    :params    {:url          "https://musicbrainz.org/ws/2/event"
+                                                    :params    {:url          (http/musicbrainz-url "/event")
                                                                 :accept       :json
                                                                 :as           :json
-                                                                :rate         1
                                                                 :query-params {:limit  10
                                                                                :offset 0
                                                                                :query  'events-query}}
@@ -109,10 +116,9 @@
                                                             :name      :artist-details
                                                             :when      [:not-nil? [:$mapper/item :artist]]
                                                             :selectors {'artist-id [:$mapper/item :artist :id]}
-                                                            :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
+                                                            :params    {:url          [(http/musicbrainz-url "/artist/%s") 'artist-id]
                                                                         :accept       :json
                                                                         :as           :json
-                                                                        :rate         1
                                                                         :query-params {:inc "ratings"}}
                                                             :return    [:body]}]
                                               :iterator   {:next [:true? [:$mapper/has-next-item]]}
@@ -184,7 +190,7 @@
                                                      {:type      :collet.actions.http/request
                                                       :name      :area-request
                                                       :selectors {'area-query [:state :area-query]}
-                                                      :params    {:url          "https://musicbrainz.org/ws/2/area"
+                                                      :params    {:url          (http/musicbrainz-url "/area")
                                                                   :accept       :json
                                                                   :as           :json
                                                                   :query-params {:limit 1
@@ -208,10 +214,9 @@
                                                       :name      :events-request
                                                       :selectors {'events-query [:state :events-query]
                                                                   'offset       [:state :offset]}
-                                                      :params    {:url          "https://musicbrainz.org/ws/2/event"
+                                                      :params    {:url          (http/musicbrainz-url "/event")
                                                                   :accept       :json
                                                                   :as           :json
-                                                                  :rate         1
                                                                   :query-params {:limit  10
                                                                                  :offset 'offset
                                                                                  :query  'events-query}}
@@ -231,10 +236,9 @@
                                                   :when      [:not-nil? [:$enrich/item :artist :id]]
                                                   :action    :collet.actions.http/request
                                                   :selectors {'artist-id [:$enrich/item :artist :id]}
-                                                  :params    {:url          ["https://musicbrainz.org/ws/2/artist/%s" 'artist-id]
+                                                  :params    {:url          [(http/musicbrainz-url "/artist/%s") 'artist-id]
                                                               :accept       :json
                                                               :as           :json
-                                                              :rate         0.5
                                                               :query-params {:inc "ratings"}}
                                                   :return    [:body]
                                                   :fold-in   [:artist]}]
