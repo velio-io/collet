@@ -44,19 +44,41 @@ docker buildx use collet-builder
 docker buildx inspect --bootstrap
 ```
 
-After authenticating to the target registry, build from the repository root:
+After the coordinated Maven release creates its one `v<version>` tag, authenticate
+to the target registry and create a separate, clean, detached worktree of that tag.
+Derive both image identity values from the tag checkout:
 
 ```shell
+tag=v0.2.8
+version=${tag#v}
+docker_worktree=$(mktemp -d)
+git worktree add --detach "$docker_worktree" "$tag"
+cd "$docker_worktree"
+revision=$(git rev-parse "$tag^{}")
+image="velioio/collet:$version"
+
+# Build one local platform first so its labels and embedded JAR can be checked.
 docker buildx build \
   -f collet-app/Dockerfile \
-  --tag velioio/collet:VERSION \
+  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_REVISION="$revision" \
+  --tag "$image" \
+  --platform linux/amd64 \
+  --load .
+bb release:verify-image "$tag" "$image"
+
+# Only publish the multi-architecture image after local verification succeeds.
+docker buildx build \
+  -f collet-app/Dockerfile \
+  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_REVISION="$revision" \
+  --tag "$image" \
   --tag velioio/collet:latest \
   --platform linux/arm64,linux/amd64 \
   --push .
 ```
 
 Repository release tasks publish Maven artifacts only. Docker pushes remain an
-explicit deployment operation: after the coordinated Maven release creates its one
-`v<version>` tag, run the Buildx command above yourself with that version. A Docker
-push failure does not change Maven publication, GitHub release creation, or the
-coordinated version state.
+explicit deployment operation. Return to the original checkout before running
+`git worktree remove "$docker_worktree"`. A Docker push failure does not change
+Maven publication, GitHub release creation, or the coordinated version state.

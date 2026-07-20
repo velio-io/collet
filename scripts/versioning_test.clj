@@ -4,7 +4,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests]]
             [versioning :as versioning]
-            [workspace :as workspace]))
+            [workspace :as workspace])
+  (:import (java.nio.file Files LinkOption)
+           (java.nio.file.attribute PosixFilePermissions)))
 
 (deftest calculates-lein-style-versions
   (is (= "0.2.8" (versioning/release-version "0.2.8-SNAPSHOT")))
@@ -66,6 +68,27 @@
       (is (.contains (slurp beta-path)
                      "nested/lib {:mvn/version \"8.8.8\" :metadata {:version \"leave\"}}"))
       (is (= [] (versioning/set-version! root "0.2.9-SNAPSHOT")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest coordinated-version-update-preserves-posix-source-mode
+  (let [{:keys [root graph-path]}
+        (fixture-repository "0.2.8-SNAPSHOT")
+        path (fs/path graph-path)
+        posix? (try
+                 (Files/getPosixFilePermissions path (make-array LinkOption 0))
+                 true
+                 (catch UnsupportedOperationException _
+                   false))]
+    (try
+      (when posix?
+        (let [expected (PosixFilePermissions/fromString "rwxr-x---")]
+          (Files/setPosixFilePermissions path expected)
+          (versioning/set-version! root "0.2.9-SNAPSHOT")
+          (is (= expected
+                 (Files/getPosixFilePermissions
+                  path (make-array LinkOption 0)))
+              "atomic source replacement must retain the tracked file mode")))
       (finally
         (fs/delete-tree root)))))
 

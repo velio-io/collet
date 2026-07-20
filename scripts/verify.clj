@@ -2,13 +2,16 @@
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [clojure.data.xml :as xml]
    [clojure.edn :as edn]
    [clojure.set :as set]
    [clojure.string :as str]
    [workspace :as workspace])
   (:import
+   (java.io StringReader)
    (java.nio.file Files LinkOption)
    (java.nio.file.attribute PosixFilePermissions)
+   (java.util Properties)
    (java.util.jar JarFile)
    (java.util.regex Pattern)))
 
@@ -79,6 +82,84 @@
 (defn- xml-value [xml tag]
   (second (re-find (re-pattern (str "<" tag ">([^<]+)</" tag ">")) xml)))
 
+(defn- expected-maven-coordinate [lib version]
+  {:group (namespace lib)
+   :artifact (name lib)
+   :version version})
+
+(def ^:private pom-coordinate-elements
+  {"groupId" :group
+   "artifactId" :artifact
+   "version" :version})
+
+(defn- coordinate-element-value [element element-name]
+  (let [content (:content element)]
+    (ensure! (every? string? content)
+             "POM project coordinate element must contain only text"
+             {:element element-name})
+    (let [value (str/trim (apply str content))]
+      (ensure! (not (str/blank? value))
+               "POM project coordinate element must not be blank"
+               {:element element-name})
+      value)))
+
+(defn- pom-project-coordinate [pom]
+  (let [project (xml/parse-str pom
+                               :support-dtd false
+                               :supporting-external-entities false)]
+    (ensure! (= "project" (name (:tag project)))
+             "Maven POM root element must be project"
+             {:root (:tag project)})
+    (let [direct-elements
+          (->> (:content project)
+               (filter associative?)
+               (group-by #(name (:tag %))))]
+      (into {}
+            (map (fn [[element-name coordinate-key]]
+                   (let [matches (get direct-elements element-name)]
+                     (ensure! (= 1 (count matches))
+                              "POM project coordinate must be declared exactly once"
+                              {:element element-name :count (count matches)})
+                     [coordinate-key
+                      (coordinate-element-value (first matches) element-name)])))
+            pom-coordinate-elements))))
+
+(defn- properties-coordinate [properties-text]
+  (let [properties (doto (Properties.)
+                     (.load (StringReader. properties-text)))]
+    {:group (.getProperty properties "groupId")
+     :artifact (.getProperty properties "artifactId")
+     :version (.getProperty properties "version")}))
+
+(defn- verify-coordinate! [actual lib version message data]
+  (let [expected (expected-maven-coordinate lib version)]
+    (ensure! (= expected actual)
+             message
+             (assoc data :expected expected :actual actual))
+    expected))
+
+(defn verify-pom-maven-coordinate! [pom lib version]
+  (verify-coordinate!
+   (pom-project-coordinate pom)
+   lib version
+   "POM Maven coordinates do not match"
+   {:lib lib}))
+
+(defn verify-artifact-maven-coordinate! [path lib version]
+  (let [config {:lib lib}
+        pom (jar-entry path (pom-entry config))
+        properties (jar-entry path (properties-entry config))]
+    (verify-coordinate!
+     (pom-project-coordinate pom)
+     lib version
+     "Artifact JAR Maven coordinates do not match"
+     {:path (str path)})
+    (verify-coordinate!
+     (properties-coordinate properties)
+     lib version
+     "Artifact JAR Maven properties do not match"
+     {:path (str path)})))
+
 (defn- pom-dependency-set [pom]
   (->> (re-seq #"(?s)<dependency>.*?</dependency>" pom)
        (map (fn [block]
@@ -94,17 +175,12 @@
     (ensure! (fs/exists? path) "Library JAR was not built"
              {:module module :path (str path)})
     (let [entries (jar-entries path)
-          pom (jar-entry path (pom-entry config))
-          properties (jar-entry path (properties-entry config))]
+          pom (jar-entry path (pom-entry config))]
     (ensure! (contains? entries "LICENSE") "Library JAR lacks LICENSE"
              {:module module})
-    (ensure! (str/includes? properties (str "version=" version))
-             "Maven properties contain the wrong version"
-             {:module module :version version})
+    (verify-artifact-maven-coordinate! path lib version)
     (doseq [fragment ["https://github.com/velio-io/collet"
-                      "Apache License, Version 2.0"
-                      (str "<artifactId>" (name lib) "</artifactId>")
-                      (str "<version>" version "</version>")]]
+                      "Apache License, Version 2.0"]]
       (ensure! (str/includes? pom fragment) "POM metadata mismatch"
                {:module module :fragment fragment}))
     (doseq [dependency internal-deps
@@ -356,6 +432,37 @@
    (str "(?i)(?:<[a-z][a-z0-9-]*>|[a-z][a-z0-9-]*)-v"
         "(?:<version>|version|\\d+\\.\\d+\\.\\d+)")))
 
+(def ^:private publication-guide-requirements
+  {"collet-app/deploy.md"
+   {:fragments ["git worktree add --detach"
+                "COLLET_VERSION"
+                "COLLET_REVISION"
+                "bb release:verify-image \"$tag\""
+                "--push"]
+    :ordered ["bb release:verify-image \"$tag\"" "--push"]}
+   "collet-cli/README.md"
+   {:fragments ["git worktree add --detach"
+                "bb build collet-cli"
+                "bb release:verify-cli \"$tag\""
+                "gh release create \"$tag\""]
+    :ordered ["bb release:verify-cli \"$tag\""
+              "gh release create \"$tag\""]}})
+
+(defn- verify-publication-guides! []
+  (doseq [[path {:keys [fragments ordered]}] publication-guide-requirements
+          :let [guide (slurp path)
+                missing (remove #(str/includes? guide %) fragments)
+                [verification publication] ordered]]
+    (ensure! (empty? missing)
+             "Publication guide lacks release-source safeguards"
+             {:path path :missing (vec missing)})
+    (ensure! (< (str/index-of guide verification)
+                (str/index-of guide publication))
+             "Publication guide verifies after publishing"
+             {:path path
+              :verification verification
+              :publication publication})))
+
 (defn- tracked-files-under [directory]
   (->> (file-seq (fs/file directory))
        (filter fs/regular-file?)
@@ -426,6 +533,7 @@
       (ensure! (empty? per-artifact-tags)
                "Documentation must use one coordinated v<version> release tag"
                {:files per-artifact-tags})))
+  (verify-publication-guides!)
   (println "verified repository versioning and release documentation consistency"))
 
 (defn verify-module-artifact! [module]

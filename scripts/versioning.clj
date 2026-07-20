@@ -2,7 +2,7 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [rewrite-clj.zip :as z])
-  (:import (java.nio.file CopyOption Files StandardCopyOption)
+  (:import (java.nio.file CopyOption Files LinkOption StandardCopyOption)
            (java.nio.file.attribute FileAttribute)))
 
 (def ^:private version-pattern
@@ -163,6 +163,32 @@
     (fs/create-dirs parent)
     (Files/createTempFile parent prefix ".tmp" (make-array FileAttribute 0))))
 
+(defn- copy-source-attributes! [source temporary]
+  ;; COPY_ATTRIBUTES retains the file provider's applicable basic attributes.
+  ;; POSIX permissions are also copied explicitly because they are not a basic
+  ;; attribute and replacement must not silently remove executable/read bits.
+  (try
+    (Files/copy (fs/path source)
+                (fs/path temporary)
+                (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
+                                        StandardCopyOption/COPY_ATTRIBUTES]))
+    (catch UnsupportedOperationException _
+      (Files/copy (fs/path source)
+                  (fs/path temporary)
+                  (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))))
+  (try
+    (Files/setPosixFilePermissions
+     (fs/path temporary)
+     (Files/getPosixFilePermissions
+      (fs/path source) (make-array LinkOption 0)))
+    (catch UnsupportedOperationException _))
+  temporary)
+
+(defn- write-source-temporary! [source temporary content]
+  (copy-source-attributes! source temporary)
+  (spit (str temporary) content)
+  temporary)
+
 (defn- move-replacing! [source destination]
   (try
     (Files/move (fs/path source)
@@ -201,7 +227,7 @@
 
 (defn- prepare-change! [{:keys [path after] :as change}]
   (let [temporary (sibling-temporary-file path)]
-    (spit (str temporary) after)
+    (write-source-temporary! path temporary after)
     (when-not (= after (slurp (str temporary)))
       (throw (ex-info "Prepared version source differs from its update plan"
                       {:path path :temporary (str temporary)})))
@@ -228,7 +254,7 @@
       (= after actual)
       (let [temporary (sibling-temporary-file path)]
         (try
-          (spit (str temporary) before)
+          (write-source-temporary! path temporary before)
           (when-not (= before (slurp (str temporary)))
             (throw (ex-info "Prepared rollback source differs from journal"
                             {:path path :temporary (str temporary)})))

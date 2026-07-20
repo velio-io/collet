@@ -444,7 +444,7 @@
         checkout-var (private-var 'release 'ensure-tag-checkout!)
         command-output-var (private-var 'release 'command-output)
         shell-var (private-var 'release 'shell!)
-        coordinate-var (private-var 'release 'verify-jar-coordinate!)
+        coordinate-var #'verify/verify-artifact-maven-coordinate!
         calls (atom [])]
     (with-redefs-fn
       {checkout-var (fn [_]
@@ -527,16 +527,16 @@
               context {:release "0.2.8" :release-commit "release-commit"}]
           (is (= jar (:jar (@verify-var context :example (artifacts)))))
           (write-jar! jar (jar-entries "0.2.9-SNAPSHOT" "0.2.8"))
-          (is (= "Release JAR Maven coordinates do not match"
+          (is (= "Artifact JAR Maven coordinates do not match"
                  (exception-message
                   #(@verify-var context :example (artifacts)))))
           (write-jar! jar (jar-entries "0.2.8" "0.2.8-SNAPSHOT"))
-          (is (= "Release JAR Maven properties do not match"
+          (is (= "Artifact JAR Maven properties do not match"
                  (exception-message
                   #(@verify-var context :example (artifacts)))))
           (write-jar! jar (jar-entries "0.2.8" "0.2.8"))
           (spit pom (pom-text "0.2.9-SNAPSHOT"))
-          (is (= "Release POM coordinates do not match captured release"
+          (is (= "POM Maven coordinates do not match"
                  (exception-message
                   #(@verify-var context :example (artifacts)))))))
       (finally

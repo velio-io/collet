@@ -2,7 +2,8 @@
 
  :deps
  {babashka/fs      {:mvn/version "0.5.22"}
-  babashka/process {:mvn/version "0.5.22"}}
+  babashka/process {:mvn/version "0.5.22"}
+  org.clojure/data.xml {:mvn/version "0.2.0-alpha11"}}
 
  :tasks
  {:requires

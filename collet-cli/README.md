@@ -51,20 +51,30 @@ Available prompt actions are:
 
 ### Deploy the script
 
-From the repository root, build the pod uberjar and distribution archive:
+After the coordinated Maven release creates `v<version>`, build the pod uberjar and
+distribution archive from a separate, clean, detached worktree of that exact tag.
+Verify the embedded version, Git revision, and Maven coordinates before uploading:
 
 ```shell
+tag=v0.2.8
+cli_worktree=$(mktemp -d)
+git worktree add --detach "$cli_worktree" "$tag"
+cd "$cli_worktree"
+
 bb build collet-cli
+bb release:verify-cli "$tag"
+
+gh release create "$tag" \
+  collet-cli/target/collet-cli.tar.gz
 ```
 
 This produces `collet-cli/target/collet.pod.jar` and
 `collet-cli/target/collet-cli.tar.gz`. The archive contains the `collet-cli/`
 directory with `bb.edn`, executable `collet.bb`, `collet.pod.jar`, and executable
 `gum`. The pod main namespace remains `pod.collet.core`.
-After a coordinated Maven release creates `v<version>`, create the GitHub release
-from that same tag and upload this file manually. `bb release` publishes Maven
-artifacts only; it neither creates the CLI GitHub release nor pushes the Docker
-image.
+Return to the original checkout before running
+`git worktree remove "$cli_worktree"`. `bb release` publishes Maven artifacts only;
+it neither creates the CLI GitHub release nor pushes the Docker image.
 
 ### Development
 

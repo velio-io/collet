@@ -8,15 +8,13 @@
    [versioning :as versioning]
    [workspace :as workspace])
   (:import
-   (java.io FileNotFoundException StringReader)
+   (java.io FileNotFoundException)
    (java.net URL)
    (java.nio.channels FileChannel)
    (java.nio.file CopyOption Files OpenOption StandardCopyOption
                   StandardOpenOption)
    (java.nio.file.attribute FileAttribute)
-   (java.security MessageDigest)
-   (java.util Properties)
-   (java.util.jar JarFile)))
+   (java.security MessageDigest)))
 
 (defn- fail! [message data]
   (throw (ex-info message data)))
@@ -274,56 +272,11 @@
       (finally
         (fs/delete-tree staging-repo)))))
 
-(defn- jar-entry [path entry]
-  (with-open [jar (JarFile. (str path))]
-    (let [item (.getEntry jar entry)]
-      (ensure! item "Release JAR metadata is missing"
-               {:jar (str path) :entry entry})
-      (slurp (.getInputStream jar item)))))
-
-(defn- xml-value [xml tag]
-  (second (re-find (re-pattern (str "<" tag ">([^<]+)</" tag ">"))
-                   xml)))
-
-(defn- pom-project-coordinates [pom]
-  (let [project-header (first (str/split pom #"<dependencies>" 2))]
-    {:group (xml-value project-header "groupId")
-     :artifact (xml-value project-header "artifactId")
-     :version (xml-value project-header "version")}))
-
-(defn- verify-jar-coordinate! [jar lib version]
-  (let [directory (str "META-INF/maven/" (namespace lib) "/" (name lib))
-        expected {:group (namespace lib)
-                  :artifact (name lib)
-                  :version version}
-        actual (pom-project-coordinates
-                (jar-entry jar (str directory "/pom.xml")))
-        properties-text (jar-entry jar (str directory "/pom.properties"))
-        properties (doto (Properties.)
-                     (.load (StringReader. properties-text)))
-        expected-properties {"groupId" (namespace lib)
-                             "artifactId" (name lib)
-                             "version" version}
-        actual-properties
-        (into {} (map (fn [key] [key (.getProperty properties key)]))
-              (keys expected-properties))]
-    (ensure! (= expected actual)
-             "Release JAR Maven coordinates do not match"
-             {:jar jar :expected expected :actual actual})
-    (ensure! (= expected-properties actual-properties)
-             "Release JAR Maven properties do not match"
-             {:jar jar :expected expected-properties
-              :actual actual-properties})))
-
 (defn- verify-release-artifact!
   [{:keys [release release-commit]} module artifacts]
   (let [{:keys [jar pom jar-sha256 pom-sha256 coordinate]}
         (ensure-artifacts! module artifacts)
-        {:keys [lib version]} (workspace/module-config module)
-        expected {:group (namespace lib)
-                  :artifact (name lib)
-                  :version release}
-        actual (pom-project-coordinates (slurp pom))]
+        {:keys [lib version]} (workspace/module-config module)]
     (ensure! (= {:lib lib :version release} coordinate)
              "Staged release coordinate changed after capture"
              {:module module :expected {:lib lib :version release}
@@ -331,14 +284,12 @@
     (ensure! (= release version)
              "Workspace module coordinate changed after staging"
              {:module module :expected release :actual version})
-    (ensure! (= expected actual)
-             "Release POM coordinates do not match captured release"
-             {:module module :expected expected :actual actual})
+    (verify/verify-pom-maven-coordinate! (slurp pom) lib release)
     (ensure! (= jar-sha256 (file-sha256 jar))
              "Release JAR changed after staging" {:module module})
     (ensure! (= pom-sha256 (file-sha256 pom))
              "Release POM changed after staging" {:module module})
-    (verify-jar-coordinate! jar lib release)
+    (verify/verify-artifact-maven-coordinate! jar lib release)
     (verify/verify-artifact-build-identity!
      jar release release-commit)
     artifacts))
@@ -771,7 +722,7 @@
       (ensure! (fs/regular-file? path)
                "CLI release artifact is missing" {:path (str path)}))
     (verify/verify-artifact-build-identity! pod version revision)
-    (verify-jar-coordinate! pod lib version)
+    (verify/verify-artifact-maven-coordinate! pod lib version)
     (let [directory (fs/create-temp-dir {:prefix "collet-cli-release-"})]
       (try
         (process/shell (workspace/nondeployment-process-options {:dir directory})
@@ -781,7 +732,7 @@
                    "CLI archive lacks collet.pod.jar" {})
           (verify/verify-artifact-build-identity!
            archived-pod version revision)
-          (verify-jar-coordinate! archived-pod lib version))
+          (verify/verify-artifact-maven-coordinate! archived-pod lib version))
         (finally
           (fs/delete-tree directory))))
     (println "Verified CLI artifacts for" (:tag context) revision)
@@ -808,7 +759,7 @@
       (try
         (shell! "docker" "cp" (str container ":/app/collet.jar") (str jar))
         (verify/verify-artifact-build-identity! jar version revision)
-        (verify-jar-coordinate!
+        (verify/verify-artifact-maven-coordinate!
          jar (:lib (workspace/module-config :collet-app)) version)
         (finally
           (try

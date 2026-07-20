@@ -2,7 +2,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is run-tests]]
+            [clojure.test :refer [deftest is run-tests testing]]
             [verify]
             [workspace :as workspace])
   (:import (java.util.zip ZipEntry ZipOutputStream)))
@@ -30,6 +30,112 @@
       (.putNextEntry output (ZipEntry. entry))
       (.write output (.getBytes content "UTF-8"))
       (.closeEntry output))))
+
+(defn- pom-text [group version dependency-version]
+  (str "<project>"
+       "<groupId>" group "</groupId>"
+       "<artifactId>example</artifactId>"
+       "<version>" version "</version>"
+       "<url>https://github.com/velio-io/collet</url>"
+       "<licenses><license><name>Apache License, Version 2.0</name>"
+       "</license></licenses>"
+       "<dependencies><dependency>"
+       "<groupId>external</groupId>"
+       "<artifactId>dep</artifactId>"
+       "<version>" dependency-version "</version>"
+       "</dependency></dependencies>"
+       "</project>"))
+
+(defn- properties-text [group version]
+  (str "groupId=" group "\n"
+       "artifactId=example\n"
+       "version=" version "\n"))
+
+(defn- verify-library-coordinate-error
+  [directory pom properties]
+  (let [lib 'io.velio/example
+        path (fs/path directory "target" "example-0.2.8.jar")
+        verify-var (ns-resolve 'verify 'verify-library!)]
+    (fs/create-dirs (fs/parent path))
+    (spit (str (fs/path directory "deps.edn"))
+          "{:deps {external/dep {:mvn/version \"0.2.8\"}}}\n")
+    (write-jar! (str path)
+                {"LICENSE" "license"
+                 "META-INF/maven/io.velio/example/pom.xml" pom
+                 "META-INF/maven/io.velio/example/pom.properties" properties})
+    (with-redefs [workspace/module-config
+                  (fn [_]
+                    {:dir (str directory)
+                     :lib lib
+                     :version "0.2.8"
+                     :namespaces []
+                     :source-dirs []
+                     :internal-deps []})]
+      (exception-message #(@verify-var :example)))))
+
+(deftest library-verification-rejects-inexact-maven-coordinates
+  (let [root (fs/create-temp-dir {:prefix "maven-coordinate-test-"})]
+    (try
+      (testing "a dependency version cannot stand in for the project version"
+        (is (= "Artifact JAR Maven coordinates do not match"
+               (verify-library-coordinate-error
+                root
+                (pom-text "io.velio" "0.2.9" "0.2.8")
+                (properties-text "io.velio" "0.2.8")))))
+      (testing "a version prefix in Java properties is not an exact value"
+        (is (= "Artifact JAR Maven properties do not match"
+               (verify-library-coordinate-error
+                root
+                (pom-text "io.velio" "0.2.8" "0.2.8")
+                (properties-text "io.velio" "0.2.8-extra")))))
+      (testing "the project group ID is part of the exact coordinate"
+        (is (= "Artifact JAR Maven coordinates do not match"
+               (verify-library-coordinate-error
+                root
+                (pom-text "io.wrong" "0.2.8" "0.2.8")
+                (properties-text "io.velio" "0.2.8")))))
+      (testing "nested metadata cannot masquerade as the project coordinate"
+        (is (= "Artifact JAR Maven coordinates do not match"
+               (verify-library-coordinate-error
+                root
+                (str "<project><properties>"
+                     "<groupId>io.velio</groupId>"
+                     "<artifactId>example</artifactId>"
+                     "<version>0.2.8</version>"
+                     "</properties>"
+                     (subs (pom-text "io.wrong" "9.9.9" "0.2.8")
+                           (count "<project>")))
+                (properties-text "io.velio" "0.2.8")))))
+      (testing "the properties group ID is also exact"
+        (is (= "Artifact JAR Maven properties do not match"
+               (verify-library-coordinate-error
+                root
+                (pom-text "io.velio" "0.2.8" "0.2.8")
+                (properties-text "io.wrong" "0.2.8")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest publication-guides-use-tag-derived-artifacts-and-verify-before-push
+  (let [app-guide (slurp "collet-app/deploy.md")
+        cli-guide (slurp "collet-cli/README.md")]
+    (testing "Docker publication is bound to and verified against the tag"
+      (doseq [fragment ["git worktree add --detach"
+                        "COLLET_VERSION"
+                        "COLLET_REVISION"
+                        "bb release:verify-image \"$tag\""]]
+        (is (.contains app-guide fragment) fragment))
+      (is (< (.indexOf app-guide "bb release:verify-image \"$tag\"")
+             (.indexOf app-guide "--push"))
+          "image verification must precede the registry push"))
+    (testing "CLI publication is built and verified in the detached tag worktree"
+      (doseq [fragment ["git worktree add --detach"
+                        "bb build collet-cli"
+                        "bb release:verify-cli \"$tag\""
+                        "gh release create \"$tag\""]]
+        (is (.contains cli-guide fragment) fragment))
+      (is (< (.indexOf cli-guide "bb release:verify-cli \"$tag\"")
+             (.indexOf cli-guide "gh release create \"$tag\""))
+          "CLI verification must precede the GitHub upload"))))
 
 (deftest verifies-embedded-build-version-and-source-revision
   (let [verify-var (ns-resolve 'verify 'verify-artifact-build-identity!)
