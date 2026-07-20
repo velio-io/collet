@@ -8,7 +8,7 @@
         com.cognitect.aws/s3        {:mvn/version "869.2.1687.0"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-support {:local/root "../test-support"}
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}
                       com.cnuernber/charred {:mvn/version "1.034"}}
          :override-deps {io.velio/collet-core {:local/root "../collet-core"}
                          io.velio/collet-action-file {:local/root "../collet-action-file"}
@@ -17,5 +17,5 @@
                     "--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
-                 io.velio/collet-build-support {:local/root "../build-support"}}
+                 io.velio/collet-build {:local/root "../build"}}
           :ns-default build}}}

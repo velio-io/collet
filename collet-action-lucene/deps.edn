@@ -8,11 +8,11 @@
         org.apache.lucene/lucene-analyzers-common {:mvn/version "8.11.4"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-support {:local/root "../test-support"}}
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
          :override-deps {io.velio/collet-core {:local/root "../collet-core"}}
          :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                     "--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
-                 io.velio/collet-build-support {:local/root "../build-support"}}
+                 io.velio/collet-build {:local/root "../build"}}
           :ns-default build}}}

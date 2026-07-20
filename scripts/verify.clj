@@ -301,7 +301,7 @@
   (let [targets (concat ["bb.edn" "deps.edn" "Dockerfile"]
                         (map str (fs/glob ".github" "**/*"))
                         (map str (fs/glob "build" "**/*"))
-                        (map str (fs/glob "build-support" "**/*"))
+                        (map str (fs/glob "test-fixtures" "**/*"))
                         (map str (fs/glob "scripts" "**/*"))
                         (map str (fs/glob "." "collet-*/bb.edn"))
                         (map str (fs/glob "." "collet-*/build.clj"))

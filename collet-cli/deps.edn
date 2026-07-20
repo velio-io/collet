@@ -5,7 +5,7 @@
         djblue/portal          {:mvn/version "0.58.2"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-support {:local/root "../test-support"}}
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
          :override-deps {io.velio/collet-core {:local/root "../collet-core"}
                          io.velio/collet-app {:local/root "../collet-app"}}
          :jvm-opts ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
@@ -21,5 +21,5 @@
                     "--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
-                 io.velio/collet-build-support {:local/root "../build-support"}}
+                 io.velio/collet-build {:local/root "../build"}}
           :ns-default build}}}

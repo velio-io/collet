@@ -7,7 +7,7 @@
         org.graalvm.js/js-scriptengine {:mvn/version "24.2.2"}}
  :aliases
  {:test {:extra-paths ["test" "test-resources"]
-         :extra-deps {io.velio/collet-test-support {:local/root "../test-support"}
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}
                       io.velio/collet-action-jdbc {:local/root "../collet-action-jdbc"}}
          :override-deps {io.velio/collet-core {:local/root "../collet-core"}
                          io.velio/collet-action-file {:local/root "../collet-action-file"}
@@ -16,5 +16,5 @@
                     "--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
-                 io.velio/collet-build-support {:local/root "../build-support"}}
+                 io.velio/collet-build {:local/root "../build"}}
           :ns-default build}}}

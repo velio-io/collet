@@ -4,7 +4,6 @@ WORKDIR /build
 
 COPY LICENSE /build/LICENSE
 COPY build /build/build
-COPY build-support /build/build-support
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
