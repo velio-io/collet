@@ -1,4 +1,6 @@
-{:project
+{:version "0.2.8-SNAPSHOT"
+
+ :project
  {:url         "https://github.com/velio-io/collet"
   :license     {:name "Apache License, Version 2.0"
                 :url  "https://www.apache.org/licenses/LICENSE-2.0.txt"}
@@ -37,7 +39,6 @@
  :modules
  {:collet-core
   {:lib           io.velio/collet-core
-   :version       "0.2.8-SNAPSHOT"
    :description   "Collet workflow engine core"
    :dir           "collet-core"
    :source-dirs   ["src"]
@@ -46,61 +47,61 @@
    :internal-deps []}
 
   :collet-action-http
-  {:lib io.velio/collet-action-http, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-http
    :description "HTTP actions for Collet", :dir "collet-action-http"
    :namespaces [collet.actions.http]
    :internal-deps [:collet-core]}
   :collet-action-file
-  {:lib io.velio/collet-action-file, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-file
    :description "File actions for Collet", :dir "collet-action-file"
    :namespaces [collet.actions.file]
    :integration-test? true
    :internal-deps [:collet-core :collet-action-http]}
   :collet-action-odata
-  {:lib io.velio/collet-action-odata, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-odata
    :description "OData actions for Collet", :dir "collet-action-odata"
    :namespaces [collet.actions.odata]
    :internal-deps [:collet-core :collet-action-http]}
   :collet-action-jdbc
-  {:lib io.velio/collet-action-jdbc, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-jdbc
    :description "JDBC actions for Collet", :dir "collet-action-jdbc"
    :namespaces [collet.actions.jdbc collet.actions.jdbc-pg]
    :integration-test? true
    :internal-deps [:collet-core]}
   :collet-action-s3
-  {:lib io.velio/collet-action-s3, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-s3
    :description "S3 actions for Collet", :dir "collet-action-s3"
    :namespaces [collet.actions.s3]
    :integration-test? true
    :internal-deps [:collet-core :collet-action-file]}
   :collet-action-queue
-  {:lib io.velio/collet-action-queue, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-queue
    :description "Queue actions for Collet", :dir "collet-action-queue"
    :namespaces [collet.actions.queue]
    :internal-deps [:collet-core]}
   :collet-action-jslt
-  {:lib io.velio/collet-action-jslt, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-jslt
    :description "JSLT actions for Collet", :dir "collet-action-jslt"
    :namespaces [collet.actions.jslt]
    :internal-deps [:collet-core]}
   :collet-action-llm
-  {:lib io.velio/collet-action-llm, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-llm
    :description "LLM actions for Collet", :dir "collet-action-llm"
    :namespaces [collet.actions.llm]
    :internal-deps [:collet-core]}
   :collet-action-vega
-  {:lib io.velio/collet-action-vega, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-vega
    :description "Vega rendering actions for Collet", :dir "collet-action-vega"
    :namespaces [collet.actions.vega]
    :integration-test? true
    :internal-deps [:collet-core :collet-action-file]}
   :collet-action-lucene
-  {:lib io.velio/collet-action-lucene, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-action-lucene
    :description "Lucene actions for Collet", :dir "collet-action-lucene"
    :namespaces [collet.actions.lucene]
    :internal-deps [:collet-core]}
   :collet-actions
-  {:lib io.velio/collet-actions, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-actions
    :description "Compatibility aggregate for all Collet actions"
    :dir "collet-actions"
    :source-dirs []
@@ -114,7 +115,7 @@
                    :collet-action-jslt :collet-action-llm :collet-action-vega
                    :collet-action-lucene]}
   :collet-app
-  {:lib io.velio/collet-app, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-app
    :description "Standalone Collet application", :dir "collet-app"
    :internal-deps [:collet-core]
    :namespaces [collet.main]
@@ -123,7 +124,7 @@
    :build-task :uberjar
    :uber-file "target/collet.jar"}
   :collet-cli
-  {:lib io.velio/collet-cli, :version "0.2.8-SNAPSHOT"
+  {:lib io.velio/collet-cli
    :description "CLI interface for Collet", :dir "collet-cli"
    :internal-deps [:collet-app]
    :namespaces [pod.collet.core]

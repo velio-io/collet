@@ -233,7 +233,7 @@
                      :mvn/local-repo (str repo-root)
                      :deps {lib {:mvn/version version}}}))
       (let [jvm-opts (map #(str "-J" %)
-                          (get-in @workspace/manifest [:project :jvm-opts]))
+                          (get-in (workspace/manifest) [:project :jvm-opts]))
             output (apply capture! (str project) "clojure" "-Srepro"
                           (concat jvm-opts ["-M" "-e" (consumer-form namespaces)]))]
         (ensure! (str/includes? output ":consumer-ok")
@@ -301,7 +301,6 @@
   (let [targets (concat ["bb.edn" "deps.edn" "Dockerfile"]
                         (map str (fs/glob ".github" "**/*"))
                         (map str (fs/glob "build" "**/*"))
-                        (map str (fs/glob "test-fixtures" "**/*"))
                         (map str (fs/glob "scripts" "**/*"))
                         (map str (fs/glob "." "collet-*/bb.edn"))
                         (map str (fs/glob "." "collet-*/build.clj"))

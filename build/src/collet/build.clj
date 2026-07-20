@@ -24,7 +24,7 @@
   (edn/read-string (slurp (repo-file "build/modules.edn"))))
 
 (defn module-config [module]
-  (let [{:keys [project modules]} (manifest)
+  (let [{:keys [project modules version]} (manifest)
         config (get modules module)]
     (when-not config
       (throw (ex-info "Unknown module" {:module module})))
@@ -32,7 +32,8 @@
             :resource-dirs ["resources"]
             :publish? true}
            project
-           config)))
+           config
+           {:version version})))
 
 (defn- artifact-name [lib]
   (name lib))

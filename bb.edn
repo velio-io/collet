@@ -8,6 +8,7 @@
  {:requires
   ([release :as release]
    [verify :as verify]
+   [versioning :as versioning]
    [workspace :as workspace])
 
   test
@@ -37,6 +38,11 @@
   verify
   {:doc  "Build and inspect artifacts, dependency trees, and isolated consumers"
    :task (verify/verify)}
+
+  version
+  {:doc "Set the coordinated workspace version: bb version <version>"
+   :override-builtin true
+   :task (versioning/version-command *command-line-args*)}
 
   release
   {:doc  "Test, verify, deploy, and tag one release: bb release <module>"

@@ -5,20 +5,25 @@
    [clojure.edn :as edn]
    [clojure.string :as str]))
 
-(def manifest
-  (delay (edn/read-string (slurp "build/modules.edn"))))
+(defn manifest []
+  (edn/read-string (slurp "build/modules.edn")))
+
+(defn project-version []
+  (:version (manifest)))
 
 (defn module-key [value]
   (keyword value))
 
 (defn module-config [module]
-  (if-let [config (get-in @manifest [:modules module])]
-    (merge {:source-dirs ["src"]
-            :resource-dirs ["resources"]
-            :publish? true}
-           config)
-    (throw (ex-info (str "Unknown module: " (name module))
-                    {:module module}))))
+  (let [workspace (manifest)]
+    (if-let [config (get-in workspace [:modules module])]
+      (merge {:source-dirs ["src"]
+              :resource-dirs ["resources"]
+              :publish? true}
+             config
+             {:version (:version workspace)})
+      (throw (ex-info (str "Unknown module: " (name module))
+                      {:module module})))))
 
 (defn migrated? [module]
   (let [{:keys [dir]} (module-config module)]
@@ -29,7 +34,7 @@
   (not= false (:publish? (module-config module))))
 
 (defn modules []
-  (->> (:module-order @manifest)
+  (->> (:module-order (manifest))
        (filter migrated?)
        vec))
 
