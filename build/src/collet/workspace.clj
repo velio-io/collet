@@ -4,6 +4,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
+   [clojure.set :as set]
    [clojure.string :as str]
    [k16.kmono.core.graph :as kmono.graph]
    [k16.kmono.version :as kmono.version]
@@ -52,6 +53,43 @@
                  [fqn package])))
         packages))
 
+(defn resolve-build-context!
+  "Resolve artifact metadata with explicit versions, without consulting Git.
+
+  This is the build-context entry point for Git-less source copies such as a
+  Docker build context. Every discovered package must have an exact override
+  so a generated POM can never guess an internal dependency version."
+  [dir versions]
+  (let [{:keys [root packages] :as context}
+        (kmono.workspace/resolve-workspace-context! dir)
+        packages (attach-artifacts packages)
+        expected (set (keys packages))
+        supplied (set (keys versions))
+        invalid (->> versions
+                     (keep (fn [[fqn version]]
+                             (when-not (and (string? version)
+                                            (not (str/blank? version)))
+                               fqn)))
+                     set)]
+    (when (or (not= expected supplied) (seq invalid))
+      (fail! "Complete package version overrides are required"
+             {:missing (sort (set/difference expected supplied))
+              :unknown (sort (set/difference supplied expected))
+              :invalid (sort invalid)}))
+    (assoc context
+           :project (read-project root)
+           :packages
+           (into {}
+                 (map (fn [[fqn package]]
+                        (let [version (get versions fqn)]
+                          [fqn (assoc package
+                                      :current-version version
+                                      :version version
+                                      :reason :override
+                                      :tag (str fqn "@" version)
+                                      :release? false)])))
+                 packages))))
+
 (defn package-fqn
   "Resolve a short module name or fully-qualified package symbol."
   [packages module]
@@ -84,13 +122,25 @@
                        (comp (filter (fn [[_ package]] (:release? package)))
                              (map first))
                        packages)
-        selected
+        initial
         (if-let [fqn (package-fqn packages module)]
           (let [closure (into #{fqn}
                               (concat (kmono.graph/query-dependencies packages fqn)
                                       (kmono.graph/query-dependents packages fqn)))]
             (set (filter closure releases)))
-          releases)]
+          releases)
+        selected
+        (loop [selected initial]
+          (let [neighbors (into selected
+                                (comp
+                                 (mapcat (fn [fqn]
+                                           (concat (get-in packages [fqn :depends-on])
+                                                   (get-in packages [fqn :dependents]))))
+                                 (filter releases))
+                                selected)]
+            (if (= selected neighbors)
+              selected
+              (recur neighbors))))]
     (release-order packages selected)))
 
 (defn- bootstrap-packages [packages]
@@ -180,7 +230,8 @@
    (let [{:keys [root packages] :as context}
          (kmono.workspace/resolve-workspace-context! dir)
          project (read-project root)
-         packages (attach-artifacts packages)
+         packages (kmono.version/resolve-package-versions
+                   root (attach-artifacts packages))
          {:keys [exit out err]}
          (shell/sh "git" "-C" root "tag" "--points-at" "HEAD")]
      (when-not (zero? exit)
@@ -206,8 +257,29 @@
                                         :reason :resume
                                         :tag tag
                                         :release? true)]
-                            [fqn (assoc package :release? false)]))))
-                 packages)]
+                            [fqn (assoc package
+                                        :current-version (:version package)
+                                        :reason :unchanged
+                                        :release? false)]))))
+                 packages)
+           tagged (into #{}
+                        (comp (filter (fn [[_ package]] (:release? package)))
+                              (map first))
+                        packages)
+           required-dependents (into #{}
+                                     (mapcat #(kmono.graph/query-dependents
+                                               packages %))
+                                     tagged)
+           missing-dependents (set/difference required-dependents tagged)
+           missing-versions (->> packages
+                                 (keep (fn [[fqn package]]
+                                         (when-not (:version package) fqn)))
+                                 set)]
+       (when (or (seq missing-dependents) (seq missing-versions))
+         (fail! "Pending package tags are incomplete"
+                {:tagged (sort tagged)
+                 :missing-dependents (sort missing-dependents)
+                 :missing-versions (sort missing-versions)}))
        (assoc context
               :project project
               :packages packages

@@ -70,6 +70,21 @@
              ":image" "\"local-image\""]]
            (mapv vec @commands)))))
 
+(deftest root-build-and-install-do-not-read-the-legacy-version-manifest
+  (let [commands (atom [])]
+    (with-redefs [workspace/manifest
+                  (fn [] (throw (ex-info "legacy manifest was read" {})))
+                  process/shell (fn [& args]
+                                  (swap! commands conj (vec args))
+                                  {:exit 0})]
+      (workspace/build ["collet-app"])
+      (workspace/install ["collet-core"]))
+    (is (= [[{:env (workspace/nondeployment-env)}
+             "clojure" "-T:build" "build" ":module" ":collet-app"]
+            [{:env (workspace/nondeployment-env)}
+             "clojure" "-T:build" "install" ":module" ":collet-core"]]
+           @commands))))
+
 (let [{:keys [fail error]} (run-tests 'workspace-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

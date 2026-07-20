@@ -2,8 +2,7 @@
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [clojure.edn :as edn]))
 
 (def publication-credential-variables
   ["CLOJARS_USERNAME" "CLOJARS_PASSWORD"])
@@ -50,22 +49,6 @@
        (filter migrated?)
        vec))
 
-(defn- selected-modules [args]
-  (if-let [module (some-> (first args) module-key)]
-    (do
-      (module-config module)
-      (when-not (migrated? module)
-        (throw (ex-info (str "Module has not migrated yet: " (name module))
-                        {:module module})))
-      [module])
-    (modules)))
-
-(defn- clojure! [module & args]
-  (let [{:keys [dir]} (module-config module)]
-    (println (str "\n==> " (name module) " " (str/join " " args)))
-    (apply process/shell (nondeployment-process-options {:dir dir})
-           "clojure" args)))
-
 (defn- root-build! [module task & args]
   (println (str "\n==> " (name module) " " task))
   (apply process/shell (nondeployment-process-options)
@@ -82,38 +65,12 @@
     (throw (ex-info "Module is not a published Maven artifact" {:module module})))
   (root-build! module "install" ":mvn/local-repo" (pr-str local-repo)))
 
-(defn- build-output-paths [module]
-  (let [{:keys [dir lib version publish? uber-file distribution]}
-        (module-config module)]
-    (cond-> []
-      publish?
-      (conj (fs/path dir "target" (str (name lib) "-" version ".jar")))
-
-      uber-file
-      (conj (fs/path dir uber-file))
-
-      (:archive distribution)
-      (conj (fs/path dir (:archive distribution))))))
-
-(defn- assert-build-outputs! [module]
-  (doseq [path (build-output-paths module)]
+(defn- artifact-metadata [module]
+  (let [path (fs/path (name module) "deps.edn")]
     (when-not (fs/regular-file? path)
-      (throw (ex-info "Build output is missing"
-                      {:module module :path (str path)})))))
-
-(defn- install-module! [module installed local-repo]
-  (when (and (publish? module)
-             (not (contains? @installed module)))
-    (if local-repo
-      (root-build! module "install" ":mvn/local-repo" (pr-str local-repo))
-      (root-build! module "install"))
-    ;; The root install includes the complete transitive workspace closure.
-    (swap! installed into
-           (conj (set (:internal-deps (module-config module))) module))))
-
-(defn- build-module! [module _installed]
-  (root-build! module "build")
-  (assert-build-outputs! module))
+      (throw (ex-info (str "Unknown module: " (name module))
+                      {:module module})))
+    (:collet/artifact (edn/read-string (slurp (str path))))))
 
 (defn unit-test-command []
   ["clojure" "-M:kmono" "run" "--M" ":test" "--" "-e" ":integration"])
@@ -134,18 +91,15 @@
 (defn- build-test-tools! []
   (process/shell (nondeployment-process-options) "clojure" "-T:build-test"))
 
-(declare build)
+(declare build root-build-task! optional-module-args)
 
 (defn test-module [args]
   (when-not (seq args)
     (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
                     {:args args})))
   (let [module (module-key (first args))
-        config (module-config module)]
-    (when-not (migrated? module)
-      (throw (ex-info (str "Module has not migrated yet: " (name module))
-                      {:module module})))
-    (when (:build-task config)
+        artifact (artifact-metadata module)]
+    (when (#{:uberjar :distribution} (:kind artifact))
       (build [module]))
     (kmono! (module-test-command module (rest args)))))
 
@@ -174,22 +128,22 @@
   (test-integration))
 
 (defn build [args]
-  (let [installed (atom #{})]
-    (doseq [module (selected-modules args)]
-      (build-module! module installed))))
+  (root-build-task! "build" (optional-module-args "build" args)))
 
 (defn install [args]
-  (let [installed (atom #{})]
-    (doseq [module (selected-modules args)]
-      (install-module! module installed nil))))
+  (root-build-task! "install" (optional-module-args "install" args)))
 
 (defn install-to! [local-repo]
-  (let [installed (atom #{})]
-    (doseq [module (modules)]
-      (install-module! module installed local-repo))))
+  (process/shell (nondeployment-process-options)
+                 "clojure" "-T:build" "install"
+                 ":mvn/local-repo" (pr-str local-repo)))
 
 (defn- root-release! [task args]
   (apply process/shell "clojure" "-T:build" task args))
+
+(defn- root-build-task! [task args]
+  (apply process/shell (nondeployment-process-options)
+         "clojure" "-T:build" task args))
 
 (defn- optional-module-args [task args]
   (when (> (count args) 1)

@@ -17,21 +17,11 @@
 (defn resolve-workspace-context!
   "Resolve the Kmono graph with independently planned package versions."
   ([] (resolve-workspace-context! nil))
-  ([dir]
-   (workspace/resolve-release-plan! dir)))
-
-(defn- with-version-overrides [{:keys [packages] :as context} versions]
-  (if (seq versions)
-    (assoc context :packages
-           (reduce-kv
-            (fn [packages fqn version]
-              (when-not (contains? packages fqn)
-                (throw (ex-info "Unknown package version override"
-                                {:package fqn})))
-              (assoc-in packages [fqn :version] version))
-            packages
-            versions))
-    context))
+  ([dir] (resolve-workspace-context! dir {}))
+  ([dir opts]
+   (if (contains? opts :versions)
+     (workspace/resolve-build-context! dir (:versions opts))
+     (workspace/resolve-release-plan! dir))))
 
 (defn- basis-options [{:keys [mvn/local-repo]}]
   (cond-> {:root {:mvn/repos
@@ -252,6 +242,11 @@
       (kmono.graph/filter-by #(contains? selected (:fqn %)) packages))
     packages))
 
+(defn- resolve-for-build! [opts]
+  (if (contains? opts :versions)
+    (resolve-workspace-context! nil opts)
+    (resolve-workspace-context!)))
+
 (defn clean
   "Clean every package target, or one package and its workspace dependencies."
   [{:keys [module]}]
@@ -266,7 +261,7 @@
   "Build every workspace artifact, or one package and its dependencies."
   [{:keys [module] :as opts}]
   (let [{:keys [packages] :as context}
-        (with-version-overrides (resolve-workspace-context!) (:versions opts))
+        (resolve-for-build! opts)
         selected (select-packages packages module)
         results (atom {})]
     (kmono.build/for-each-package selected
@@ -280,7 +275,7 @@
   "Build and install publishable workspace packages in dependency order."
   [{:keys [module] :as opts}]
   (let [{:keys [packages] :as context}
-        (with-version-overrides (resolve-workspace-context!) (:versions opts))
+        (resolve-for-build! opts)
         requested (workspace/package-fqn packages module)
         selected (select-packages packages module)
         publishable (kmono.graph/filter-by

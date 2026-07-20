@@ -179,7 +179,9 @@
   nil)
 
 (defn- build-release! [plan revision release-plan]
-  (let [versions (into {} (map (juxt :fqn :version)) release-plan)]
+  (let [versions (into {}
+                       (map (fn [[fqn package]] [fqn (:version package)]))
+                       (:packages plan))]
     (reduce
      (fn [artifacts package]
        (let [result (build/build {:module (:fqn package)
@@ -245,22 +247,24 @@
 (defn production-ops
   "Construct production operations for one local release plan."
   [plan]
-  (let [root (:root plan)
-        revision (atom nil)]
+  (let [root (:root plan)]
     {:fetch-tags! #(fetch-tags! root)
-     :preflight! (fn []
-                   (let [result (production-preflight! root)]
-                     (reset! revision (:revision result))
-                     result))
+     :preflight! #(production-preflight! root)
      :require-credentials! require-credentials!
      :test! #(quality-gate! root "test")
      :verify! #(quality-gate! root "verify")
-     :build! #(build-release! plan @revision %)
+     :build! #(build-release! plan %2 %1)
      :tag-target! #(git-tag-target root %)
-     :create-tag! (fn [tag target]
-                    (command! {} "git" "-C" root "tag" "-a" tag
-                              "-m" tag target))
-     :publication-status! #(publication-status! % @revision)
+     :create-tags! (fn [tags target]
+                     (let [commands (str "start\n"
+                                         (str/join ""
+                                                   (map #(str "create refs/tags/" %
+                                                              " " target "\n")
+                                                        tags))
+                                         "prepare\ncommit\n")]
+                       (command! {:in commands}
+                                 "git" "-C" root "update-ref" "--stdin")))
+     :publication-status! publication-status!
      :deploy! #(deploy! root %1 %2)
      :push-tags! (fn [tags]
                    (apply command! {} "git" "-C" root "push" "--atomic"
@@ -307,6 +311,7 @@
     ((:fetch-tags! ops))
     (let [{:keys [revision]} ((:preflight! ops))
           targets (into {} (map (juxt identity (:tag-target! ops))) tags)
+          existing-targets (into {} (filter (comp some? val)) targets)
           resume? (and (seq tags)
                        (every? #(= revision (get targets %)) tags))
           collisions (into {}
@@ -316,48 +321,61 @@
       (when (seq collisions)
         (fail! "Package release tag points to a different revision"
                {:revision revision :tags collisions}))
+      (when (and (seq existing-targets) (not resume?))
+        (fail! "Local package release tags are incomplete"
+               {:revision revision :tags existing-targets :expected tags}))
       (when (seq publishable)
         ((:require-credentials! ops)))
       ((:test! ops))
       ((:verify! ops))
-      (let [artifacts ((:build! ops) release-plan)]
-        (let [statuses (into {}
-                             (map (fn [package]
-                                    [(:fqn package)
-                                     (normalize-status
-                                      ((:publication-status! ops) package))]))
-                             publishable)
-              invalid (into {}
-                            (filter (fn [[_ status]]
-                                      (#{:partial :mismatch} status)))
-                            statuses)]
-          (when (seq invalid)
-            (fail! "Remote Maven publication is partial or mismatched"
-                   {:packages invalid}))
-          (let [matching (into {}
-                               (filter (fn [[_ status]] (= :matching status)))
-                               statuses)]
-            (when (and (seq matching) (not resume?))
-              (fail! "Remote Maven coordinate already exists for a fresh release"
-                     {:packages (keys matching)})))
-          (doseq [tag tags
-                  :when (nil? (get targets tag))]
-            ((:create-tag! ops) tag revision))
-          (let [skipped (->> publishable
-                             (filter #(= :matching (get statuses (:fqn %))))
-                             (mapv :fqn))
-                missing (filterv #(= :absent (get statuses (:fqn %)))
-                                 publishable)]
-            (doseq [package missing]
-              ((:deploy! ops) package (get artifacts (:fqn package))))
-            ((:push-tags! ops) tags)
-            {:revision revision
-             :tags tags
-             :deployed (mapv :fqn missing)
-             :skipped skipped
-             :tag-only (->> release-plan
-                            (remove :publish?)
-                            (mapv :fqn))}))))))
+      (let [{current-revision :revision} ((:preflight! ops))]
+        (when-not (= revision current-revision)
+          (fail! "Release source changed during quality gates"
+                 {:expected revision :actual current-revision}))
+        (let [artifacts ((:build! ops) release-plan revision)
+              {built-revision :revision} ((:preflight! ops))]
+          (when-not (= revision built-revision)
+            (fail! "Release source changed during artifact construction"
+                   {:expected revision :actual built-revision}))
+          (let [statuses (into {}
+                               (map (fn [package]
+                                      [(:fqn package)
+                                       (normalize-status
+                                        ((:publication-status! ops)
+                                         package revision))]))
+                               publishable)
+                invalid (into {}
+                              (filter (fn [[_ status]]
+                                        (#{:partial :mismatch} status)))
+                              statuses)]
+            (when (seq invalid)
+              (fail! "Remote Maven publication is partial or mismatched"
+                     {:packages invalid}))
+            (let [matching (into {}
+                                 (filter (fn [[_ status]]
+                                           (= :matching status)))
+                                 statuses)]
+              (when (and (seq matching) (not resume?))
+                (fail! "Remote Maven coordinate already exists for a fresh release"
+                       {:packages (keys matching)})))
+            (let [missing-tags (filterv #(nil? (get targets %)) tags)]
+              (when (seq missing-tags)
+                ((:create-tags! ops) missing-tags revision)))
+            (let [skipped (->> publishable
+                               (filter #(= :matching (get statuses (:fqn %))))
+                               (mapv :fqn))
+                  missing (filterv #(= :absent (get statuses (:fqn %)))
+                                   publishable)]
+              (doseq [package missing]
+                ((:deploy! ops) package (get artifacts (:fqn package))))
+              ((:push-tags! ops) tags)
+              {:revision revision
+               :tags tags
+               :deployed (mapv :fqn missing)
+               :skipped skipped
+               :tag-only (->> release-plan
+                              (remove :publish?)
+                              (mapv :fqn))})))))))
 
 (defn- module-option [module]
   (when module

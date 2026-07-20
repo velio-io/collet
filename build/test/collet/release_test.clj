@@ -2,6 +2,7 @@
   (:require
    [babashka.fs :as fs]
    [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [collet.release :as release]
@@ -52,32 +53,46 @@
     (catch clojure.lang.ExceptionInfo error
       error)))
 
+(defn- git! [root & args]
+  (let [{:keys [exit out err]}
+        (apply shell/sh "git" "-C" (str root) args)]
+    (when-not (zero? exit)
+      (throw (ex-info "git failed" {:args args :error err})))
+    (str/trim out)))
+
 (defn- recording-ops
   ([events] (recording-ops events {}))
-  ([events {:keys [local-tags statuses failures]
+  ([events {:keys [local-tags statuses failures preflight-revisions]
             :or {local-tags {}
                  statuses {}
-                 failures #{}}}]
+                 failures #{}
+                 preflight-revisions [revision revision]}}]
+   (let [preflights (atom preflight-revisions)]
    {:fetch-tags! #(swap! events conj :fetch)
     :preflight! (fn []
                   (swap! events conj :preflight)
-                  {:revision revision})
+                  (let [current (or (first @preflights) revision)]
+                    (swap! preflights #(if (next %) (vec (next %)) %))
+                    {:revision current}))
     :require-credentials! #(swap! events conj :credentials)
     :test! #(swap! events conj :test)
     :verify! #(swap! events conj :verify)
-    :build! (fn [release-plan]
+    :build! (fn [release-plan source-revision]
               (swap! events conj [:build (mapv :version release-plan)])
+              (is (= revision source-revision))
               (into {}
                     (map (fn [{:keys [fqn]}]
                            [fqn {:jar-file (str (name fqn) ".jar")
                                  :pom-file (str (name fqn) ".pom")}]))
                     release-plan))
     :tag-target! #(get local-tags %)
-    :create-tag! (fn [tag target]
-                   (swap! events conj [:tag tag target])
-                   (when (contains? failures :tag)
-                     (throw (ex-info "tag failed" {:tag tag}))))
-    :publication-status! (fn [{:keys [fqn]}]
+    :create-tags! (fn [tags target]
+                    (swap! events conj [:tags tags target])
+                    (when (contains? failures :tag)
+                      (throw (ex-info "tag failed" {:tags tags}))))
+    :publication-status! (fn [{:keys [fqn]} source-revision]
+                           (is (= revision source-revision))
+                           (swap! events conj [:status fqn])
                            (get statuses fqn :absent))
     :deploy! (fn [{:keys [fqn]} _]
                (swap! events conj [:deploy fqn])
@@ -86,7 +101,7 @@
     :push-tags! (fn [tags]
                   (swap! events conj [:push tags])
                   (when (contains? failures :push)
-                    (throw (ex-info "push failed" {}))))}))
+                    (throw (ex-info "push failed" {}))))})))
 
 (defn- write-jar! [path entries]
   (with-open [output (ZipOutputStream. (io/output-stream (str path)))]
@@ -137,21 +152,28 @@
                             @events)))))))
 
 (deftest matching-coordinate-is-a-collision-without-a-complete-local-tag-resume
-  (doseq [local-tags
-          [{}
-           {"example/pkg-a@1.2.4" revision}]]
-    (let [events (atom [])
-          error (exception
-                 #(release/execute-release!
-                   plan
-                   (recording-ops
-                    events
-                    {:local-tags local-tags
-                     :statuses {'example/pkg-a :matching}})))]
-      (is (= "Remote Maven coordinate already exists for a fresh release"
-             (ex-message error)))
-      (is (empty? (filter #(and (vector? %) (= :deploy (first %)))
-                          @events))))))
+  (let [events (atom [])
+        error (exception
+               #(release/execute-release!
+                 plan
+                 (recording-ops
+                  events
+                  {:statuses {'example/pkg-a :matching}})))]
+    (is (= "Remote Maven coordinate already exists for a fresh release"
+           (ex-message error)))
+    (is (empty? (filter #(and (vector? %) (= :deploy (first %)))
+                        @events)))))
+
+(deftest partial-local-tag-set-is-rejected-before-quality-gates
+  (let [events (atom [])
+        error (exception
+               #(release/execute-release!
+                 plan
+                 (recording-ops
+                  events
+                  {:local-tags {"example/pkg-a@1.2.4" revision}})))]
+    (is (= "Local package release tags are incomplete" (ex-message error)))
+    (is (= [:fetch :preflight] @events))))
 
 (deftest resume-rebuilds-tagged-versions-and-skips-matching-publications
   (let [events (atom [])
@@ -165,7 +187,7 @@
                              'example/pkg-b :matching}}))]
     (is (= [:build ["1.2.4" "1.2.4" "1.2.4"]]
            (some #(when (and (vector? %) (= :build (first %))) %) @events)))
-    (is (empty? (filter #(and (vector? %) (= :tag (first %))) @events)))
+    (is (empty? (filter #(and (vector? %) (= :tags (first %))) @events)))
     (is (empty? (filter #(and (vector? %) (= :deploy (first %))) @events)))
     (is (= ['example/pkg-a 'example/pkg-b] (:skipped result)))))
 
@@ -184,19 +206,81 @@
 (deftest successful-release-tags-before-deploys-and-atomically-pushes-all-tags
   (let [events (atom [])
         result (release/execute-release! plan (recording-ops events))
-        tag-indexes (keep-indexed #(when (and (vector? %2)
-                                              (= :tag (first %2))) %1)
-                                  @events)
+        tag-index (first (keep-indexed #(when (and (vector? %2)
+                                                   (= :tags (first %2))) %1)
+                                       @events))
         deploy-indexes (keep-indexed #(when (and (vector? %2)
                                                  (= :deploy (first %2))) %1)
                                      @events)]
-    (is (< (apply max tag-indexes) (apply min deploy-indexes)))
+    (is (< tag-index (apply min deploy-indexes)))
+    (is (= [[:tags ["example/pkg-a@1.2.4"
+                    "example/pkg-b@1.2.4"
+                    "example/pkg-cli@1.2.4"] revision]]
+           (filterv #(and (vector? %) (= :tags (first %))) @events)))
     (is (= ["example/pkg-a@1.2.4"
             "example/pkg-b@1.2.4"
             "example/pkg-cli@1.2.4"]
            (-> @events last second)))
     (is (= ['example/pkg-a 'example/pkg-b] (:deployed result)))
     (is (= ['example/pkg-cli] (:tag-only result)))))
+
+(deftest production-tag-creation-is-an-all-or-nothing-git-transaction
+  (let [root (fs/create-temp-dir {:prefix "collet-atomic-tags-test-"})]
+    (try
+      (git! root "init" "-b" "main")
+      (spit (str (fs/path root "source.txt")) "source")
+      (git! root "add" ".")
+      (git! root "-c" "user.name=Collet Test"
+            "-c" "user.email=collet@example.test"
+            "commit" "-m" "feat: source")
+      (let [head (git! root "rev-parse" "HEAD")
+            existing "example/pkg-b@1.2.4"
+            new-tag "example/pkg-a@1.2.4"
+            create-tags! (:create-tags! (release/production-ops {:root (str root)}))]
+        (git! root "tag" existing)
+        (is (= "Command failed"
+               (ex-message
+                (exception #(create-tags! [new-tag existing] head)))))
+        (is (str/blank?
+             (:out (shell/sh "git" "-C" (str root)
+                             "tag" "--list" new-tag))))
+        (is (= existing
+               (str/trim
+                (:out (shell/sh "git" "-C" (str root)
+                                "tag" "--list" existing))))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest source-drift-during-quality-gates-stops-before-build-tag-or-deploy
+  (let [events (atom [])
+        error (exception
+               #(release/execute-release!
+                 plan
+                 (recording-ops
+                  events
+                  {:preflight-revisions [revision "changed-after-tests"]})))]
+    (is (= "Release source changed during quality gates" (ex-message error)))
+    (is (= 2 (count (filter #{:preflight} @events))))
+    (is (not-any? #(and (vector? %)
+                        (#{:build :tags :deploy} (first %)))
+                  @events))))
+
+(deftest source-drift-during-build-stops-before-publication-tag-or-deploy
+  (let [events (atom [])
+        error (exception
+               #(release/execute-release!
+                 plan
+                 (recording-ops
+                  events
+                  {:preflight-revisions
+                   [revision revision "changed-during-build"]})))]
+    (is (= "Release source changed during artifact construction"
+           (ex-message error)))
+    (is (= 3 (count (filter #{:preflight} @events))))
+    (is (some #(and (vector? %) (= :build (first %))) @events))
+    (is (not-any? #(and (vector? %)
+                        (#{:status :tags :deploy} (first %)))
+                  @events))))
 
 (deftest tag-only-selection-does-not-require-publication-credentials
   (let [events (atom [])

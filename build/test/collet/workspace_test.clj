@@ -42,7 +42,8 @@
                ["pkg-cli" {:description "CLI" :kind :uberjar :publish? false
                             :main 'example.cli
                             :outputs {:uberjar "target/cli.jar"}}
-                {'example/pkg-b {:local/root "../pkg-b"}}]
+                {'example/pkg-b {:local/root "../pkg-b"}
+                 'example/pkg-c {:local/root "../pkg-c"}}]
                ["pkg-c" {:description "C" :kind :library :publish? true} {}]]]
         (write-edn! (fs/path root dir "deps.edn")
                     {:paths ["src"]
@@ -139,6 +140,21 @@
                (set (:selected plan))))
         (is (not (contains? (set (:selected plan)) 'example/pkg-c)))))))
 
+(deftest module-filter-reaches-a-fixed-point-across-a-changed-diamond
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (change! root "pkg-b" "src/example/b.clj" "fix: correct B"
+               "(ns example.b)\n;; fixed\n")
+      (change! root "pkg-c" "src/example/c.clj" "feat: extend C"
+               "(ns example.c)\n;; feature\n")
+      (let [plan (workspace/resolve-release-plan! (str root) {:module :pkg-b})]
+        (is (= #{'example/pkg-b 'example/pkg-c 'example/pkg-cli}
+               (set (:selected plan))))
+        (is (= "1.2.4" (:version (package plan 'example/pkg-b))))
+        (is (= "1.3.0" (:version (package plan 'example/pkg-c))))
+        (is (= "1.2.4" (:version (package plan 'example/pkg-cli))))))))
+
 (deftest plan-retains-current-candidate-reason-tag-and-publication-metadata
   (with-workspace
     (fn [root]
@@ -159,14 +175,34 @@
 (deftest resolves-package-tags-at-head-as-resumable-exact-versions
   (with-workspace
     (fn [root]
+      (tag-all! root "1.2.3")
+      (change! root "pkg-a" "src/example/a.clj" "fix: correct A"
+               "(ns example.a)\n;; fixed\n")
       (git! root "tag" "example/pkg-a@1.2.4")
       (git! root "tag" "example/pkg-b@2.0.0")
+      (git! root "tag" "example/pkg-cli@2.0.1")
       (let [plan (workspace/resolve-pending-release-plan! (str root))]
-        (is (= ['example/pkg-a 'example/pkg-b] (:selected plan)))
+        (is (= ['example/pkg-a 'example/pkg-b 'example/pkg-cli]
+               (:selected plan)))
         (is (= {:version "1.2.4"
                 :reason :resume
                 :tag "example/pkg-a@1.2.4"
                 :release? true}
                (select-keys (package plan 'example/pkg-a)
                             [:version :reason :tag :release?])))
-        (is (= "2.0.0" (:version (package plan 'example/pkg-b))))))))
+        (is (= "2.0.0" (:version (package plan 'example/pkg-b))))
+        (is (= {:version "1.2.3"
+                :current-version "1.2.3"
+                :reason :unchanged
+                :release? false}
+               (select-keys (package plan 'example/pkg-c)
+                            [:version :current-version :reason :release?])))))))
+
+(deftest rejects-a-partial-pending-dependent-tag-set
+  (with-workspace
+    (fn [root]
+      (git! root "tag" "example/pkg-a@1.2.4")
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Pending package tags are incomplete"
+           (workspace/resolve-pending-release-plan! (str root)))))))

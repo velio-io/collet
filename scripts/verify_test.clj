@@ -1,6 +1,5 @@
 (ns verify-test
   (:require [babashka.fs :as fs]
-            [babashka.process :as process]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is run-tests testing]]
             [verify]
@@ -155,58 +154,28 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest app-build-requires-both-thin-and-uber-jars
-  (let [root (fs/create-temp-dir {:prefix "app-build-output-test-"})
-        module-dir (str (fs/path root "collet-app"))
-        thin (fs/path module-dir "target" "collet-app-0.2.8-SNAPSHOT.jar")
-        uber (fs/path module-dir "target" "collet.jar")
-        manifest {:version "0.2.8-SNAPSHOT"
-                  :module-order [:collet-app]
-                  :modules {:collet-app {:dir module-dir
-                                         :lib 'io.velio/collet-app
-                                         :publish? true
-                                         :build-task :uberjar
-                                         :uber-file "target/collet.jar"}}}
-        invoke-build
-        (fn [outputs]
-          (with-redefs [workspace/manifest (fn [] manifest)
-                        process/shell
-                        (fn [& args]
-                          (when (= ["clojure" "-T:build" "build"
-                                    ":module" ":collet-app"]
-                                   (vec (rest args)))
-                            (fs/create-dirs (fs/parent uber))
-                            (doseq [path outputs]
-                              (spit (str path) "artifact")))
-                          {:exit 0})]
-            (workspace/build ["collet-app"])))]
-    (try
-      (fs/create-dirs module-dir)
-      (spit (str (fs/path module-dir "deps.edn")) "{:deps {}}\n")
-      (is (= "Build output is missing"
-             (exception-message #(invoke-build [uber]))))
-      (is (nil? (exception-message #(invoke-build [thin uber]))))
-      (finally
-        (fs/delete-tree root)))))
-
 (deftest docker-build-carries-release-version-and-source-identity
   (let [dockerfile (slurp "collet-app/Dockerfile")]
-    (doseq [fragment ["ARG COLLET_VERSION"
+    (doseq [fragment ["ARG COLLET_CORE_VERSION"
+                      "ARG COLLET_VERSION"
                       "ARG COLLET_REVISION"
-                      ":expected-version"
+                      ":versions"
+                      "io.velio/collet-core"
+                      "io.velio/collet-app"
                       ":source-revision"
                       "org.opencontainers.image.version"
                       "org.opencontainers.image.revision"]]
       (is (.contains dockerfile fragment) fragment))
-    (is (= 1 (count (re-seq #":expected-version" dockerfile)))
-        "only the independently versioned app is checked against its image tag")
-    (is (= 3 (count (re-seq #":source-revision" dockerfile)))
-        "the core install and both app build branches receive source identity")))
+    (is (= 1 (count (re-seq #":versions" dockerfile)))
+        "the complete Git-less workspace is versioned in one build call")
+    (is (= 1 (count (re-seq #":source-revision" dockerfile)))
+        "the app build receives an explicit source identity")
+    (is (.contains (slurp ".dockerignore") ".git")
+        "the build must not rely on Git being copied into its context")))
 
 (deftest docker-build-uses-the-root-kmono-build-only
   (let [dockerfile (slurp "collet-app/Dockerfile")]
     (is (.contains dockerfile "COPY deps.edn /build/deps.edn"))
-    (is (.contains dockerfile "clojure -T:build install :module :collet-core"))
     (is (.contains dockerfile "clojure -T:build build :module :collet-app"))
     (is (not (re-find #"(?m)^RUN cd /build/collet-" dockerfile))
         "Docker builds must not invoke a module-local tools.build alias")))

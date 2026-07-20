@@ -1,8 +1,10 @@
-ARG COLLET_VERSION=""
+ARG COLLET_CORE_VERSION="0.0.0-local"
+ARG COLLET_VERSION="0.0.0-local"
 ARG COLLET_REVISION="docker-build"
 
 FROM clojure:temurin-21-tools-deps AS builder
 
+ARG COLLET_CORE_VERSION
 ARG COLLET_VERSION
 ARG COLLET_REVISION
 
@@ -14,16 +16,10 @@ COPY build /build/build
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
-RUN clojure -T:build install :module :collet-core \
+RUN clojure -T:build build :module :collet-app \
+      :versions "{io.velio/collet-core \"${COLLET_CORE_VERSION}\" \
+                  io.velio/collet-app \"${COLLET_VERSION}\"}" \
       :source-revision "\"${COLLET_REVISION}\""
-RUN if [ -n "${COLLET_VERSION}" ]; then \
-      clojure -T:build build :module :collet-app \
-        :expected-version "\"${COLLET_VERSION}\"" \
-        :source-revision "\"${COLLET_REVISION}\""; \
-    else \
-      clojure -T:build build :module :collet-app \
-        :source-revision "\"${COLLET_REVISION}\""; \
-    fi
 
 
 FROM eclipse-temurin:21.0.5_11-jre

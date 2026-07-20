@@ -94,6 +94,25 @@
             (is (= "0.2.8"
                    (get-in packages ['example/pkg-a :version])))))))))
 
+(deftest resolves-a-completely-versioned-build-context-without-git
+  (with-workspace
+    (fn [root]
+      (fs/delete-tree (fs/path root ".git"))
+      (let [versions {'example/pkg-a "2.1.0"
+                      'example/pkg-b "3.2.1"
+                      'example/pkg-cli "4.0.0"}
+            context (build/resolve-workspace-context!
+                     root {:versions versions})]
+        (is (= versions
+               (into {} (map (juxt key (comp :version val)))
+                     (:packages context))))
+        (is (= "example/pkg-b@3.2.1"
+               (get-in context [:packages 'example/pkg-b :tag]))))
+      (is (thrown-with-message?
+           #"Complete package version overrides are required"
+           #(build/resolve-workspace-context!
+             root {:versions {'example/pkg-a "2.1.0"}}))))))
+
 (deftest chooses-publishable-and-local-build-bases
   (with-workspace
     (fn [root]
