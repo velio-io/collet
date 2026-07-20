@@ -82,6 +82,25 @@
 (defn- build-task [module]
   (name (or (:build-task (module-config module)) :jar)))
 
+(defn- build-output-paths [module]
+  (let [{:keys [dir lib version publish? uber-file distribution]}
+        (module-config module)]
+    (cond-> []
+      publish?
+      (conj (fs/path dir "target" (str (name lib) "-" version ".jar")))
+
+      uber-file
+      (conj (fs/path dir uber-file))
+
+      (:archive distribution)
+      (conj (fs/path dir (:archive distribution))))))
+
+(defn- assert-build-outputs! [module]
+  (doseq [path (build-output-paths module)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "Build output is missing"
+                      {:module module :path (str path)})))))
+
 (defn- install-module! [module installed local-repo]
   (doseq [dependency (:internal-deps (module-config module))]
     (install-module! dependency installed local-repo))
@@ -102,7 +121,8 @@
              (:build-task (module-config module))
              (not (contains? @installed module)))
     (install-module! module installed nil))
-  (clojure! module "-T:build" (build-task module)))
+  (clojure! module "-T:build" (build-task module))
+  (assert-build-outputs! module))
 
 (defn- run-test! [module test-runner-options build-artifact?]
   (when build-artifact?

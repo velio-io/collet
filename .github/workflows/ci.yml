@@ -23,8 +23,8 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
-          cli: latest
-          bb: latest
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
@@ -43,8 +43,8 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
-          cli: latest
-          bb: latest
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
@@ -71,8 +71,8 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
-          cli: latest
-          bb: latest
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository

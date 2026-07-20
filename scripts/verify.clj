@@ -38,6 +38,19 @@
       (ensure! item "Missing JAR entry" {:jar (str path) :entry entry})
       (slurp (.getInputStream jar item)))))
 
+(defn verify-artifact-build-identity!
+  [path expected-version expected-revision]
+  (let [identity (edn/read-string
+                  (jar-entry path "META-INF/collet/build.edn"))]
+    (ensure! (= {:version expected-version :revision expected-revision}
+                identity)
+             "Artifact build identity does not match the release source"
+             {:path (str path)
+              :expected-version expected-version
+              :expected-revision expected-revision
+              :actual identity})
+    identity))
+
 (defn- namespace-entry [namespace]
   (str (-> (str namespace)
            (str/replace "." "/")
@@ -265,12 +278,17 @@
                                   (make-array LinkOption 0))))
 
 (defn- verify-deployables! []
-  (let [app-jar (fs/path "collet-app/target/collet.jar")
+  (let [version (workspace/project-version)
+        revision (str/trim (capture! "." "git" "rev-parse" "HEAD"))
+        app-thin (library-jar (workspace/module-config :collet-app))
+        app-jar (fs/path "collet-app/target/collet.jar")
         pod-jar (fs/path "collet-cli/target/collet.pod.jar")
         archive (fs/path "collet-cli/target/collet-cli.tar.gz")]
-    (doseq [path [app-jar pod-jar archive]]
+    (doseq [path [app-thin app-jar pod-jar archive]]
       (ensure! (fs/regular-file? path) "Deployable artifact is missing"
                {:path (str path)}))
+    (doseq [path [app-thin app-jar pod-jar]]
+      (verify-artifact-build-identity! path version revision))
     (ensure! (= "collet.main" (main-class app-jar))
              "Application uberjar entrypoint changed" {})
     (ensure! (= "pod.collet.core" (main-class pod-jar))

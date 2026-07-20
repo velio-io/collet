@@ -75,6 +75,26 @@
       (b/copy-dir {:src-dirs (vec dirs) :target-dir target}))
     (copy-license! target)))
 
+(defn- git-revision []
+  (let [{:keys [exit out err]} (shell/sh "git" "rev-parse" "HEAD")]
+    (when-not (zero? exit)
+      (throw (ex-info "Cannot determine build source revision"
+                      {:exit exit :error (str/trim err)})))
+    (str/trim out)))
+
+(defn- write-build-identity!
+  [{:keys [version] :as config} {:keys [expected-version source-revision]}]
+  (when (and expected-version (not= version expected-version))
+    (throw (ex-info "Build version does not match the expected release"
+                    {:expected expected-version :actual version})))
+  (let [revision (or source-revision (git-revision))
+        path (io/file (class-dir config) "META-INF/collet/build.edn")]
+    (when (str/blank? revision)
+      (throw (ex-info "Build source revision must not be blank" {})))
+    (io/make-parents path)
+    (spit path (pr-str {:version version :revision revision}))
+    {:version version :revision revision}))
+
 (defn- basis [opts]
   (b/create-basis
    (cond-> {:root {:mvn/repos
@@ -148,6 +168,7 @@
      (clean module opts)
      (copy-project! config)
      (pom module opts)
+     (write-build-identity! config opts)
      (b/jar {:class-dir target :jar-file output})
      {:module module :jar-file output})))
 
@@ -177,6 +198,12 @@
      (clean module opts)
      (copy-project! config)
      (pom module opts)
+     (write-build-identity! config opts)
+     ;; Deployable Maven modules must retain their publishable thin JAR after
+     ;; the uberjar build. Both artifacts are produced from one clean class
+     ;; directory so neither build can erase the other.
+     (when (:publish? config)
+       (b/jar {:class-dir target :jar-file (jar-file config)}))
      (b/compile-clj {:basis project-basis
                      :class-dir target
                      :src-dirs source-dirs

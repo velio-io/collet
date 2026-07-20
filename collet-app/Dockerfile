@@ -1,4 +1,10 @@
+ARG COLLET_VERSION=""
+ARG COLLET_REVISION="docker-build"
+
 FROM clojure:temurin-21-tools-deps AS builder
+
+ARG COLLET_VERSION
+ARG COLLET_REVISION
 
 WORKDIR /build
 
@@ -8,10 +14,24 @@ COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
 
 RUN cd /build/collet-core && clojure -T:build install
-RUN cd /build/collet-app && clojure -T:build uberjar
+RUN cd /build/collet-app && \
+    if [ -n "${COLLET_VERSION}" ]; then \
+      clojure -T:build uberjar \
+        :expected-version "\"${COLLET_VERSION}\"" \
+        :source-revision "\"${COLLET_REVISION}\""; \
+    else \
+      clojure -T:build uberjar \
+        :source-revision "\"${COLLET_REVISION}\""; \
+    fi
 
 
 FROM eclipse-temurin:21.0.5_11-jre
+
+ARG COLLET_VERSION
+ARG COLLET_REVISION
+
+LABEL org.opencontainers.image.version="${COLLET_VERSION}" \
+      org.opencontainers.image.revision="${COLLET_REVISION}"
 
 ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
