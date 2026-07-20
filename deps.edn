@@ -1,5 +1,16 @@
 {:paths []
- :deps  {io.velio/collet-core {:local/root "collet-core"}}
+ :deps  {io.velio/collet-core          {:local/root "collet-core"}
+         io.velio/collet-action-http   {:local/root "collet-action-http"}
+         io.velio/collet-action-file   {:local/root "collet-action-file"}
+         io.velio/collet-action-odata  {:local/root "collet-action-odata"}
+         io.velio/collet-action-jdbc   {:local/root "collet-action-jdbc"}
+         io.velio/collet-action-s3     {:local/root "collet-action-s3"}
+         io.velio/collet-action-queue  {:local/root "collet-action-queue"}
+         io.velio/collet-action-jslt   {:local/root "collet-action-jslt"}
+         io.velio/collet-action-llm    {:local/root "collet-action-llm"}
+         io.velio/collet-action-vega   {:local/root "collet-action-vega"}
+         io.velio/collet-action-lucene {:local/root "collet-action-lucene"}
+         io.velio/collet-actions       {:local/root "collet-actions"}}
  :aliases
  {:dev {:extra-deps {io.velio/collet-test-support
                      {:local/root "test-support"}}}}}

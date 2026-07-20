@@ -29,7 +29,7 @@
         (throw (ex-info (str "Module has not migrated yet: " (name module))
                         {:module module})))
       [module])
-    (->> (keys (:modules @manifest))
+    (->> (:module-order @manifest)
          (filter migrated?))))
 
 (defn- clojure! [module & args]
@@ -38,14 +38,15 @@
     (apply process/shell {:dir dir} "clojure" args)))
 
 (defn test-module [args]
-  (when-not (= 1 (count args))
-    (throw (ex-info "Usage: bb test:module <module>" {:args args})))
+  (when-not (seq args)
+    (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
+                    {:args args})))
   (let [module (module-key (first args))]
     (module-config module)
     (when-not (migrated? module)
       (throw (ex-info (str "Module has not migrated yet: " (name module))
                       {:module module})))
-    (clojure! module "-M:test")))
+    (apply clojure! module "-M:test" (rest args))))
 
 (defn build [args]
   (doseq [module (selected-modules args)]

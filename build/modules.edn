@@ -18,6 +18,22 @@
                 "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
                 "--enable-native-access=ALL-UNNAMED"]}
 
+ :module-order
+ [:collet-core
+  :collet-action-http
+  :collet-action-file
+  :collet-action-odata
+  :collet-action-jdbc
+  :collet-action-s3
+  :collet-action-queue
+  :collet-action-jslt
+  :collet-action-llm
+  :collet-action-vega
+  :collet-action-lucene
+  :collet-actions
+  :collet-app
+  :collet-cli]
+
  :modules
  {:collet-core
   {:lib           io.velio/collet-core

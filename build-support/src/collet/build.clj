@@ -7,7 +7,8 @@
    [clojure.string :as str]
    [clojure.tools.build.api :as b])
   (:import
-   (java.nio.file CopyOption Files StandardCopyOption)))
+   (java.nio.file CopyOption Files StandardCopyOption)
+   (java.util.regex Pattern)))
 
 (defn- repo-file [path]
   (let [from-module (io/file ".." path)
@@ -66,6 +67,35 @@
   (cond-> (b/create-basis {:project "deps.edn"})
     (:mvn/local-repo opts) (assoc :mvn/local-repo (:mvn/local-repo opts))))
 
+(defn- pom-path [{:keys [lib] :as config}]
+  (str (class-dir config) "/META-INF/maven/"
+       (namespace lib) "/" (name lib) "/pom.xml"))
+
+(defn- patch-pom-extensions! [pom-file]
+  ;; tools.build 0.10.14 does not emit Maven <type> for :extension
+  ;; coordinates. Graal's org.graalvm.polyglot/js artifact is POM-only, so
+  ;; losing this field makes downstream Maven consumers request a nonexistent
+  ;; JAR. Keep the project deps.edn authoritative and restore those types.
+  (let [deps (:deps (edn/read-string (slurp "deps.edn")))
+        patched
+        (reduce-kv
+         (fn [xml lib {:keys [extension]}]
+           (if (and extension (not= "jar" extension))
+             (let [dependency-prefix
+                   (str "      <groupId>" (namespace lib) "</groupId>\n"
+                        "      <artifactId>" (name lib) "</artifactId>\n")
+                   pattern (re-pattern
+                            (str (Pattern/quote dependency-prefix)
+                                 "      <version>[^<]+</version>"))]
+               (str/replace-first
+                xml pattern
+                (fn [matched]
+                  (str matched "\n      <type>" extension "</type>"))))
+             xml))
+         (slurp pom-file)
+         deps)]
+    (spit pom-file patched)))
+
 (defn clean
   ([module] (clean module {}))
   ([module _]
@@ -80,15 +110,16 @@
          (merge (module-config module) opts)
          target (class-dir config)]
      (b/write-pom {:class-dir target
+                   :src-pom :none
                    :lib lib
                    :version version
                    :basis (basis opts)
                    :src-dirs source-dirs
                    :resource-dirs (:resource-dirs config)
                    :pom-data (pom-data config)})
+     (patch-pom-extensions! (pom-path config))
      {:module module
-      :pom-file (str target "/META-INF/maven/"
-                     (namespace lib) "/" (name lib) "/pom.xml")})))
+      :pom-file (pom-path config)})))
 
 (defn jar
   ([module] (jar module {}))

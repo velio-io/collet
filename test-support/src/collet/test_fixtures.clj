@@ -3,6 +3,9 @@
    [clojure.java.io :as io]
    [malli.instrument :as mi]))
 
+(defn resource-path [resource-name]
+  (some-> resource-name io/resource io/file str))
+
 
 (defn- delete-tree!
   [^java.io.File root]

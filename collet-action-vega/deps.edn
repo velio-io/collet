@@ -1,0 +1,20 @@
+{:paths ["src" "resources"]
+ :deps {org.clojure/clojure         {:mvn/version "1.12.0"}
+        io.velio/collet-core        {:mvn/version "0.2.8-SNAPSHOT"}
+        io.velio/collet-action-file {:mvn/version "0.2.8-SNAPSHOT"}
+        com.cnuernber/charred       {:mvn/version "1.034"}
+        org.graalvm.polyglot/js     {:mvn/version "24.2.2" :extension "pom"}
+        org.graalvm.js/js-scriptengine {:mvn/version "24.2.2"}}
+ :aliases
+ {:test {:extra-paths ["test" "test-resources"]
+         :extra-deps {io.velio/collet-test-support {:local/root "../test-support"}
+                      io.velio/collet-action-jdbc {:local/root "../collet-action-jdbc"}}
+         :override-deps {io.velio/collet-core {:local/root "../collet-core"}
+                         io.velio/collet-action-file {:local/root "../collet-action-file"}
+                         io.velio/collet-action-http {:local/root "../collet-action-http"}}
+         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "cognitect.test-runner"]}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}
+                 io.velio/collet-build-support {:local/root "../build-support"}}
+          :ns-default build}}}

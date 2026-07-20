@@ -1,0 +1,8 @@
+{:project "applied-science/darkstar"
+ :source "https://github.com/applied-science/darkstar"
+ :revision "541a3ff36065c59e92fe6aa61e41a4385ba6f893"
+ :license "MIT"
+ :copyright "Copyright (c) 2020 Applied Science"
+ :bundled {"vega.js" "5.10.1"
+           "vega-lite.js" "4.10.1"}
+ :notes "Source and resources were previously carried in collet-actions/lib/darkstar.jar. The namespace keeps its public API; the GraalJS bridge is adapted for current host-access rules."}
