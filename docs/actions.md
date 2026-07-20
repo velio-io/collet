@@ -4,6 +4,26 @@
 - [Built-in actions](#built-in-actions)
 - [Actions to work with external datasource's](#actions-to-work-with-external-datasources)
 
+Optional actions are published as separate artifacts so consumers only load the
+dependency families they use. Existing consumers may continue to use the
+`io.velio/collet-actions` compatibility aggregate; it exposes every legacy namespace
+through transitive dependencies. Namespace names, configuration keys, and action
+types are unchanged. The complete artifact-to-namespace mapping is in the
+[module migration guide](./module-migration.md#module-graph).
+Replace `VERSION` in the examples below with the release version you use.
+
+For example, an HTTP-only application can use:
+
+```clojure
+io.velio/collet-action-http {:mvn/version "VERSION"}
+```
+
+An existing all-actions application can keep using:
+
+```clojure
+io.velio/collet-actions {:mvn/version "VERSION"}
+```
+
 ## Types of actions
 
 Actions are functions defined by the `:type` key.
@@ -467,7 +487,8 @@ metrics you want to calculate. Available metrics are: `:sum` `:mean` `:median` `
 ## Actions to work with external datasource's
 
 Collet has a separate package with actions to work with external datasource's like third-party APIs, databases, etc.
-You'll have to include that package as a dependency `[io.velio/collet-actions "0.2.7"]`
+You can include the compatibility aggregate `[io.velio/collet-actions "VERSION"]`
+or the individual action artifact documented for the action below.
 Available actions are:
 
 ### HTTP request
@@ -560,8 +581,9 @@ Accepts all HTTP options and the following OData specific options:
 
 ### JDBC query
 
-`:collet.actions.jdbc/query` performs a JDBC query. Database drivers aren't included so you have to make sure that
-driver for a specific database is available in the classpath.
+`:collet.actions.jdbc/query` performs a JDBC query. The PostgreSQL driver is included
+because `collet.actions.jdbc-pg` imports its classes. For other databases, make sure
+the corresponding driver is available on the classpath.
 The request map can contain the following keys:
 
 - `:connection` - the JDBC connection properties map
@@ -579,7 +601,7 @@ The request map can contain the following keys:
 
 ```clojure
 {:name  :products-bought-by-users
- :deps  {:coordinates [[io.velio/collet-actions "0.2.7"]
+ :deps  {:coordinates [[io.velio/collet-actions "VERSION"]
                        [com.mysql/mysql-connector-j "9.0.0"]]}
  :tasks [{:name    :query
           :actions [{:name   :query-action
@@ -618,7 +640,7 @@ The request map can contain the following:
 
 ```clojure
 {:name  :s3-sink-test
- :deps  {:coordinates [[io.velio/collet-actions "0.2.7"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "VERSION"]]}
  :tasks [{:name    :s3-test-task
           :actions [{:name   :s3-action
                      :type   :collet.actions.s3/sink
@@ -669,7 +691,7 @@ Options:
 
 ```clojure
 {:name  :queue-sink-test
- :deps  {:coordinates [[io.velio/collet-actions "0.2.7"]]}
+ :deps  {:coordinates [[io.velio/collet-actions "VERSION"]]}
  :tasks [{:name    :write-messages
           :actions [{:name   :queue-action
                      :type   :collet.actions.queue/enqueue

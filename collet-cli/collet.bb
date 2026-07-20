@@ -28,7 +28,6 @@
   "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
   "--enable-native-access=ALL-UNNAMED"
   "-jar" pod-jar-path])
-;;(pods/load-pod ["lein" "run"])
 (require '[pod.collet.core :as collet])
 
 

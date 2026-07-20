@@ -42,47 +42,62 @@
    :dir           "collet-core"
    :source-dirs   ["src"]
    :resource-dirs ["resources"]
+   :namespaces    [collet.core]
    :internal-deps []}
 
   :collet-action-http
   {:lib io.velio/collet-action-http, :version "0.2.8-SNAPSHOT"
    :description "HTTP actions for Collet", :dir "collet-action-http"
+   :namespaces [collet.actions.http]
    :internal-deps [:collet-core]}
   :collet-action-file
   {:lib io.velio/collet-action-file, :version "0.2.8-SNAPSHOT"
    :description "File actions for Collet", :dir "collet-action-file"
+   :namespaces [collet.actions.file]
+   :integration-test? true
    :internal-deps [:collet-core :collet-action-http]}
   :collet-action-odata
   {:lib io.velio/collet-action-odata, :version "0.2.8-SNAPSHOT"
    :description "OData actions for Collet", :dir "collet-action-odata"
+   :namespaces [collet.actions.odata]
    :internal-deps [:collet-core :collet-action-http]}
   :collet-action-jdbc
   {:lib io.velio/collet-action-jdbc, :version "0.2.8-SNAPSHOT"
    :description "JDBC actions for Collet", :dir "collet-action-jdbc"
+   :namespaces [collet.actions.jdbc collet.actions.jdbc-pg]
+   :integration-test? true
    :internal-deps [:collet-core]}
   :collet-action-s3
   {:lib io.velio/collet-action-s3, :version "0.2.8-SNAPSHOT"
    :description "S3 actions for Collet", :dir "collet-action-s3"
+   :namespaces [collet.actions.s3]
+   :integration-test? true
    :internal-deps [:collet-core :collet-action-file]}
   :collet-action-queue
   {:lib io.velio/collet-action-queue, :version "0.2.8-SNAPSHOT"
    :description "Queue actions for Collet", :dir "collet-action-queue"
+   :namespaces [collet.actions.queue]
    :internal-deps [:collet-core]}
   :collet-action-jslt
   {:lib io.velio/collet-action-jslt, :version "0.2.8-SNAPSHOT"
    :description "JSLT actions for Collet", :dir "collet-action-jslt"
+   :namespaces [collet.actions.jslt]
    :internal-deps [:collet-core]}
   :collet-action-llm
   {:lib io.velio/collet-action-llm, :version "0.2.8-SNAPSHOT"
    :description "LLM actions for Collet", :dir "collet-action-llm"
+   :namespaces [collet.actions.llm]
    :internal-deps [:collet-core]}
   :collet-action-vega
   {:lib io.velio/collet-action-vega, :version "0.2.8-SNAPSHOT"
    :description "Vega rendering actions for Collet", :dir "collet-action-vega"
+   :namespaces [collet.actions.vega]
+   :integration-test? true
    :internal-deps [:collet-core :collet-action-file]}
   :collet-action-lucene
   {:lib io.velio/collet-action-lucene, :version "0.2.8-SNAPSHOT"
    :description "Lucene actions for Collet", :dir "collet-action-lucene"
+   :namespaces [collet.actions.lucene]
    :internal-deps [:collet-core]}
   :collet-actions
   {:lib io.velio/collet-actions, :version "0.2.8-SNAPSHOT"
@@ -90,6 +105,10 @@
    :dir "collet-actions"
    :source-dirs []
    :resource-dirs []
+   :namespaces [collet.actions.http collet.actions.file collet.actions.odata
+                collet.actions.jdbc collet.actions.jdbc-pg collet.actions.s3
+                collet.actions.queue collet.actions.jslt collet.actions.llm
+                collet.actions.vega collet.actions.lucene]
    :internal-deps [:collet-action-http :collet-action-file :collet-action-odata
                    :collet-action-jdbc :collet-action-s3 :collet-action-queue
                    :collet-action-jslt :collet-action-llm :collet-action-vega
@@ -98,6 +117,8 @@
   {:lib io.velio/collet-app, :version "0.2.8-SNAPSHOT"
    :description "Standalone Collet application", :dir "collet-app"
    :internal-deps [:collet-core]
+   :namespaces [collet.main]
+   :integration-test? true
    :main collet.main
    :build-task :uberjar
    :uber-file "target/collet.jar"}
@@ -105,6 +126,8 @@
   {:lib io.velio/collet-cli, :version "0.2.8-SNAPSHOT"
    :description "CLI interface for Collet", :dir "collet-cli"
    :internal-deps [:collet-app]
+   :namespaces [pod.collet.core]
+   :integration-test? true
    :main pod.collet.core
    :build-task :dist
    :uber-file "target/collet.pod.jar"

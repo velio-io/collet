@@ -1,37 +1,59 @@
-### Local build
+# Application deployment
+
+The application requires JDK 21 or newer. Build its preserved uberjar filename from
+the repository root:
 
 ```shell
-cp -r ~/.m2/repository/io/velio velio
-
-docker build -t collet .
-
-docker run \
-    -e PIPELINE_SPEC="/data/pipeline.edn" \
-    -e PIPELINE_CONFIG="/data/config.edn" \
-    -p 8080:8080 \
-    -m 500m \
-    collet
+bb build collet-app
+java -jar collet-app/target/collet.jar \
+  -s collet-app/configs/sample-pipeline.edn \
+  -c '{}'
 ```
 
-### Production build
+The application library JAR can be installed independently with
+`bb install collet-app`; the executable artifact remains
+`collet-app/target/collet.jar` with main namespace `collet.main`.
 
-Create a builder for multi-arch builds
+## Local Docker image
+
+The Docker build context must be the repository root because the builder consumes
+the shared graph, build support, core, and application modules:
+
+```shell
+docker build -f collet-app/Dockerfile -t collet .
+
+docker run --rm \
+  -e PIPELINE_SPEC='{:name :example :tasks []}' \
+  -e PIPELINE_CONFIG='{}' \
+  -p 8080:8080 \
+  -m 500m \
+  collet
+```
+
+The builder uses Clojure CLI with JDK 21. The runtime image preserves the existing
+JVM options, JMX agent on port 8080, `/tini` entrypoint, environment variables, and
+startup command.
+
+## Multi-architecture image
+
+Create and bootstrap a Docker Buildx builder once:
 
 ```shell
 docker buildx create --name collet-builder
 docker buildx use collet-builder
-```
-
-Verify that the builder is created
-
-```shell
 docker buildx inspect --bootstrap
 ```
 
-Login to Docker Hub.
-
-Build and push the image
+After authenticating to the target registry, build from the repository root:
 
 ```shell
-docker buildx build --tag velioio/collet:0.1.0 --tag velioio/collet:latest --platform linux/arm64,linux/amd64 --push .
+docker buildx build \
+  -f collet-app/Dockerfile \
+  --tag velioio/collet:VERSION \
+  --tag velioio/collet:latest \
+  --platform linux/arm64,linux/amd64 \
+  --push .
 ```
+
+Repository release tasks publish Maven artifacts only. Docker pushes remain an
+explicit deployment operation.

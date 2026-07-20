@@ -1,5 +1,4 @@
-{:paths
- ["scripts"]
+{:paths ["scripts"]
 
  :deps
  {babashka/fs      {:mvn/version "0.5.22"}
@@ -7,42 +6,42 @@
 
  :tasks
  {:requires
-  ([babashka.fs :as fs]
-   [babashka.process :as ps]
-   [release :as release]
+  ([release :as release]
+   [verify :as verify]
    [workspace :as workspace])
 
+  test
+  {:doc  "Run every unit and Docker integration test in separate JVMs"
+   :task (workspace/test-all)}
+
+  test:unit
+  {:doc  "Run every module test suite without :integration tests"
+   :task (workspace/test-unit)}
+
+  test:integration
+  {:doc  "Run Docker-backed and artifact startup integration tests"
+   :task (workspace/test-integration)}
+
   test:module
-  {:doc  "Test one migrated module in its own JVM"
+  {:doc  "Test one module: bb test:module <module> [test-runner-options]"
    :task (workspace/test-module *command-line-args*)}
 
   build
-  {:doc  "Build one migrated module (defaults to every migrated module)"
+  {:doc  "Build one module (defaults to all modules)"
    :task (workspace/build *command-line-args*)}
 
   install
-  {:doc  "Install one migrated module (defaults to every migrated module)"
+  {:doc  "Install one module and its dependencies (defaults to all libraries)"
    :task (workspace/install *command-line-args*)}
 
-  dev-setup
-  {:doc  "Create a checkouts folders and symlinks for sub projects"
-   :task (do (ps/shell {:dir "collet-core"} "lein" "install")
-             (fs/create-dir "collet-actions/checkouts")
-             (fs/create-sym-link "collet-actions/checkouts/collet-core" "../../collet-core/")
-             (fs/create-dir "collet-app/checkouts")
-             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/")
-             (ps/shell {:dir "collet-app"} "lein" "install")
-             (fs/create-dir "collet-cli/checkouts")
-             (fs/create-sym-link "collet-cli/checkouts/collet-app" "../../collet-app/"))}
-
-
-  dev-cleanup
-  {:doc  "Cleanup dev resources"
-   :task (do (fs/delete-tree "collet-actions/checkouts")
-             (fs/delete-tree "collet-app/checkouts")
-             (fs/delete-tree "collet-cli/checkouts"))}
-
+  verify
+  {:doc  "Build and inspect artifacts, dependency trees, and isolated consumers"
+   :task (verify/verify)}
 
   release
-  {:doc  "Make a new Collet release"
-   :task (release/make-release)}}}
+  {:doc  "Test, verify, deploy, and tag one release: bb release <module>"
+   :task (release/release-module *command-line-args*)}
+
+  release:all
+  {:doc  "Release every publishable module in dependency order"
+   :task (release/release-all)}}}

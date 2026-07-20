@@ -8,18 +8,30 @@
 (def manifest
   (delay (edn/read-string (slurp "build/modules.edn"))))
 
-(defn- module-key [value]
+(defn module-key [value]
   (keyword value))
 
-(defn- module-config [module]
-  (or (get-in @manifest [:modules module])
-      (throw (ex-info (str "Unknown module: " (name module))
-                      {:module module}))))
+(defn module-config [module]
+  (if-let [config (get-in @manifest [:modules module])]
+    (merge {:source-dirs ["src"]
+            :resource-dirs ["resources"]
+            :publish? true}
+           config)
+    (throw (ex-info (str "Unknown module: " (name module))
+                    {:module module}))))
 
-(defn- migrated? [module]
+(defn migrated? [module]
   (let [{:keys [dir]} (module-config module)]
     (and (fs/exists? (fs/path dir "deps.edn"))
          (fs/exists? (fs/path dir "build.clj")))))
+
+(defn publish? [module]
+  (not= false (:publish? (module-config module))))
+
+(defn modules []
+  (->> (:module-order @manifest)
+       (filter migrated?)
+       vec))
 
 (defn- selected-modules [args]
   (if-let [module (some-> (first args) module-key)]
@@ -29,31 +41,54 @@
         (throw (ex-info (str "Module has not migrated yet: " (name module))
                         {:module module})))
       [module])
-    (->> (:module-order @manifest)
-         (filter migrated?))))
+    (modules)))
 
 (defn- clojure! [module & args]
   (let [{:keys [dir]} (module-config module)]
     (println (str "\n==> " (name module) " " (str/join " " args)))
     (apply process/shell {:dir dir} "clojure" args)))
 
-(defn- publish? [module]
-  (not= false (:publish? (module-config module))))
+(defn build-library! [module local-repo]
+  (module-config module)
+  (if local-repo
+    (clojure! module "-T:build" "jar" ":mvn/local-repo" (pr-str local-repo))
+    (clojure! module "-T:build" "jar")))
+
+(defn install-module-to! [module local-repo]
+  (when-not (publish? module)
+    (throw (ex-info "Module is not a published Maven artifact" {:module module})))
+  (clojure! module "-T:build" "install"
+            ":mvn/local-repo" (pr-str local-repo)))
 
 (defn- build-task [module]
   (name (or (:build-task (module-config module)) :jar)))
 
-(defn- install-dependencies! [module installed]
+(defn- install-module! [module installed local-repo]
   (doseq [dependency (:internal-deps (module-config module))]
-    (install-dependencies! dependency installed)
-    (when (and (publish? dependency)
-               (not (contains? @installed dependency)))
-      (clojure! dependency "-T:build" "install")
-      (swap! installed conj dependency))))
+    (install-module! dependency installed local-repo))
+  (when (and (publish? module)
+             (not (contains? @installed module)))
+    (if local-repo
+      (clojure! module "-T:build" "install" ":mvn/local-repo" (pr-str local-repo))
+      (clojure! module "-T:build" "install"))
+    (swap! installed conj module)))
 
 (defn- build-module! [module installed]
-  (install-dependencies! module installed)
+  (doseq [dependency (:internal-deps (module-config module))]
+    (install-module! dependency installed nil))
+  ;; Deployable modules also publish a library JAR. Install that JAR before
+  ;; building the uberjar so downstream deployables can consume it without a
+  ;; later install wiping the preserved uberjar filename from target/.
+  (when (and (publish? module)
+             (:build-task (module-config module))
+             (not (contains? @installed module)))
+    (install-module! module installed nil))
   (clojure! module "-T:build" (build-task module)))
+
+(defn- run-test! [module test-runner-options build-artifact?]
+  (when build-artifact?
+    (build-module! module (atom #{})))
+  (apply clojure! module "-M:test" test-runner-options))
 
 (defn test-module [args]
   (when-not (seq args)
@@ -64,9 +99,21 @@
     (when-not (migrated? module)
       (throw (ex-info (str "Module has not migrated yet: " (name module))
                       {:module module})))
-    (when (:build-task (module-config module))
-      (build-module! module (atom #{})))
-    (apply clojure! module "-M:test" (rest args))))
+    (run-test! module (rest args) (boolean (:build-task (module-config module))))))
+
+(defn test-unit []
+  (doseq [module (modules)]
+    (run-test! module ["-e" ":integration"] false)))
+
+(defn test-integration []
+  (doseq [module (modules)
+          :when (:integration-test? (module-config module))]
+    (run-test! module ["-i" ":integration"]
+               (boolean (:build-task (module-config module))))))
+
+(defn test-all []
+  (test-unit)
+  (test-integration))
 
 (defn build [args]
   (let [installed (atom #{})]
@@ -74,6 +121,11 @@
       (build-module! module installed))))
 
 (defn install [args]
-  (doseq [module (selected-modules args)]
-    (when (publish? module)
-      (clojure! module "-T:build" "install"))))
+  (let [installed (atom #{})]
+    (doseq [module (selected-modules args)]
+      (install-module! module installed nil))))
+
+(defn install-to! [local-repo]
+  (let [installed (atom #{})]
+    (doseq [module (modules)]
+      (install-module! module installed local-repo))))

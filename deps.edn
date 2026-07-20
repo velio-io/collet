@@ -15,4 +15,7 @@
          io.velio/collet-cli           {:local/root "collet-cli"}}
  :aliases
  {:dev {:extra-deps {io.velio/collet-test-support
-                     {:local/root "test-support"}}}}}
+                     {:local/root "test-support"}}}
+  :release
+  {:extra-deps {slipset/deps-deploy {:mvn/version "0.2.5"}}
+   :exec-fn deps-deploy.deps-deploy/deploy}}}

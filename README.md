@@ -15,6 +15,7 @@ making it easier to manage complex data workflows.
 - [Actions](#actions)
 - [Using Collet with Docker](#using-collet-with-docker)
 - [Collet as a library](#collet-as-a-library)
+- [Modules and development](#modules-and-development)
 
 ## Quick start
 
@@ -88,10 +89,8 @@ Don't worry if you don't understand everything at once, we will explain it step 
 
 ```clojure
 {:name  :comments-sentiment-analysis
- ;; include postgres jdbc driver as a runtime dependency
- :deps  {:coordinates [[org.postgresql/postgresql "42.7.3"]
-                       ;; also you can include a library with some prebuilt actions
-                       [io.velio/collet-actions "0.2.7"]]
+ ;; include the compatibility library with all prebuilt actions
+ :deps  {:coordinates [[io.velio/collet-actions "VERSION"]]
          ;; you'll need to require namespaces with actions we're going to use
          :requires    [[collet.actions.jdbc-pg]]} ;; postgres specific bindings
  ;; define the pipeline tasks
@@ -410,7 +409,12 @@ action execution.
 will be called without arguments.
 `:return` is a "path vector" (with special syntax supported)
 
-Also, Collet provides a separate package for more complex actions - `[io.velio/collet-actions "0.2.7"]`
+Collet provides optional actions as isolated artifacts. The compatibility aggregate
+`[io.velio/collet-actions "VERSION"]` still exposes every existing action namespace,
+so existing pipeline specifications and action types do not change. Applications can
+instead depend only on the action modules they use; see the
+[action dependency table](./docs/module-migration.md#module-graph).
+Replace `VERSION` in dependency examples with the release version you use.
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
 `:collet.actions.queue/enqueue`, `:collet.actions.jslt/apply`, `:collet.actions.llm/openai`
@@ -437,9 +441,7 @@ git clone git@github.com:velio-io/collet.git && cd collet
 Then build the image with the following command:
 
 ```shell
-cd collet-app
-
-docker build -t velioio/collet .
+docker build -f collet-app/Dockerfile -t velioio/collet .
 ```
 
 To run Collet, you need to provide a pipeline specification and optionally a pipeline config map.
@@ -498,17 +500,12 @@ You can change this using the `JMX_PORT` environment variable.
 Collet core library heavily relies on latest Java features, such as virtual threads.
 So you'll need JDK 21 or higher to run it.
 Add the following dependency to your project:
+Replace `VERSION` with the release version you use.
 
-For Leiningen:
-
-```clojure
-[io.velio/collet-core "0.2.7"]
-```
-
-For deps.edn:
+For `deps.edn`:
 
 ```clojure
-io.velio/collet-core {:mvn/version "0.2.7"}
+io.velio/collet-core {:mvn/version "VERSION"}
 ```
 
 After adding Collet to your project dependencies, you can use it as follows:
@@ -549,6 +546,23 @@ After adding Collet to your project dependencies, you can use it as follows:
 (collet/pipe-status my-pipeline)
 (collet/pipe-error my-pipeline)
 ```
+
+### Modules and development
+
+The repository is a Clojure CLI workspace built with `tools.build` and orchestrated
+with Babashka. Each public artifact has its own `deps.edn` and can be tested, built,
+installed, and released independently.
+
+```shell
+bb test:unit
+bb test:module collet-action-http
+bb build collet-app
+bb verify
+```
+
+See [development](./docs/development.md), [module migration](./docs/module-migration.md),
+and [release](./docs/releasing.md) for prerequisites, the complete command contract,
+versioning, Docker tests, and compatibility guidance.
 
 ## License
 

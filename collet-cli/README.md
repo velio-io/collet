@@ -51,16 +51,26 @@ Available prompt actions are:
 
 ### Deploy the script
 
-Build the uberjar file for collet pod and pack it as a tar file.
+From the repository root, build the pod uberjar and distribution archive:
 
 ```shell
-bb build
+bb build collet-cli
 ```
 
-This will produce a `target/collet-cli.tar.gz` file.
+This produces `collet-cli/target/collet.pod.jar` and
+`collet-cli/target/collet-cli.tar.gz`. The archive contains the `collet-cli/`
+directory with `bb.edn`, executable `collet.bb`, `collet.pod.jar`, and executable
+`gum`. The pod main namespace remains `pod.collet.core`.
 You can upload this file to GitHub releases.
 
 ### Development
+
+Building requires JDK 21 or newer, Clojure CLI, and Babashka. Run the pod artifact
+startup test with:
+
+```shell
+bb test:module collet-cli
+```
 
 When you are developing the collet-cli, you can use the following command to run the CLI.
 

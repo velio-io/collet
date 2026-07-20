@@ -75,8 +75,14 @@
     (copy-license! target)))
 
 (defn- basis [opts]
-  (cond-> (b/create-basis {:project "deps.edn"})
-    (:mvn/local-repo opts) (assoc :mvn/local-repo (:mvn/local-repo opts))))
+  (b/create-basis
+   (cond-> {:root {:mvn/repos
+                   {"central" {:url "https://repo1.maven.org/maven2/"}
+                    "clojars" {:url "https://repo.clojars.org/"}}}
+            :user nil
+            :project "deps.edn"}
+     (:mvn/local-repo opts)
+     (assoc :extra {:mvn/local-repo (:mvn/local-repo opts)}))))
 
 (defn- pom-path [{:keys [lib] :as config}]
   (str (class-dir config) "/META-INF/maven/"
