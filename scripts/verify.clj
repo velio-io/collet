@@ -332,7 +332,8 @@
 
 (def ^:private per-artifact-tag-pattern
   (re-pattern
-   (str "(?i)<artifact>" "-v<version>|[a-z][a-z0-9-]*-v\\d+\\.\\d+\\.\\d+")))
+   (str "(?i)(?:<[a-z][a-z0-9-]*>|[a-z][a-z0-9-]*)-v"
+        "(?:<version>|version|\\d+\\.\\d+\\.\\d+)")))
 
 (defn- tracked-files-under [directory]
   (->> (file-seq (fs/file directory))

@@ -32,9 +32,9 @@ bb version 0.3.0-SNAPSHOT
 ```
 
 The command validates the requested version, updates the shared graph version and
-every internal Maven pin as one operation, and rejects any stale,
-unexpected, or module-local internal coordinate. It does not commit, tag, publish,
-or push.
+every internal Maven pin as one operation, and rejects stale or unexpected internal
+pins. Module-local `:version` entries are rejected by `bb verify`'s repository
+consistency check. `bb version` does not commit, tag, publish, or push.
 
 ## Maven release
 
