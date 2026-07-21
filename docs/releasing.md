@@ -2,8 +2,8 @@
 
 Collet packages are versioned independently by Kmono 4.12.3. Versions do not live
 in source files and are never rewritten during publication. Kmono reads package
-tags and conventional commits, while the root build converts internal `:local/root`
-dependencies to exact Maven versions in generated POMs.
+tags and conventional commits, and it converts internal `:local/root` dependencies
+to exact Maven versions when the root build asks it to generate POMs.
 
 Tags use `<coordinate>@<version>`, for example:
 
@@ -166,9 +166,23 @@ clojure -X:release :installer :remote :sign-releases? false \
   :pom-file '"/absolute/path/pom.xml"'
 ```
 
-After every selected Maven coordinate exists, create the exact planned package tags
-at the release revision and push them together with `git push --atomic`. Do not
-create or push any package tag while a selected Maven coordinate is missing.
+After every selected Maven coordinate exists, create every exact planned package tag
+at the release revision and push all of them atomically. Copy every selected tag from
+the printed plan into this command; do not omit tag-only packages:
+
+```shell
+release_revision=$(git rev-parse HEAD)
+planned_tags=(
+  'io.velio/collet-core@0.2.9'
+  'io.velio/collet-cli@0.2.9'
+)
+for planned_tag in "${planned_tags[@]}"; do
+  git tag "$planned_tag" "$release_revision"
+done
+git push --atomic origin "${planned_tags[@]}"
+```
+
+Do not create or push any package tag while a selected Maven coordinate is missing.
 
 ## GitHub and CLI distribution
 

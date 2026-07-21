@@ -26,7 +26,11 @@
   (is (= [["clojure" "-T:build" "build" ":module" ":collet-cli"]
           ["clojure" "-M:kmono" "run" "-F" ":io.velio/collet-cli"
            "--M" ":test"]]
-         (workspace/module-test-commands ["collet-cli"]))))
+         (workspace/module-test-commands ["collet-cli"])))
+  (is (= [["clojure" "-T:build" "build" ":module" ":collet-app"]
+          ["clojure" "-M:kmono" "run" "-F" ":io.velio/collet-app"
+           "--M" ":test"]]
+         (workspace/module-test-commands ["collet-app"]))))
 
 (deftest build-command-vector
   (is (= [["clojure" "-T:build" "build" ":module" ":collet-app"]]
