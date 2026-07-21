@@ -138,6 +138,24 @@
               (build/resolve-context! root {:changes? true})
               :pkg-b))))))
 
+(deftest module-filter-excludes-releasing-siblings-of-unchanged-dependencies
+  (let [core 'example/core
+        selected 'example/selected
+        sibling 'example/sibling
+        aggregate 'example/aggregate
+        packages {core {:fqn core :release? false :reason :unchanged
+                        :depends-on #{} :dependents #{selected sibling}}
+                  selected {:fqn selected :release? true :reason :patch
+                            :depends-on #{core} :dependents #{aggregate}}
+                  sibling {:fqn sibling :release? true :reason :patch
+                           :depends-on #{core} :dependents #{}}
+                  aggregate {:fqn aggregate :release? true :reason :dependency
+                             :depends-on #{selected} :dependents #{}}}
+        context {:packages packages
+                 :order [core selected sibling aggregate]}]
+    (is (= [selected aggregate]
+           (build/release-packages context :selected)))))
+
 (deftest resolve-context-requires-complete-docker-version-overrides
   (with-workspace
     (fn [root]

@@ -198,10 +198,13 @@
                    (set (keys packages))
                    (let [required (conj
                                    (kmono.graph/query-dependencies packages fqn)
-                                   fqn)]
+                                   fqn)
+                         release-required (filter
+                                           #(get-in packages [% :release?])
+                                           required)]
                      (into required
                            (mapcat #(kmono.graph/query-dependents packages %))
-                           required)))]
+                           release-required)))]
     (filterv #(and (contains? selected %)
                    (get-in packages [% :release?]))
              order)))
