@@ -209,6 +209,27 @@
            #"Unknown or ambiguous workspace package"
            #(build/package-version {:root root :module :missing}))))))
 
+(deftest build-packages-binds-each-selected-package-root-in-dependency-order
+  (with-workspace
+    (fn [root]
+      (b/with-project-root root
+        (let [{:keys [packages] :as context} (build/resolve-context! root)
+              selected ['example/pkg-a 'example/pkg-b]
+              calls (atom [])]
+          (with-redefs-fn
+            {(ns-resolve 'collet.build 'build-package!)
+             (fn [_ package _]
+               (swap! calls conj
+                      [(:fqn package)
+                       (.getCanonicalPath (b/resolve-path "."))])
+               {:package (:fqn package)})}
+            #(build/build-packages context selected {}))
+          (is (= (mapv (fn [fqn]
+                         [fqn (str (fs/canonicalize
+                                    (get-in packages [fqn :absolute-path])))])
+                       selected)
+                 @calls)))))))
+
 (deftest chooses-publishable-and-local-build-bases
   (with-workspace
     (fn [root]

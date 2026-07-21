@@ -459,16 +459,21 @@
 
   Release planning has already selected this set, so this deliberately does
   not expand it to unchanged dependencies."
-  [{:keys [packages order] :as context} package-fqns opts]
+  [{:keys [packages] :as context} package-fqns opts]
   (let [selected (set package-fqns)
-        results (reduce
-                 (fn [artifacts fqn]
-                   (assoc artifacts fqn
-                          (build-package! context (get packages fqn) opts)))
-                 {}
-                 (filter selected order))]
+        selected-packages (kmono.graph/filter-by
+                           #(contains? selected (:fqn %))
+                           packages)
+        selected-packages (update-vals
+                           selected-packages
+                           #(assoc % :relative-path (:absolute-path %)))
+        results (atom {})]
+    (kmono.build/for-each-package selected-packages {:concurrency 1}
+      (fn [package]
+        (swap! results assoc (:fqn package)
+               (build-package! context package opts))))
     {:versions (into {} (map (juxt key (comp :version val))) packages)
-     :artifacts results}))
+     :artifacts @results}))
 
 (defn install
   "Build and install publishable workspace packages in dependency order."
