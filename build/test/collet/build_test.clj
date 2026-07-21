@@ -113,6 +113,23 @@
            #(build/resolve-workspace-context!
              root {:versions {'example/pkg-a "2.1.0"}}))))))
 
+(deftest package-version-prints-the-exact-kmono-version
+  (with-workspace
+    (fn [root]
+      (is (= "0.2.8\n"
+             (with-out-str
+               (build/package-version {:root root :module :pkg-a})))))))
+
+(deftest package-version-requires-a-known-module
+  (with-workspace
+    (fn [root]
+      (is (thrown-with-message?
+           #"Package module is required"
+           #(build/package-version {:root root})))
+      (is (thrown-with-message?
+           #"Unknown or ambiguous workspace package"
+           #(build/package-version {:root root :module :missing}))))))
+
 (deftest chooses-publishable-and-local-build-bases
   (with-workspace
     (fn [root]

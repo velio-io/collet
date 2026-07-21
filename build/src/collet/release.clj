@@ -71,10 +71,13 @@
              {:element name :count (count matches)}))
     (first matches)))
 
+(defn- parse-pom [pom]
+  (xml/parse-str pom
+                 :support-dtd false
+                 :supporting-external-entities false))
+
 (defn- direct-pom-coordinate [pom]
-  (let [project (xml/parse-str pom
-                               :support-dtd false
-                               :supporting-external-entities false)]
+  (let [project (parse-pom pom)]
     (when-not (= "project" (name (:tag project)))
       (fail! "Maven POM root element must be project" {:root (:tag project)}))
     (let [elements (direct-elements project)
@@ -83,6 +86,46 @@
        :artifact (element-value (exactly-one elements "artifactId") "artifactId")
        :version (element-value (exactly-one elements "version") "version")
        :scm-tag (element-value (exactly-one (direct-elements scm) "tag") "tag")})))
+
+(defn verify-direct-dependency!
+  "Require one exact direct Maven dependency in a POM."
+  [pom expected-fqn expected-version]
+  (try
+    (let [project (parse-pom pom)]
+      (when-not (= "project" (name (:tag project)))
+        (fail! "Maven POM root element must be project" {:root (:tag project)}))
+      (let [dependency-elements
+            (mapcat #(get (direct-elements %) "dependency")
+                    (get (direct-elements project) "dependencies"))
+            dependencies
+            (mapv (fn [dependency]
+                    (let [elements (direct-elements dependency)]
+                      {:group (element-value
+                               (exactly-one elements "groupId") "groupId")
+                       :artifact (element-value
+                                  (exactly-one elements "artifactId") "artifactId")
+                       :version (element-value
+                                 (exactly-one elements "version") "version")}))
+                  dependency-elements)
+            expected {:group (namespace expected-fqn)
+                      :artifact (name expected-fqn)
+                      :version expected-version}
+            matches (filter #(and (= (:group expected) (:group %))
+                                  (= (:artifact expected) (:artifact %)))
+                            dependencies)]
+        (when-not (= 1 (count matches))
+          (fail! "POM dependency must be declared exactly once"
+                 {:dependency expected-fqn :count (count matches)}))
+        (when-not (= expected (first matches))
+          (fail! "POM dependency version does not match"
+                 {:dependency expected-fqn
+                  :expected expected-version
+                  :actual (:version (first matches))}))
+        true))
+    (catch clojure.lang.ExceptionInfo error
+      (throw error))
+    (catch Exception error
+      (throw (ex-info "Malformed Maven POM" {} error)))))
 
 (defn- jar-entry [jar-path entry]
   (with-open [jar (JarFile. (str jar-path))]
@@ -128,6 +171,25 @@
         prefix (str "META-INF/maven/" group "/" artifact "/")
         pom-text (jar-entry jar-path (str prefix "pom.xml"))]
     (verify-publication package revision pom-text jar-path)))
+
+(defn verify-image-jar!
+  "Verify app artifact identity and its exact direct core dependency."
+  [package revision core-version jar-path]
+  (when-not (= :matching (verify-jar package revision jar-path))
+    (fail! "Image application JAR identity does not match its package tag"
+           {:jar (str jar-path)}))
+  (let [group (namespace (:fqn package))
+        artifact (name (:fqn package))
+        pom-text (jar-entry jar-path
+                            (str "META-INF/maven/" group "/" artifact
+                                 "/pom.xml"))]
+    (try
+      (verify-direct-dependency! pom-text 'io.velio/collet-core core-version)
+      (catch Exception error
+        (throw (ex-info "Application POM does not use the expected core version"
+                        {:expected core-version :jar (str jar-path)}
+                        error)))))
+  true)
 
 (defn- command-result [options command]
   (apply shell/sh (concat command
@@ -436,7 +498,11 @@
         (when-not (and (:release? package) (= version (:version package)))
           (fail! "Package tag does not match the checkout package version"
                  {:tag tag :package expected-fqn}))
-        {:tag tag :version version :revision revision :package package}))))
+        {:tag tag
+         :version version
+         :revision revision
+         :package package
+         :packages (:packages plan)}))))
 
 (defn verify-cli
   "Verify CLI artifacts from a detached CLI package-tag checkout."
@@ -471,14 +537,18 @@
   "Verify an application image against an app package tag."
   [{:keys [root tag image] :or {root "."}}]
   (let [fqn 'io.velio/collet-app
-        {:keys [version revision package] :as context}
+        {:keys [version revision package packages] :as context}
         (ensure-tag-checkout! root tag fqn)
+        core-version (get-in packages ['io.velio/collet-core :version])
         labels (command-output
                 {}
                 "docker" "image" "inspect" "--format"
                 (str "{{ index .Config.Labels \"org.opencontainers.image.version\" }} "
                      "{{ index .Config.Labels \"org.opencontainers.image.revision\" }}")
                 image)]
+    (when (str/blank? core-version)
+      (fail! "Cannot resolve the app checkout's core package version"
+             {:tag tag :package 'io.velio/collet-core}))
     (when-not (= (str version " " revision) labels)
       (fail! "Docker image identity does not match the app package tag"
              {:image image :tag tag :labels labels}))
@@ -487,9 +557,7 @@
           container (command-output {} "docker" "create" image)]
       (try
         (command! {} "docker" "cp" (str container ":/app/collet.jar") (str jar))
-        (when-not (= :matching (verify-jar package revision jar))
-          (fail! "Image application JAR identity does not match its package tag"
-                 {:jar (str jar)}))
+        (verify-image-jar! package revision core-version jar)
         (finally
           (try
             (command! {} "docker" "rm" "-f" container)

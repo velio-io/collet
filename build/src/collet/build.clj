@@ -247,6 +247,15 @@
     (resolve-workspace-context! nil opts)
     (resolve-workspace-context!)))
 
+(defn package-version
+  "Print the exact Kmono version for one workspace package."
+  [{:keys [root module]}]
+  (when-not module
+    (throw (ex-info "Package module is required" {})))
+  (let [{:keys [packages]} (resolve-workspace-context! root)
+        fqn (workspace/package-fqn packages module)]
+    (println (get-in packages [fqn :version]))))
+
 (defn clean
   "Clean every package target, or one package and its workspace dependencies."
   [{:keys [module]}]

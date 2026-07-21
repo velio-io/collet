@@ -173,18 +173,18 @@ worktree with `git worktree remove "$cli_worktree"`.
 ## Docker publication
 
 Build the image later from a separate detached `io.velio/collet-app@<version>`
-worktree. Because app and core versions are independent, pass both exact values;
-use the app package version from the tag and the exact core version recorded in the
-released app POM/release plan. Pass the tag commit as the source revision, verify the
-local image, and only then upload it:
+worktree. Because app and core versions are independent, derive the app version from
+the tag and ask the root build for the exact Kmono-resolved core version at that tagged
+commit. Pass both values and the tag commit as build inputs, verify the local image,
+and only then upload it:
 
 ```shell
 tag='io.velio/collet-app@0.2.8'
 app_version=${tag##*@}
-core_version='0.2.8' # use the exact io.velio/collet-core version in this app POM
 docker_worktree=$(mktemp -d)
 git worktree add --detach "$docker_worktree" "$tag"
 cd "$docker_worktree"
+core_version=$(clojure -T:build package-version :module :collet-core)
 revision=$(git rev-parse "$tag^{}")
 registry=registry.example.com/your-team
 image="$registry/collet:$app_version"
@@ -198,9 +198,11 @@ bb release:verify-image "$tag" "$image"
 docker push "$image"
 ```
 
-The verifier checks OCI version/revision labels and the application JAR's embedded
-identity against the app package tag. Return to the original checkout before
-removing the temporary worktree with `git worktree remove "$docker_worktree"`.
+The verifier checks OCI version/revision labels, the application JAR's embedded
+identity, and that its embedded POM declares exactly one direct
+`io.velio/collet-core` dependency at the Kmono-resolved version. Return to the
+original checkout before removing the temporary worktree with
+`git worktree remove "$docker_worktree"`.
 
 See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime and
 multi-architecture deployment details.

@@ -46,17 +46,17 @@ docker buildx inspect --bootstrap
 
 After `bb release` creates an application package tag, authenticate to the target
 registry and create a separate, clean, detached worktree of that exact tag. App and
-core versions are independent: derive the app version from the tag and set the core
-version to the exact `io.velio/collet-core` version in the released app POM or
-reviewed release plan. Both versions and the tag revision are required build inputs:
+core versions are independent: derive the app version from the tag and ask the root
+build for the exact Kmono-resolved `io.velio/collet-core` version at that tagged
+commit. Both versions and the tag revision are required build inputs:
 
 ```shell
 tag='io.velio/collet-app@0.2.8'
 app_version=${tag##*@}
-core_version='0.2.8' # exact io.velio/collet-core version used by this app
 docker_worktree=$(mktemp -d)
 git worktree add --detach "$docker_worktree" "$tag"
 cd "$docker_worktree"
+core_version=$(clojure -T:build package-version :module :collet-core)
 revision=$(git rev-parse "$tag^{}")
 image="velioio/collet:$app_version"
 
@@ -84,6 +84,9 @@ docker buildx build \
 ```
 
 Repository release tasks never push Docker images. Docker publication remains an
-explicit operation from the app package tag. Return to the original checkout before
-running `git worktree remove "$docker_worktree"`. A Docker push failure does not
-change Maven publication, the CLI GitHub release, or any package version tag.
+explicit operation from the app package tag. `bb release:verify-image` also rejects
+an image whose embedded app POM does not declare exactly one direct
+`io.velio/collet-core` dependency at that resolved version. Return to the original
+checkout before running `git worktree remove "$docker_worktree"`. A Docker push
+failure does not change Maven publication, the CLI GitHub release, or any package
+version tag.

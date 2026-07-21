@@ -116,6 +116,20 @@
        "<version>" version "</version><scm><tag>" tag
        "</tag></scm></project>"))
 
+(defn- dependency [group artifact version]
+  (str "<dependency><groupId>" group "</groupId>"
+       "<artifactId>" artifact "</artifactId>"
+       (when version (str "<version>" version "</version>"))
+       "</dependency>"))
+
+(defn- app-pom [dependencies]
+  (str "<project><modelVersion>4.0.0</modelVersion>"
+       "<groupId>io.velio</groupId><artifactId>collet-app</artifactId>"
+       "<version>2.4.0</version>"
+       "<scm><tag>io.velio/collet-app@2.4.0</tag></scm>"
+       dependencies
+       "</project>"))
+
 (deftest plan-display-shows-package-current-next-reason-tag-and-publication
   (let [output (release/format-plan plan)]
     (doseq [text ["PACKAGE" "CURRENT" "NEXT" "REASON" "TAG" "PUBLICATION"
@@ -327,6 +341,65 @@
                    "</parent><scm><tag>example/pkg-a@1.2.4</tag></scm>"
                    "</project>")
               (str jar))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest direct-pom-dependency-requires-one-exact-core-coordinate
+  (let [core (dependency "io.velio" "collet-core" "1.7.2")]
+    (is (true? (release/verify-direct-dependency!
+                (app-pom (str "<dependencies>" core "</dependencies>"))
+                'io.velio/collet-core
+                "1.7.2")))
+    (doseq [[case pom-text]
+            [["missing"
+              (app-pom "<dependencies></dependencies>")]
+             ["duplicate"
+              (app-pom (str "<dependencies>" core core "</dependencies>"))]
+             ["wrong version"
+              (app-pom
+               (str "<dependencies>"
+                    (dependency "io.velio" "collet-core" "9.9.9")
+                    "</dependencies>"))]
+             ["nested only"
+              (app-pom
+               (str "<dependencyManagement><dependencies>" core
+                    "</dependencies></dependencyManagement>"))]
+             ["malformed dependency"
+              (app-pom
+               (str "<dependencies>"
+                    (dependency "io.velio" "collet-core" nil)
+                    "</dependencies>"))]
+             ["malformed XML"
+              "<project><dependencies>"]]]
+      (testing case
+        (is (some? (exception
+                    #(release/verify-direct-dependency!
+                      pom-text 'io.velio/collet-core "1.7.2"))))))))
+
+(deftest image-jar-verification-includes-the-core-pom-dependency
+  (let [root (fs/create-temp-dir {:prefix "collet-image-jar-test-"})
+        jar (fs/path root "collet.jar")
+        package {:fqn 'io.velio/collet-app
+                 :version "2.4.0"
+                 :tag "io.velio/collet-app@2.4.0"}
+        pom-text (app-pom
+                  (str "<dependencies>"
+                       (dependency "io.velio" "collet-core" "1.7.2")
+                       "</dependencies>"))]
+    (try
+      (write-jar!
+       jar
+       {"META-INF/collet/build.edn"
+        (pr-str {:version "2.4.0" :revision revision})
+        "META-INF/maven/io.velio/collet-app/pom.xml" pom-text
+        "META-INF/maven/io.velio/collet-app/pom.properties"
+        "groupId=io.velio\nartifactId=collet-app\nversion=2.4.0\n"})
+      (is (true? (release/verify-image-jar!
+                  package revision "1.7.2" (str jar))))
+      (is (= "Application POM does not use the expected core version"
+             (ex-message
+              (exception #(release/verify-image-jar!
+                            package revision "9.9.9" (str jar))))))
       (finally
         (fs/delete-tree root)))))
 
