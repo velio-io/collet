@@ -18,8 +18,7 @@
    ["clojure" "-M:kmono" "run" "--M" ":test" "--" "-e" ":integration"]])
 
 (defn integration-test-commands []
-  [["clojure" "-T:build" "build" ":module" ":collet-app"]
-   ["clojure" "-T:build" "build" ":module" ":collet-cli"]
+  [["clojure" "-T:build" "build" ":module" ":collet-cli"]
    ["clojure" "-M:kmono" "run" "--M" ":test:integration"
     "--" "-i" ":integration"]])
 

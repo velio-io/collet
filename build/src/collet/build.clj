@@ -20,11 +20,6 @@
 
 (def ^:private bootstrap-version "0.2.8")
 
-(def ^:private default-artifact
-  {:public-namespaces []
-   :publish? true
-   :kind :library})
-
 (defn- fail! [message data]
   (throw (ex-info message data)))
 
@@ -51,8 +46,7 @@
 (defn- attach-artifacts [packages]
   (into {}
         (map (fn [[fqn package]]
-               (let [artifact (merge default-artifact
-                                     (get-in package [:deps-edn :collet/artifact]))
+               (let [artifact (get-in package [:deps-edn :collet/artifact])
                      package (assoc package
                                     :artifact artifact
                                     :publish? (:publish? artifact))]
@@ -197,20 +191,17 @@
         selected (if (or bootstrap? (nil? fqn))
                    (set (keys packages))
                    (let [candidates (kmono.graph/filter-by :release? packages)
-                         candidate-fqns (set (keys candidates))
                          required (conj
                                    (kmono.graph/query-dependencies packages fqn)
                                    fqn)
-                         seed (set/intersection candidate-fqns required)]
+                         seed (set/intersection (set (keys candidates)) required)]
                      (loop [closure seed]
                        (let [expanded
                              (into closure
-                                   (comp
-                                    (mapcat
-                                     (fn [package]
-                                       (concat (:depends-on package)
-                                               (:dependents package))))
-                                    (filter candidate-fqns))
+                                   (mapcat
+                                    (fn [package]
+                                      (concat (:depends-on package)
+                                              (:dependents package))))
                                    (map candidates closure))]
                          (if (= closure expanded)
                            closure
@@ -302,12 +293,7 @@
   {:version (:version package) :revision revision})
 
 (defn- write-build-identity!
-  [{:keys [root]} package {:keys [expected-version source-revision]}]
-  (when (and expected-version (not= (:version package) expected-version))
-    (throw (ex-info "Build version does not match the expected release"
-                    {:package (:fqn package)
-                     :expected expected-version
-                     :actual (:version package)})))
+  [{:keys [root]} package {:keys [source-revision]}]
   (let [revision (or source-revision (git-revision root))
         path (resolved-file (str (class-dir package)
                                  "/META-INF/collet/build.edn"))]

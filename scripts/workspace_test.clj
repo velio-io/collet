@@ -10,8 +10,7 @@
          (workspace/unit-test-commands))))
 
 (deftest integration-test-command-vectors
-  (is (= [["clojure" "-T:build" "build" ":module" ":collet-app"]
-          ["clojure" "-T:build" "build" ":module" ":collet-cli"]
+  (is (= [["clojure" "-T:build" "build" ":module" ":collet-cli"]
           ["clojure" "-M:kmono" "run" "--M" ":test:integration"
            "--" "-i" ":integration"]]
          (workspace/integration-test-commands))))
