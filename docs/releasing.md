@@ -39,6 +39,26 @@ GitHub release or pushes an image.
 Only run release commands from the repository root. CI plans and verifies releases
 but never deploys.
 
+## How the build is divided
+
+Kmono owns workspace discovery, the dependency graph, package order, conversion of
+internal `:local/root` dependencies to Maven coordinates, package-tag version lookup,
+conventional-commit version increments, and dependent patch bumps. Collet does not
+wrap or reimplement those algorithms.
+
+The root build contains only repository-specific work that Kmono does not provide:
+
+- `collet.build` creates library JARs, application/CLI uberjars, and the CLI archive
+  with `tools.build` while preserving their public filenames and layout.
+- `collet.release` performs the release preflight, invokes Kmono's version plan,
+  deploys Maven artifacts with `deps-deploy`, and pushes package tags.
+- `collet.verify` checks the small public artifact contract: coordinates, required
+  namespaces, filenames, entrypoints, archive layout and modes, and absence of
+  snapshot or local-root data in published POMs.
+
+Babashka tasks are shell-level entrypoints only. They contain no package graph,
+version, or release policy.
+
 ## Version and change policy
 
 The highest release-producing conventional commit for a package determines its next
@@ -50,10 +70,11 @@ version:
 | `feat: ...` | Minor |
 | `type!: ...` or a `BREAKING CHANGE:` footer | Major |
 
-Documentation, tests, CI, and development-only paths are ignored and do not publish.
-A meaningful runtime/package change with no release-producing commit makes
-`bb release:plan` and `bb verify` fail. Fix the commit message—or the PR title that
-will become the squash commit—instead of assigning or editing a version manually.
+Only commit messages determine whether a release is produced. Collet does not inspect
+or classify changed paths. Documentation, tests, CI, and development-only commits use
+non-releasing conventional types such as `docs:`, `test:`, `ci:`, or `chore:` and do
+not publish. Runtime changes must use `fix:`, `feat:`, or a breaking-change marker;
+using `chore:` for a runtime change intentionally produces no release.
 
 When a package changes version, its workspace dependents receive patch releases
 transitively so their generated POMs can pin the new exact dependency. Any action
@@ -106,45 +127,32 @@ It performs this guarded sequence:
    publishable.
 3. Runs `bb test` and `bb verify` with Clojars credentials removed from child
    process environments.
-4. Rechecks source identity, builds every selected artifact with the exact planned
-   package-version map, and rechecks source identity again.
-5. Inspects every selected Maven coordinate. A fresh release requires both POM and
-   JAR to be absent; an existing coordinate is never overwritten.
-6. Atomically creates the complete set of provisional local package tags at the
-   release revision before the first deployment.
-7. Deploys missing Maven artifacts through `deps-deploy` in Kmono topological order.
-   The CLI archive is built but remains tag-only.
-8. Atomically pushes all selected package tags only after every Maven deployment
+4. Builds every selected artifact once with the exact planned package-version map.
+5. Deploys publishable Maven artifacts through `deps-deploy` in Kmono topological
+   order. The CLI archive is built but remains tag-only.
+6. Creates the selected package tags at the release revision after every deployment
    succeeds.
+7. Atomically pushes those tags.
 
 Generated and embedded POMs contain exact internal Maven versions, SCM package tag,
-license metadata, and build identity. Publication checks verify POM coordinates,
-SCM tag, and the JAR's embedded version/revision before an existing coordinate may
-be skipped during recovery.
+license metadata, and build identity.
 
 ## Failure recovery
 
-The complete set of provisional local package tags is the only resume state. There
-is no transaction journal, auxiliary artifact state, version rewrite, or release
-commit. If deployment stops after those tags are created, leave them intact and
-rerun the same release command from the same clean revision. The rerun rebuilds the
-tagged source and the same version plan, verifies matching remote POM/JAR identity,
-skips exact matches, deploys absent coordinates, and finally pushes all tags.
+The release command is deliberately fail-fast and has no transaction journal,
+remote-coordinate probing, automatic skip, or resume state machine.
 
-Recovery is intentionally strict:
+- A failure before deployment changes no remote state; fix the cause and rerun.
+- A deployment failure can leave earlier Maven coordinates published because Maven
+  publication is irreversible. Record the printed plan, inspect Clojars, and finish
+  or reconcile the remaining coordinates manually before creating package tags.
+- A tag-push failure occurs after successful deployment. Inspect the local tags and
+  retry the atomic push after fixing the Git remote problem.
+- Never overwrite or reuse an existing Maven version for different source.
 
-- A fresh release stops if any planned remote coordinate already exists.
-- Only a complete set of local package tags pointing at `HEAD` qualifies as a
-  resume; missing tags stop safely.
-- A remote POM without its JAR, a JAR without its POM, mismatched coordinates, SCM
-  tag, version, or embedded source revision stops safely.
-- A local tag pointing to another revision is a collision and stops safely.
-- A failed atomic tag push leaves the complete local tags available for the same
-  verified rerun.
-
-Maven publication is irreversible. Do not delete or move provisional tags to force
-a new release, and do not try to overwrite a mismatched Clojars coordinate. Inspect
-the reported package and reconcile it with the maintainers before rerunning.
+This recovery is intentionally manual: partial releases are rare, and keeping a
+custom recovery engine would make the normal release path harder to understand and
+maintain.
 
 ## GitHub and CLI distribution
 
