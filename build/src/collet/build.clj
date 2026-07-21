@@ -454,6 +454,22 @@
     {:versions (into {} (map (juxt key (comp :version val))) packages)
      :artifacts @results}))
 
+(defn build-packages
+  "Build exactly the supplied package coordinates in Kmono dependency order.
+
+  Release planning has already selected this set, so this deliberately does
+  not expand it to unchanged dependencies."
+  [{:keys [packages order] :as context} package-fqns opts]
+  (let [selected (set package-fqns)
+        results (reduce
+                 (fn [artifacts fqn]
+                   (assoc artifacts fqn
+                          (build-package! context (get packages fqn) opts)))
+                 {}
+                 (filter selected order))]
+    {:versions (into {} (map (juxt key (comp :version val))) packages)
+     :artifacts results}))
+
 (defn install
   "Build and install publishable workspace packages in dependency order."
   [{:keys [module] :as opts}]
