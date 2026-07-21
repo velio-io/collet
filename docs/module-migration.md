@@ -110,8 +110,9 @@ release plan; fix the commit or squash-merge PR title rather than adding a versi
 Internal dependency changes give affected dependents a patch release transitively.
 In particular, any action release also patches `io.velio/collet-actions`; a core
 release patches every affected action, the aggregate, app, and CLI through the graph.
-Use `bb release:plan` to inspect all candidates. With a module, the plan shows only
-that module, its required changed dependencies, and their release-candidate
-dependents; Maven publication is automated by `bb release`, while the CLI GitHub
-release and Docker push remain later, explicit operations from their own package
-tags.
+Use `bb release:plan` to inspect all candidates. With a module, selection reaches a
+fixed point over candidate dependency and dependent edges, so an aggregate can pull
+another changed action into a scoped plan when its POM needs both candidate versions.
+Unchanged shared packages do not connect independent candidate siblings. Maven
+publication is automated by `bb release`, while the CLI GitHub release and Docker
+push remain later, explicit operations from their own package tags.

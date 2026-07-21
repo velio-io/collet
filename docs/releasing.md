@@ -105,10 +105,12 @@ bb release
 bb release:all
 ```
 
-`bb release <module>` starts with that package and its required dependency closure,
-then includes their transitive dependents when those packages are release candidates.
-The result remains in Kmono dependency order, while unchanged packages are omitted,
-so dependent and aggregate patch candidates cannot be stranded by a filtered release:
+`bb release <module>` starts with that package and closes in both directions over
+release candidates: selected candidate dependencies and dependents can pull each
+other into the plan until it reaches a fixed point. This may broaden a scoped plan
+through an aggregate, but ensures every selected POM references available candidate
+versions. Unchanged shared packages do not connect otherwise independent candidate
+siblings. The result remains in Kmono dependency order.
 
 Bootstrap is the exception: while all package tags are missing, any module filter
 expands to all 14 packages at `0.2.8` so the first release cannot leave an incomplete
