@@ -110,6 +110,8 @@
           (fs/create-dirs (fs/parent source))
           (spit (str source) (str "(ns example." (subs dir 4) ")\n"))))
       (git! root "init" "-b" "main")
+      (git! root "config" "user.name" "Collet Test")
+      (git! root "config" "user.email" "collet@example.test")
       (commit! root "feat: initial workspace")
       (f root)
       (finally
