@@ -50,14 +50,6 @@
                {:variables missing}))))
   nil)
 
-(defn release-steps
-  "Describe the fixed release pipeline for ordered candidate packages."
-  [packages]
-  (into [:quality-gate :build]
-        (concat (map (fn [{:keys [fqn]}] [:deploy fqn])
-                     (filter :publish? packages))
-                [:tag :push])))
-
 (defn format-plan
   "Render package/current/next/reason/tag/publication release candidates."
   [packages]
@@ -79,14 +71,9 @@
                                     widths row)))
                    rows))))
 
-(defn- module-option [module]
-  (when module
-    (if (or (keyword? module) (symbol? module)) module (keyword module))))
-
 (defn- candidate-plan [root module]
   (let [context (build/resolve-context! root {:changes? true})
-        fqn (module-option module)
-        selected (build/release-packages context fqn)]
+        selected (build/release-packages context module)]
     {:context context
      :packages (mapv #(get (:packages context) %) selected)}))
 
@@ -360,10 +347,7 @@
           (when-not (fs/regular-file? archived-pod)
             (fail! "CLI archive lacks collet.pod.jar" {}))
           (when-not (= -1 (Files/mismatch pod archived-pod))
-            (fail! "Archived CLI pod differs from the top-level pod" {}))
-          (when-not (= :matching (verify-jar package revision archived-pod))
-            (fail! "Archived CLI JAR identity does not match its package tag"
-                   {:jar (str archived-pod)})))
+            (fail! "Archived CLI pod differs from the top-level pod" {})))
         (finally (fs/delete-tree directory))))
     (println "Verified CLI artifacts for" tag revision)
     context))
@@ -385,14 +369,16 @@
     (when-not (= (str version " " revision) labels)
       (fail! "Docker image identity does not match the app package tag"
              {:image image :tag tag :labels labels}))
-    (let [directory (fs/create-temp-dir {:prefix "collet-image-release-"})
-          jar (fs/path directory "collet.jar")
-          container (command-output {} "docker" "create" image)]
+    (let [directory (fs/create-temp-dir {:prefix "collet-image-release-"})]
       (try
-        (command! {} "docker" "cp" (str container ":/app/collet.jar") (str jar))
-        (verify-image-jar! package revision core-version jar)
+        (let [jar (fs/path directory "collet.jar")
+              container (command-output {} "docker" "create" image)]
+          (try
+            (command! {} "docker" "cp" (str container ":/app/collet.jar") (str jar))
+            (verify-image-jar! package revision core-version jar)
+            (finally
+              (command! {} "docker" "rm" "-f" container))))
         (finally
-          (try (command! {} "docker" "rm" "-f" container)
-               (finally (fs/delete-tree directory))))))
+          (fs/delete-tree directory))))
     (println "Verified Docker image for" tag revision)
     context))

@@ -98,19 +98,6 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest release-steps-follow-the-fail-fast-pipeline
-  (is (= [:quality-gate
-          :build
-          [:deploy 'example/pkg-a]
-          [:deploy 'example/pkg-b]
-          :tag
-          :push]
-         (release/release-steps packages))))
-
-(deftest release-steps-omit-deployment-for-tag-only-packages
-  (is (= [:quality-gate :build :tag :push]
-         (release/release-steps [(last packages)]))))
-
 (deftest plan-display-shows-package-current-next-reason-tag-and-publication
   (let [output (release/format-plan packages)]
     (doseq [text ["PACKAGE" "CURRENT" "NEXT" "REASON" "TAG" "PUBLICATION"
@@ -267,6 +254,27 @@
                                    {:root root :tag (:tag package)}))))]
         (is (= "Archived CLI pod differs from the top-level pod"
                (ex-message error)))))))
+
+(deftest image-verification-cleans-its-directory-when-container-creation-fails
+  (let [directory (fs/create-temp-dir {:prefix "verify-image-release-test-"})
+        context {:version "1" :revision "abc" :package {}
+                 :packages {'io.velio/collet-core {:version "1"}}}]
+    (try
+      (let [error (with-redefs-fn
+                    {(release-var 'ensure-tag-checkout!) (fn [& _] context)
+                     (release-var 'command-output)
+                     (fn [_ & command]
+                       (if (= "create" (second command))
+                         (throw (ex-info "docker create failed" {}))
+                         "1 abc"))
+                     #'fs/create-temp-dir (fn [& _] directory)}
+                    #(exception (fn [] (release/verify-image
+                                         {:tag "tag" :image "image"}))))]
+        (is (= "docker create failed" (ex-message error)))
+        (is (not (fs/exists? directory))))
+      (finally
+        (when (fs/exists? directory)
+          (fs/delete-tree directory))))))
 
 (deftest direct-dependency-rejects-a-conflicting-duplicate-version
   (let [dependency (fn [version]
