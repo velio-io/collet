@@ -296,7 +296,7 @@
         'io.velio/collet-action-llm #{:llm}
         'io.velio/collet-action-vega #{:graal}
         'io.velio/collet-action-lucene #{:lucene}
-        'io.velio/collet-actions #{:postgres :mysql :aws :queue
+        'io.velio/collet-actions #{:postgres :aws :queue
                                    :llm :graal :lucene}
         'io.velio/collet-app #{:aws}
         'io.velio/collet-cli #{:aws}}

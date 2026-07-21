@@ -145,7 +145,7 @@
          (verify/allowed-optional-families 'io.velio/collet-action-s3)))
   (is (= #{:aws}
          (verify/allowed-optional-families 'io.velio/collet-app)))
-  (is (= #{:postgres :mysql :aws :queue :llm :graal :lucene}
+  (is (= #{:postgres :aws :queue :llm :graal :lucene}
          (verify/allowed-optional-families 'io.velio/collet-actions))))
 
 (deftest ci-fetches-tags-without-any-release-or-deploy-step
