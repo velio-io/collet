@@ -165,7 +165,7 @@
             (is (= "1.2.4" (:version dependent)))
             (is (= :dependency (:reason dependent)))))))))
 
-(deftest returns-no-release-for-an-unchanged-or-ignored-package
+(deftest normal-test-doc-and-dev-only-changes-remain-ignored
   (with-workspace
     (fn [root]
       (tag-all! root "1.2.3")
@@ -174,6 +174,41 @@
       (change! root "pkg-a" "dev/scratch.clj" "chore: experiment" "dev only")
       (change! root "pkg-a" "notes.md" "docs: explain A" "markdown only")
       (is (empty? (:selected (workspace/resolve-release-plan! (str root))))))))
+
+(deftest deleted-runtime-source-retains-the-commit-and-produces-a-patch
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (fs/delete (fs/path root "pkg-a" "src" "example" "a.clj"))
+      (commit! root "fix: remove obsolete A runtime source")
+      (let [plan (workspace/resolve-release-plan! (str root))]
+        (is (= :patch (:reason (package plan 'example/pkg-a))))
+        (is (= "1.2.4" (:version (package plan 'example/pkg-a))))
+        (is (= :dependency (:reason (package plan 'example/pkg-b))))))))
+
+(deftest deleted-runtime-source-without-release-commit-is-actionable
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (fs/delete (fs/path root "pkg-a" "src" "example" "a.clj"))
+      (commit! root "chore: remove obsolete A runtime source")
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Use fix:, feat:, !, BREAKING CHANGE:, or fix the squash PR title"
+           (workspace/resolve-release-plan! (str root)))))))
+
+(deftest runtime-source-renamed-into-an-ignored-path-still-produces-a-release
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (fs/create-dirs (fs/path root "pkg-a" "test" "example"))
+      (git! root "mv"
+            "pkg-a/src/example/a.clj"
+            "pkg-a/test/example/a_test.clj")
+      (commit! root "fix: retire A runtime source into a regression fixture")
+      (let [plan (workspace/resolve-release-plan! (str root))]
+        (is (= :patch (:reason (package plan 'example/pkg-a))))
+        (is (= "1.2.4" (:version (package plan 'example/pkg-a))))))))
 
 (deftest rejects-meaningful-package-changes-without-a-version-bump
   (with-workspace

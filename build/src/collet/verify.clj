@@ -5,7 +5,6 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
-   [clojure.set :as set]
    [clojure.string :as str]
    [collet.build :as build]
    [collet.workspace :as workspace])
@@ -146,8 +145,8 @@
   (let [project (parse-pom pom)
         expected (expected-coordinate package)
         actual (pom-coordinate project)
-        expected-deps (set (expected-dependencies context package))
-        actual-deps (set (pom-dependencies project))
+        expected-deps (expected-dependencies context package)
+        actual-deps (pom-dependencies project)
         project-metadata (:project context)
         scm (only-child project "scm")
         license (-> project
@@ -161,11 +160,11 @@
                       (str/includes? pom "local-root")))
              "POM leaks a local-root or snapshot dependency"
              {:package (:fqn package)})
-    (ensure! (= expected-deps actual-deps)
+    (ensure! (= (frequencies expected-deps) (frequencies actual-deps))
              "POM direct dependencies differ"
              {:package (:fqn package)
-              :missing (set/difference expected-deps actual-deps)
-              :unexpected (set/difference actual-deps expected-deps)})
+              :expected expected-deps
+              :actual actual-deps})
     (ensure! (= (get-in project-metadata [:scm :url])
                 (child-text scm "url"))
              "POM SCM URL does not match" {:package (:fqn package)})
@@ -239,23 +238,26 @@
                                (str/replace "\\" "/"))))))))
          set)))
 
+(defn- verify-artifact-maven-metadata! [context package path]
+  (let [pom (jar-entry path (pom-entry package))
+        properties (jar-entry path (properties-entry package))
+        expected (expected-coordinate package)
+        actual (properties-coordinate properties)]
+    (verify-pom! context package pom)
+    (ensure! (= expected actual)
+             "Artifact JAR Maven properties do not match"
+             {:package (:fqn package) :expected expected :actual actual})
+    true))
+
 (defn verify-library-artifact!
   "Verify one publishable JAR and its embedded POM/Maven/build metadata."
   [context package path revision]
   (ensure! (file? path) "Library JAR was not built"
            {:package (:fqn package) :path (str path)})
-  (let [entries (jar-entries path)
-        pom (jar-entry path (pom-entry package))
-        properties (jar-entry path (properties-entry package))
-        expected (expected-coordinate package)]
+  (let [entries (jar-entries path)]
     (ensure! (contains? entries "LICENSE") "Library JAR lacks LICENSE"
              {:package (:fqn package)})
-    (verify-pom! context package pom)
-    (ensure! (= expected (properties-coordinate properties))
-             "Artifact JAR Maven properties do not match"
-             {:package (:fqn package)
-              :expected expected
-              :actual (properties-coordinate properties)})
+    (verify-artifact-maven-metadata! context package path)
     (verify-artifact-build-identity! path (:version package) revision)
     (when (seq (get-in package [:deps-edn :paths]))
       (doseq [namespace (get-in package [:artifact :public-namespaces])]
@@ -372,7 +374,7 @@
 (defn- output-path [package output]
   (str (io/file (:absolute-path package) output)))
 
-(defn- verify-deployable! [package revision]
+(defn- verify-deployable! [context package revision]
   (let [{:keys [kind main outputs]} (:artifact package)
         uberjar (output-path package (:uberjar outputs))]
     (ensure! (file? uberjar) "Deployable uberjar is missing"
@@ -381,6 +383,7 @@
              "Deployable entrypoint changed"
              {:package (:fqn package) :expected main
               :actual (main-class uberjar)})
+    (verify-artifact-maven-metadata! context package uberjar)
     (verify-artifact-build-identity! uberjar (:version package) revision)
     (when (= :distribution kind)
       (let [archive (output-path package (:archive outputs))
@@ -485,7 +488,7 @@
               :let [package (get packages fqn)]
               :when (#{:uberjar :distribution}
                       (get-in package [:artifact :kind]))]
-        (verify-deployable! package revision))
+        (verify-deployable! context package revision))
       (println "\n==> checking Vega/Darkstar golden output")
       (verify-vega-golden! context)
       (verify-no-legacy-build! root)

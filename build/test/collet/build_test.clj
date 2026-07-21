@@ -5,6 +5,7 @@
    [clojure.test :refer [deftest is testing]]
    [clojure.tools.build.api :as b]
    [collet.build :as build]
+   [collet.verify :as verify]
    [k16.kmono.core.graph :as kmono.graph]))
 
 (defn- write-edn! [path value]
@@ -61,9 +62,13 @@
         :collet/artifact {:description "CLI"
                           :public-namespaces ['example.cli]
                           :publish? false
-                          :kind :uberjar
+                          :kind :distribution
                           :main 'example.cli
-                          :outputs {:uberjar "target/cli.jar"}}})
+                          :outputs {:uberjar "target/cli.jar"
+                                    :archive "target/cli.tar.gz"
+                                    :root "cli"
+                                    :files [{:from "target/cli.jar"
+                                             :to "cli.jar"}]}}})
       (git! root "init" "-b" "main")
       (git! root "add" ".")
       (git! root "-c" "user.name=Collet Test"
@@ -170,6 +175,28 @@
             (is (= "1.7.2"
                    (get-in basis [:libs 'example/pkg-a :mvn/version])))
             (is (nil? (get-in basis [:libs 'example/pkg-a :local/root])))))))))
+
+(deftest nonpublishable-distribution-pom-uses-exact-independent-dependencies
+  (with-workspace
+    (fn [root]
+      (fs/delete-tree (fs/path root ".git"))
+      (let [versions {'example/pkg-a "1.7.2"
+                      'example/pkg-b "4.3.1"
+                      'example/pkg-cli "9.0.0"}
+            {:keys [packages] :as context}
+            (build/resolve-workspace-context! root {:versions versions})
+            package (get packages 'example/pkg-cli)
+            write-pom! (ns-resolve 'collet.build 'write-pom!)]
+        (b/with-project-root (:absolute-path package)
+          (let [basis (build/package-basis context package :pom {})
+                pom-file (write-pom! context package {})
+                pom (slurp pom-file)]
+            (is (= :mvn
+                   (get-in basis [:libs 'example/pkg-b :deps/manifest])))
+            (is (= "4.3.1"
+                   (get-in basis [:libs 'example/pkg-b :mvn/version])))
+            (is (nil? (get-in basis [:libs 'example/pkg-b :local/root])))
+            (is (true? (verify/verify-pom! context package pom)))))))))
 
 (deftest install-hands-tools-build-a-package-relative-jar-path
   (with-workspace

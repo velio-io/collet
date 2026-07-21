@@ -49,7 +49,8 @@
 
 (defn- pom-text
   ([] (pom-text {}))
-  ([{:keys [app-version core-version scm-tag scm-connection suffix]
+  ([{:keys [app-version core-version scm-tag scm-connection
+            duplicate-core? suffix]
      :or {app-version "3.2.1"
           core-version "1.7.2"
           scm-tag "example/app@3.2.1"
@@ -70,6 +71,10 @@
         "<dependencies>"
         "<dependency><groupId>example</groupId><artifactId>core</artifactId>"
         "<version>" core-version "</version></dependency>"
+        (when duplicate-core?
+          (str "<dependency><groupId>example</groupId>"
+               "<artifactId>core</artifactId><version>" core-version
+               "</version></dependency>"))
         "<dependency><groupId>external</groupId><artifactId>dep</artifactId>"
         "<version>4.5.6</version><exclusions><exclusion>"
         "<groupId>excluded</groupId><artifactId>lib</artifactId>"
@@ -85,6 +90,8 @@
             "POM Maven coordinates do not match"]
            ["local root leakage" {:suffix "<local-root>../core</local-root>"}
             "POM leaks a local-root or snapshot dependency"]
+           ["duplicate internal dependency" {:duplicate-core? true}
+            "POM direct dependencies differ"]
            ["wrong package tag" {:scm-tag "HEAD"}
             "POM SCM tag does not match the package tag"]
            ["wrong SCM connection" {:scm-connection "scm:git:wrong"}
@@ -134,6 +141,43 @@
              (exception-message
               #(verify/verify-library-artifact!
                 context package (str artifact) "abc123"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest deployable-verification-enforces-embedded-pom-and-maven-properties
+  (let [root (fs/create-temp-dir {:prefix "verify-deployable-test-"})
+        artifact (fs/path root "app.jar")
+        deployable (-> package
+                       (assoc :absolute-path (str root))
+                       (assoc-in [:artifact :kind] :uberjar)
+                       (assoc-in [:artifact :main] 'example.app)
+                       (assoc-in [:artifact :outputs] {:uberjar "app.jar"}))
+        context (assoc-in context [:packages 'example/app] deployable)
+        verify-deployable! (ns-resolve 'collet.verify 'verify-deployable!)
+        entries {"META-INF/MANIFEST.MF"
+                 "Manifest-Version: 1.0\nMain-Class: example.app\n\n"
+                 "META-INF/maven/example/app/pom.xml" (pom-text)
+                 "META-INF/maven/example/app/pom.properties"
+                 "groupId=example\nartifactId=app\nversion=3.2.1\n"
+                 "META-INF/collet/build.edn"
+                 (pr-str {:version "3.2.1" :revision "abc123"})}]
+    (try
+      (write-jar! (str artifact) entries)
+      (is (true? (verify-deployable! context deployable "abc123")))
+      (write-jar! (str artifact)
+                  (assoc entries
+                         "META-INF/maven/example/app/pom.xml"
+                         (pom-text {:core-version "9.9.9"})))
+      (is (= "POM direct dependencies differ"
+             (exception-message
+              #(verify-deployable! context deployable "abc123"))))
+      (write-jar! (str artifact)
+                  (assoc entries
+                         "META-INF/maven/example/app/pom.properties"
+                         "groupId=example\nartifactId=app\nversion=wrong\n"))
+      (is (= "Artifact JAR Maven properties do not match"
+             (exception-message
+              #(verify-deployable! context deployable "abc123"))))
       (finally
         (fs/delete-tree root)))))
 

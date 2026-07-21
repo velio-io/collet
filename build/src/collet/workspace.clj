@@ -174,6 +174,73 @@
                            :release? true)]))
         packages))
 
+(defn- changed-paths
+  "Return every old and new path touched by a commit.
+
+  Kmono remains responsible for finding package commits. This Git query is
+  limited to ignore-path classification because Kmono 4.12.3 drops deleted
+  paths and the old side of renames while applying `:ignore-changes`."
+  [root sha]
+  (let [{:keys [exit out err]}
+        (shell/sh "git" "-C" root
+                  "diff-tree" "--root" "--no-commit-id" "--name-status"
+                  "-r" "-M" "-z" "--first-parent" sha)]
+    (when-not (zero? exit)
+      (fail! "Cannot inspect changed paths for package commit"
+             {:commit sha :error (str/trim err)}))
+    (loop [tokens (vec (butlast (str/split out #"\u0000" -1)))
+           paths []]
+      (if (empty? tokens)
+        paths
+        (let [status (first tokens)
+              path-count (if (re-matches #"[RC][0-9]+" status) 2 1)
+              remaining (subvec tokens 1)]
+          (when (< (count remaining) path-count)
+            (fail! "Git returned malformed changed-path data"
+                   {:commit sha :status status}))
+          (recur (subvec remaining path-count)
+                 (into paths (subvec remaining 0 path-count))))))))
+
+(defn- package-relative-path [package path]
+  (let [package-path (str/replace (:relative-path package) #"/$" "")
+        prefix (str package-path "/")]
+    (cond
+      (= package-path path) ""
+      (str/starts-with? path prefix) (subs path (count prefix))
+      :else nil)))
+
+(defn- ignored-path? [patterns path]
+  (boolean (some #(re-find (re-pattern %) path) patterns)))
+
+(defn- filter-ignored-commits
+  [root config original-packages changed-packages]
+  (let [paths-by-sha (memoize #(changed-paths root %))]
+    (into {}
+          (map
+           (fn [[fqn changed-package]]
+             (let [original-package (get original-packages fqn)
+                   patterns (or (:ignore-changes original-package)
+                                (:ignore-changes config))
+                   meaningful?
+                   (fn [{:keys [sha]}]
+                     (or (empty? patterns)
+                         (->> (paths-by-sha sha)
+                              (keep #(package-relative-path original-package %))
+                              (some #(not (ignored-path? patterns %)))
+                              boolean)))
+                   commits (filterv meaningful? (:commits changed-package))]
+               [fqn (assoc (merge original-package changed-package)
+                           :commits commits)]))
+          changed-packages))))
+
+(defn- resolve-meaningful-package-changes [root config packages]
+  (let [unfiltered (into {}
+                         (map (fn [[fqn package]]
+                                [fqn (dissoc package :ignore-changes)]))
+                         packages)
+        changed (kmono.version/resolve-package-changes root unfiltered)]
+    (filter-ignored-commits root config packages changed)))
+
 (defn- plan-versioned-packages [root config packages]
   (let [resolved (kmono.version/resolve-package-versions root packages)
         missing (->> resolved
@@ -187,10 +254,8 @@
         (when (seq missing)
           (fail! "Package version tags are incomplete"
                  {:packages missing}))
-        (let [changed (kmono.version/resolve-package-changes
-                       root
-                       {:ignore-changes (:ignore-changes config)}
-                       resolved)
+        (let [changed (resolve-meaningful-package-changes
+                       root config resolved)
               direct-levels (into {}
                                   (map (fn [[fqn package]]
                                          [fqn (conventional/version-fn package)]))

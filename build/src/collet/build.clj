@@ -34,11 +34,12 @@
 (defn package-basis
   "Create the basis appropriate to a package build phase.
 
-  Publishable POMs use Kmono's Maven-coordinate replacement. Uberjars keep the
-  normal tools.deps local-root graph so they build the current checkout."
+  Every POM uses Kmono's Maven-coordinate replacement, including nonpublished
+  distributions. Uberjars keep the normal tools.deps local-root graph so they
+  compile and run the current checkout."
   [{:keys [packages]} package phase opts]
   (let [basis-opts (basis-options opts)]
-    (if (and (= :pom phase) (get-in package [:artifact :publish?]))
+    (if (= :pom phase)
       (kmono.build/create-basis packages package basis-opts)
       (b/create-basis basis-opts))))
 
