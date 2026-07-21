@@ -1,6 +1,7 @@
 (ns collet.build-test
   (:require
    [babashka.fs :as fs]
+   [clojure.edn :as edn]
    [clojure.java.shell :as shell]
    [clojure.test :refer [deftest is testing]]
    [clojure.tools.build.api :as b]
@@ -91,6 +92,10 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest root-workspace-does-not-filter-release-commit-paths
+  (is (nil? (get-in (edn/read-string (slurp "deps.edn"))
+                    [:kmono/workspace :ignore-changes]))))
+
 (deftest resolve-context-bootstraps-every-package-and-attaches-build-metadata
   (with-workspace
     (fn [root]
@@ -171,6 +176,27 @@
                         (:reason (packages 'example/pkg-b))]))
                 (is (= ['example/pkg-a 'example/pkg-b 'example/pkg-cli]
                        (build/release-packages context nil)))))))))))
+
+(deftest deletion-only-fix-commit-releases-the-package
+  (with-workspace
+    (fn [root]
+      (let [source (fs/path root "pkg-a" "src" "example" "removed.clj")]
+        (fs/create-dirs (fs/parent source))
+        (spit (str source) "(ns example.removed)\n")
+        (git! root "add" ".")
+        (git! root "-c" "user.name=Collet Test"
+              "-c" "user.email=collet@example.test"
+              "commit" "-m" "feat: add removable runtime source")
+        (tag-all! root "1.2.3")
+        (fs/delete source)
+        (git! root "add" "-A")
+        (git! root "-c" "user.name=Collet Test"
+              "-c" "user.email=collet@example.test"
+              "commit" "-m" "fix: remove obsolete runtime source")
+        (let [package (get-in (build/resolve-context! root {:changes? true})
+                              [:packages 'example/pkg-a])]
+          (is (= ["1.2.4" :patch]
+                 [(:version package) (:reason package)])))))))
 
 (deftest release-packages-omits-nonreleasing-commits
   (with-workspace

@@ -2,8 +2,7 @@
  {:group          io.velio
   ;; Kmono 4.12.3 matches deps.edn paths rather than package directories, so
   ;; the trailing segment is required for the requested collet-* package glob.
-  :packages       "collet-*/*"
-  :ignore-changes ["^test/" "^test-resources/" "^dev/" ".*\\.md$"]}
+  :packages       "collet-*/*"}
 
  :collet/project
  {:url      "https://github.com/velio-io/collet"
