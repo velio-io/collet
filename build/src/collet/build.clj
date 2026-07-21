@@ -2,26 +2,199 @@
   "Root-only tools.build entry points for the Collet Kmono workspace."
   (:refer-clojure :exclude [compile])
   (:require
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
+   [clojure.set :as set]
    [clojure.string :as str]
    [clojure.tools.build.api :as b]
-   [collet.workspace :as workspace]
    [k16.kmono.build :as kmono.build]
-   [k16.kmono.core.graph :as kmono.graph])
+   [k16.kmono.core.graph :as kmono.graph]
+   [k16.kmono.version :as kmono.version]
+   [k16.kmono.version.alg.conventional-commits :as conventional]
+   [k16.kmono.workspace :as kmono.workspace])
   (:import
    (java.nio.file CopyOption Files StandardCopyOption)
    (java.nio.file.attribute PosixFilePermissions)
    (java.util.regex Pattern)))
 
-(defn resolve-workspace-context!
-  "Resolve the Kmono graph with independently planned package versions."
-  ([] (resolve-workspace-context! nil))
-  ([dir] (resolve-workspace-context! dir {}))
-  ([dir opts]
-   (if (contains? opts :versions)
-     (workspace/resolve-build-context! dir (:versions opts))
-     (workspace/resolve-release-plan! dir))))
+(def ^:private bootstrap-version "0.2.8")
+
+(def ^:private default-artifact
+  {:public-namespaces []
+   :publish? true
+   :kind :library})
+
+(defn- fail! [message data]
+  (throw (ex-info message data)))
+
+(defn- read-project [root]
+  (-> (io/file root "deps.edn") slurp edn/read-string :collet/project))
+
+(defn- validate-artifact! [{:keys [fqn artifact]}]
+  (let [{:keys [description kind main outputs]} artifact]
+    (when-not (and (string? description) (not (str/blank? description)))
+      (fail! "Package artifact description is required" {:package fqn}))
+    (when-not (#{:library :uberjar :distribution} kind)
+      (fail! "Unknown package artifact kind" {:package fqn :kind kind}))
+    (when (and (#{:uberjar :distribution} kind)
+               (not (and main (get outputs :uberjar))))
+      (fail! "Executable package requires :main and :outputs/:uberjar"
+             {:package fqn}))
+    (when (and (= :distribution kind)
+               (not (and (get outputs :archive)
+                         (get outputs :root)
+                         (seq (get outputs :files)))))
+      (fail! "Distribution package outputs are incomplete" {:package fqn})))
+  true)
+
+(defn- attach-artifacts [packages]
+  (into {}
+        (map (fn [[fqn package]]
+               (let [artifact (merge default-artifact
+                                     (get-in package [:deps-edn :collet/artifact]))
+                     package (assoc package
+                                    :artifact artifact
+                                    :publish? (:publish? artifact))]
+                 (validate-artifact! package)
+                 [fqn package])))
+        packages))
+
+(defn- package-order [packages]
+  (vec (mapcat identity (kmono.graph/parallel-topo-sort packages))))
+
+(defn- bootstrap-packages [packages]
+  (into {}
+        (map (fn [[fqn package]]
+               [fqn (assoc package
+                           :current-version bootstrap-version
+                           :version bootstrap-version
+                           :reason :bootstrap
+                           :tag (str fqn "@" bootstrap-version)
+                           :release? true)]))
+        packages))
+
+(defn- versioned-packages [root packages changes?]
+  (let [resolved (kmono.version/resolve-package-versions root packages)
+        missing (->> resolved
+                     (keep (fn [[fqn package]]
+                             (when-not (:version package) fqn)))
+                     sort
+                     vec)]
+    (cond
+      (= (count missing) (count resolved))
+      (bootstrap-packages resolved)
+
+      (seq missing)
+      (fail! "Package version tags are incomplete" {:packages missing})
+
+      (not changes?)
+      (into {}
+            (map (fn [[fqn package]]
+                   [fqn (assoc package
+                               :current-version (:version package)
+                               :reason :unchanged
+                               :tag (str fqn "@" (:version package))
+                               :release? false)]))
+            resolved)
+
+      :else
+      (let [changed (kmono.version/resolve-package-changes root resolved)
+            direct-levels (into {}
+                                (map (fn [[fqn package]]
+                                       [fqn (conventional/version-fn package)]))
+                                changed)
+            candidates (kmono.version/inc-package-versions
+                        conventional/version-fn changed)]
+        (into {}
+              (map (fn [[fqn package]]
+                     (let [current (get-in resolved [fqn :version])
+                           version (:version package)
+                           release? (not= current version)
+                           reason (cond
+                                    (get direct-levels fqn) (get direct-levels fqn)
+                                    release? :dependency
+                                    :else :unchanged)]
+                       [fqn (assoc package
+                                   :current-version current
+                                   :reason reason
+                                   :tag (str fqn "@" version)
+                                   :release? release?)])))
+              candidates)))))
+
+(defn- version-overrides [packages versions]
+  (let [expected (set (keys packages))
+        supplied (set (keys versions))
+        invalid (->> versions
+                     (keep (fn [[fqn version]]
+                             (when-not (and (string? version)
+                                            (not (str/blank? version)))
+                               fqn)))
+                     set)]
+    (when (or (not= expected supplied) (seq invalid))
+      (fail! "Complete package version overrides are required"
+             {:missing (sort (set/difference expected supplied))
+              :unknown (sort (set/difference supplied expected))
+              :invalid (sort invalid)}))
+    (into {}
+          (map (fn [[fqn package]]
+                 (let [version (get versions fqn)]
+                   [fqn (assoc package
+                               :current-version version
+                               :version version
+                               :reason :override
+                               :tag (str fqn "@" version)
+                               :release? false)])))
+          packages)))
+
+(defn resolve-context!
+  "Resolve Kmono packages with Collet artifact and project metadata.
+
+  Pass :versions for Git-less builds, or :changes? for a release-candidate
+  conventional-commit plan."
+  ([] (resolve-context! nil {}))
+  ([dir] (resolve-context! dir {}))
+  ([dir {:keys [versions changes?] :as opts}]
+   (let [{:keys [root packages] :as context}
+         (kmono.workspace/resolve-workspace-context! dir)
+         packages (attach-artifacts packages)
+         packages (if (contains? opts :versions)
+                    (version-overrides packages versions)
+                    (versioned-packages root packages changes?))]
+     (assoc context
+            :project (read-project root)
+            :packages packages
+            :order (package-order packages)))))
+
+(defn package-fqn
+  "Resolve a short module name or fully-qualified package symbol."
+  [packages module]
+  (when module
+    (or (when (and (symbol? module)
+                   (namespace module)
+                   (contains? packages module))
+          module)
+        (let [requested (name module)
+              matches (->> (keys packages)
+                           (filter #(= requested (name %)))
+                           sort
+                           vec)]
+          (when-not (= 1 (count matches))
+            (fail! "Unknown or ambiguous workspace package"
+                   {:module module :matches matches}))
+          (first matches)))))
+
+(defn release-packages
+  "Return changed packages, optionally limited to a module's dependencies.
+
+  The result keeps the dependency-first Kmono order preserved in context."
+  [{:keys [packages order]} module]
+  (let [selected (if-let [fqn (package-fqn packages module)]
+                   (conj (set (kmono.graph/query-dependencies packages fqn)) fqn)
+                   (set (keys packages)))]
+    (filterv #(and (contains? selected %)
+                   (get-in packages [% :release?]))
+             order)))
 
 (defn- basis-options [{:keys [mvn/local-repo]}]
   (cond-> {:root {:mvn/repos
@@ -238,29 +411,29 @@
     :distribution (build-distribution! context package opts)))
 
 (defn- select-packages [packages module]
-  (if-let [fqn (workspace/package-fqn packages module)]
+  (if-let [fqn (package-fqn packages module)]
     (let [selected (conj (kmono.graph/query-dependencies packages fqn) fqn)]
       (kmono.graph/filter-by #(contains? selected (:fqn %)) packages))
     packages))
 
 (defn- resolve-for-build! [opts]
   (if (contains? opts :versions)
-    (resolve-workspace-context! nil opts)
-    (resolve-workspace-context!)))
+    (resolve-context! nil opts)
+    (resolve-context!)))
 
 (defn package-version
   "Print the exact Kmono version for one workspace package."
   [{:keys [root module]}]
   (when-not module
     (throw (ex-info "Package module is required" {})))
-  (let [{:keys [packages]} (resolve-workspace-context! root)
-        fqn (workspace/package-fqn packages module)]
+  (let [{:keys [packages]} (resolve-context! root)
+        fqn (package-fqn packages module)]
     (println (get-in packages [fqn :version]))))
 
 (defn clean
   "Clean every package target, or one package and its workspace dependencies."
   [{:keys [module]}]
-  (let [{:keys [packages] :as context} (resolve-workspace-context!)
+  (let [{:keys [packages] :as context} (resolve-context!)
         selected (select-packages packages module)]
     (kmono.build/for-each-package selected {:concurrency 1}
       clean-package!)
@@ -286,7 +459,7 @@
   [{:keys [module] :as opts}]
   (let [{:keys [packages] :as context}
         (resolve-for-build! opts)
-        requested (workspace/package-fqn packages module)
+        requested (package-fqn packages module)
         selected (select-packages packages module)
         publishable (kmono.graph/filter-by
                      #(get-in % [:artifact :publish?])

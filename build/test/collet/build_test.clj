@@ -5,8 +5,7 @@
    [clojure.test :refer [deftest is testing]]
    [clojure.tools.build.api :as b]
    [collet.build :as build]
-   [collet.verify :as verify]
-   [k16.kmono.core.graph :as kmono.graph]))
+   [collet.verify :as verify]))
 
 (defn- write-edn! [path value]
   (fs/create-dirs (fs/parent path))
@@ -24,6 +23,20 @@
         (apply shell/sh "git" "-C" (str root) args)]
     (when-not (zero? exit)
       (throw (ex-info "git failed" {:args args :error err})))))
+
+(defn- tag-all! [root version]
+  (doseq [package '[example/pkg-a example/pkg-b example/pkg-cli]]
+    (git! root "tag" (str package "@" version))))
+
+(defn- change! [root package message]
+  (let [path (fs/path root (name package) "src" "example"
+                      (str (name package) ".clj"))]
+    (fs/create-dirs (fs/parent path))
+    (spit (str path) (str ";; " message "\n"))
+    (git! root "add" ".")
+    (git! root "-c" "user.name=Collet Test"
+          "-c" "user.email=collet@example.test"
+          "commit" "-m" message)))
 
 (defn- with-workspace [f]
   (let [root (fs/create-temp-dir {:prefix "collet-build-test-"})]
@@ -78,26 +91,87 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest resolves-workspace-graph-and-artifact-metadata
+(deftest resolve-context-bootstraps-every-package-and-attaches-build-metadata
   (with-workspace
     (fn [root]
-      (let [resolve-context (ns-resolve 'collet.build
-                                        'resolve-workspace-context!)]
+      (let [resolve-context (ns-resolve 'collet.build 'resolve-context!)]
         (is (some? resolve-context)
-            "the root build exposes its Kmono workspace resolver")
+            "the root build exposes direct Kmono package planning")
         (when resolve-context
-          (let [{:keys [packages version]} (resolve-context root)]
-            (is (nil? version))
+          (let [{:keys [packages project order]} (resolve-context root)]
             (is (= #{'example/pkg-a 'example/pkg-b 'example/pkg-cli}
                    (set (keys packages))))
-            (is (= #{'example/pkg-a}
-                   (get-in packages ['example/pkg-b :depends-on])))
-            (is (= [['example/pkg-a] ['example/pkg-b] ['example/pkg-cli]]
-                   (kmono.graph/parallel-topo-sort packages)))
-            (is (= :uberjar
-                   (get-in packages ['example/pkg-b :artifact :kind])))
-            (is (= "0.2.8"
-                   (get-in packages ['example/pkg-a :version])))))))))
+            (is (= ["0.2.8" "0.2.8" "0.2.8"]
+                   (mapv :version (vals packages))))
+            (is (= ['example/pkg-a 'example/pkg-b 'example/pkg-cli]
+                   order))
+            (is (= "https://example.test/collet" (:url project)))
+            (is (= :distribution
+                   (get-in packages ['example/pkg-cli :artifact :kind])))))))))
+
+(deftest resolve-context-requires-complete-docker-version-overrides
+  (with-workspace
+    (fn [root]
+      (fs/delete-tree (fs/path root ".git"))
+      (let [resolve-context (ns-resolve 'collet.build 'resolve-context!)]
+        (is (some? resolve-context))
+        (when resolve-context
+          (is (thrown-with-message?
+               #"Complete package version overrides are required"
+               #(resolve-context root {:versions {'example/pkg-a "2.1.0"}})))
+          (is (thrown-with-message?
+               #"Complete package version overrides are required"
+               #(resolve-context root {:versions nil})))
+          (is (= {'example/pkg-a "2.1.0"
+                  'example/pkg-b "3.2.1"
+                  'example/pkg-cli "4.0.0"}
+                 (into {}
+                       (map (juxt key (comp :version val)))
+                       (:packages
+                        (resolve-context root {:versions {'example/pkg-a "2.1.0"
+                                                         'example/pkg-b "3.2.1"
+                                                         'example/pkg-cli "4.0.0"}}))))))))))
+
+(deftest resolve-context-uses-kmono-conventional-increments-and-dependent-patches
+  (doseq [[message expected]
+          [["fix: correct A" ["1.2.4" :patch]]
+           ["feat: extend A" ["1.3.0" :minor]]
+           ["fix!: replace A API" ["2.0.0" :major]]
+           ["chore: compatibility\n\nBREAKING CHANGE: removed old API"
+            ["2.0.0" :major]]]]
+    (testing message
+      (with-workspace
+        (fn [root]
+          (tag-all! root "1.2.3")
+          (change! root :pkg-a message)
+          (let [resolve-context (ns-resolve 'collet.build 'resolve-context!)]
+            (is (some? resolve-context))
+            (when resolve-context
+              (let [context (resolve-context root {:changes? true})
+                    packages (:packages context)]
+                (is (= expected
+                       [(:version (packages 'example/pkg-a))
+                        (:reason (packages 'example/pkg-a))]))
+                (is (= ["1.2.4" :dependency]
+                       [(:version (packages 'example/pkg-b))
+                        (:reason (packages 'example/pkg-b))]))
+                (is (= ['example/pkg-a 'example/pkg-b 'example/pkg-cli]
+                       (build/release-packages context nil)))))))))))
+
+(deftest release-packages-omits-nonreleasing-commits
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (change! root :pkg-a "docs: explain A")
+      (let [resolve-context (ns-resolve 'collet.build 'resolve-context!)
+            releases (ns-resolve 'collet.build 'release-packages)]
+        (is (some? resolve-context))
+        (is (some? releases))
+        (when (and resolve-context releases)
+          (let [context (resolve-context root {:changes? true})]
+            (is (= :unchanged
+                   (get-in context [:packages 'example/pkg-a :reason])))
+            (is (= [] (releases context nil)))))))))
 
 (deftest resolves-a-completely-versioned-build-context-without-git
   (with-workspace
@@ -106,7 +180,7 @@
       (let [versions {'example/pkg-a "2.1.0"
                       'example/pkg-b "3.2.1"
                       'example/pkg-cli "4.0.0"}
-            context (build/resolve-workspace-context!
+            context (build/resolve-context!
                      root {:versions versions})]
         (is (= versions
                (into {} (map (juxt key (comp :version val)))
@@ -115,7 +189,7 @@
                (get-in context [:packages 'example/pkg-b :tag]))))
       (is (thrown-with-message?
            #"Complete package version overrides are required"
-           #(build/resolve-workspace-context!
+           #(build/resolve-context!
              root {:versions {'example/pkg-a "2.1.0"}}))))))
 
 (deftest package-version-prints-the-exact-kmono-version
@@ -139,7 +213,7 @@
   (with-workspace
     (fn [root]
       (let [resolve-context (ns-resolve 'collet.build
-                                        'resolve-workspace-context!)
+                                        'resolve-context!)
             package-basis (ns-resolve 'collet.build 'package-basis)]
         (is (some? resolve-context))
         (is (some? package-basis))
@@ -168,7 +242,7 @@
                       'example/pkg-b "4.3.1"
                       'example/pkg-cli "9.0.0"}
             {:keys [packages] :as context}
-            (build/resolve-workspace-context! root {:versions versions})
+            (build/resolve-context! root {:versions versions})
             package (get packages 'example/pkg-b)]
         (b/with-project-root (:absolute-path package)
           (let [basis (build/package-basis context package :pom {})]
@@ -184,7 +258,7 @@
                       'example/pkg-b "4.3.1"
                       'example/pkg-cli "9.0.0"}
             {:keys [packages] :as context}
-            (build/resolve-workspace-context! root {:versions versions})
+            (build/resolve-context! root {:versions versions})
             package (get packages 'example/pkg-cli)
             write-pom! (ns-resolve 'collet.build 'write-pom!)]
         (b/with-project-root (:absolute-path package)
@@ -202,11 +276,11 @@
   (with-workspace
     (fn [root]
       (let [{:keys [packages] :as context}
-            (build/resolve-workspace-context! root)
+            (build/resolve-context! root)
             package (get packages 'example/pkg-a)
             install-opts (atom nil)]
         (with-redefs-fn
-          {(ns-resolve 'collet.build 'resolve-workspace-context!)
+          {(ns-resolve 'collet.build 'resolve-context!)
            (fn [] context)
            (ns-resolve 'collet.build 'build-jar!)
            (fn [_ _ _]
@@ -247,11 +321,11 @@
   (with-workspace
     (fn [root]
       (let [{:keys [packages] :as context}
-            (build/resolve-workspace-context! root)
+            (build/resolve-context! root)
             built (atom [])
             installed (atom [])]
         (with-redefs-fn
-          {(ns-resolve 'collet.build 'resolve-workspace-context!)
+          {(ns-resolve 'collet.build 'resolve-context!)
            (fn [] context)
            (ns-resolve 'collet.build 'build-jar!)
            (fn [_ package _]
