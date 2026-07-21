@@ -17,7 +17,7 @@
    :task (workspace/test-unit)}
 
   test:scripts
-  {:doc  "Run workspace and artifact policy tests"
+  {:doc  "Run root command-adapter tests"
    :task (workspace/test-scripts)}
 
   test:integration
@@ -37,7 +37,7 @@
    :task (workspace/install *command-line-args*)}
 
   verify
-  {:doc  "Build and inspect artifacts, dependency trees, and isolated consumers"
+  {:doc  "Build and check public artifact contracts"
    :task (workspace/verify *command-line-args*)}
 
   release:plan

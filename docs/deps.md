@@ -36,3 +36,9 @@ pins the exact compatible versions of all action modules transitively, so consum
 must not add or synchronize those internal versions themselves. See the
 [module graph](./module-migration.md#module-graph) for every coordinate and its direct
 internal dependencies.
+
+These are consumer dependencies. Inside this repository, package `deps.edn` files
+use top-level `:local/root` entries for other Collet packages, so a checkout uses its
+own source. Kmono converts them only for generated POMs, where every internal Maven
+coordinate receives the exact version resolved from its package tag. Do not copy
+those generated versions into source dependencies.

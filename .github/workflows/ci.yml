@@ -65,7 +65,7 @@ jobs:
             collet-ci
 
   artifacts:
-    name: Artifacts and isolated consumers
+    name: Public artifact contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

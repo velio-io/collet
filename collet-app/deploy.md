@@ -34,6 +34,10 @@ The builder uses Clojure CLI with JDK 21. The runtime image preserves the existi
 JVM options, JMX agent on port 8080, `/tini` entrypoint, environment variables, and
 startup command.
 
+Docker is required for this workflow. The repository release command creates the app
+package tag but never builds or pushes a registry image; image publication is a
+separate, explicit operation from that tag.
+
 ## Multi-architecture image
 
 Create and bootstrap a Docker Buildx builder once:

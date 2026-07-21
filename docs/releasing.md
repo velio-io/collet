@@ -70,8 +70,8 @@ version:
 | `feat: ...` | Minor |
 | `type!: ...` or a `BREAKING CHANGE:` footer | Major |
 
-Only commit messages determine whether a release is produced. Collet does not inspect
-or classify changed paths. Documentation, tests, CI, and development-only commits use
+Only conventional commit messages determine whether a release is produced.
+Documentation, tests, CI, and development-only commits use
 non-releasing conventional types such as `docs:`, `test:`, `ci:`, or `chore:` and do
 not publish. Runtime changes must use `fix:`, `feat:`, or a breaking-change marker;
 using `chore:` for a runtime change intentionally produces no release.
@@ -93,7 +93,7 @@ tag-only distribution, and does not require credentials.
 # Every changed package
 bb release:plan
 
-# Changed packages in the selected package's required dependency/dependent closure
+# Changed packages in the selected package and its required dependency chain
 bb release:plan collet-action-http
 ```
 
@@ -105,9 +105,10 @@ bb release
 bb release:all
 ```
 
-`bb release <module>` starts with changed packages related to that module, then
-selects the required changed dependency/dependent fixed-point closure. This keeps a
-filtered release internally consistent without publishing unrelated changes:
+`bb release <module>` selects release candidates only from that package and its
+required dependencies, in Kmono dependency order. It does not add dependents
+automatically; use `bb release:plan` without a module when the complete independent
+package plan is required:
 
 ```shell
 bb release collet-action-http
@@ -125,8 +126,7 @@ It performs this guarded sequence:
    `origin/main`.
 2. Requires Clojars credentials only when at least one selected package is
    publishable.
-3. Runs `bb test` and `bb verify` with Clojars credentials removed from child
-   process environments.
+3. Runs `bb test` and `bb verify` before publishing.
 4. Builds every selected artifact once with the exact planned package-version map.
 5. Deploys publishable Maven artifacts through `deps-deploy` in Kmono topological
    order. The CLI archive is built but remains tag-only.
@@ -139,8 +139,8 @@ license metadata, and build identity.
 
 ## Failure recovery
 
-The release command is deliberately fail-fast and has no transaction journal,
-remote-coordinate probing, automatic skip, or resume state machine.
+The release command is deliberately fail-fast. Maven publication cannot be rolled
+back, so recovery after a partial publication is manual.
 
 - A failure before deployment changes no remote state; fix the cause and rerun.
 - A deployment failure can leave earlier Maven coordinates published because Maven
@@ -153,6 +153,22 @@ remote-coordinate probing, automatic skip, or resume state machine.
 This recovery is intentionally manual: partial releases are rare, and keeping a
 custom recovery engine would make the normal release path harder to understand and
 maintain.
+
+For a partial Maven publication, use the failed run's already-built target JAR and
+POM when they are still present. If they are not, rerun the same `bb release
+[module]` command to recreate the exact planned artifacts; expect deployment to stop
+when it reaches an existing coordinate after the build. Compare the printed plan with
+Clojars, then deploy only the missing target JAR/POM coordinates in Kmono order:
+
+```shell
+clojure -X:release :installer :remote :sign-releases? false \
+  :artifact '"/absolute/path/package.jar"' \
+  :pom-file '"/absolute/path/pom.xml"'
+```
+
+After every selected Maven coordinate exists, create the exact planned package tags
+at the release revision and push them together with `git push --atomic`. Do not
+create or push any package tag while a selected Maven coordinate is missing.
 
 ## GitHub and CLI distribution
 

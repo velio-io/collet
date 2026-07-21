@@ -64,21 +64,21 @@ each coordinate they declare directly.
 JDBC includes the PostgreSQL driver because `collet.actions.jdbc-pg` imports its
 classes. The MySQL driver remains test-only and consumers add their chosen driver.
 
-## Dependency isolation
+## Source dependencies and generated Maven dependencies
 
 Source checkouts use top-level `:local/root` dependencies between packages. Kmono
 converts each local root into that package's exact Maven coordinate and resolved
 version only when generating a publishable POM; local paths never appear in
 published metadata. External consumers continue to use `:mvn/version`. There are no
-internal pins or source versions to update manually. `bb verify` installs every
-library into a temporary Maven repository, starts a minimal consumer process for
-each coordinate, requires its promised
-namespaces, and checks forbidden optional dependency families in each dependency
-tree.
+internal pins or source versions to update manually. `bb verify` reads generated POMs
+directly and checks exact internal Maven coordinates and resolved versions, together
+with published JAR namespaces and executable contracts.
 
-The `io.velio/collet-actions` aggregate is the only artifact expected to expose all
-optional families. HTTP-only consumers do not receive JDBC, AWS, Chronicle, OpenAI,
-Graal, or Lucene dependencies.
+For example, the source dependency for file is a local root to HTTP and core. Its
+generated POM contains `io.velio/collet-action-http` and
+`io.velio/collet-core`, each at the exact Kmono-resolved package-tag version. The
+aggregate POM likewise lists all ten action coordinates at their exact resolved
+versions. This conversion is owned by Kmono, not a Collet dependency-rewrite layer.
 
 ## Vega and Darkstar
 
@@ -104,12 +104,13 @@ Tags use Kmono's `<coordinate>@<version>` format, for example
 `io.velio/collet-action-http@0.2.8`. `fix:` commits produce patch releases, `feat:`
 commits produce minor releases, and `!` or a `BREAKING CHANGE:` footer produces a
 major release. Documentation, tests, CI, and development-only changes are ignored.
-A meaningful package change with no release-producing commit fails planning and
-verification with guidance to fix the commit or squash-merge PR title.
+A meaningful package change with no release-producing commit is absent from the
+release plan; fix the commit or squash-merge PR title rather than adding a version.
 
 Internal dependency changes give affected dependents a patch release transitively.
 In particular, any action release also patches `io.velio/collet-actions`; a core
 release patches every affected action, the aggregate, app, and CLI through the graph.
-Use `bb release:plan [module]` to inspect the exact fixed-point closure before a
-release. Maven publication is automated by `bb release`; the CLI GitHub release and
-Docker push remain later, explicit operations from their own package tags.
+Use `bb release:plan` to inspect all candidates. With a module, the plan shows only
+that module and its dependencies; Maven publication is automated by `bb release`,
+while the CLI GitHub release and Docker push remain later, explicit operations from
+their own package tags.

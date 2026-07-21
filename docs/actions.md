@@ -18,6 +18,10 @@ version. Package releases use tags such as
 `io.velio/collet-action-http@0.2.8`; see the
 [release guide](./releasing.md) for the conventional-commit policy and workflow.
 
+In the source workspace, action packages use `:local/root` for their Collet
+dependencies. Kmono emits ordinary Maven dependencies in each published POM and
+pins those internal coordinates to their exact independently resolved versions.
+
 For example, an HTTP-only application can use:
 
 ```clojure

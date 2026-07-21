@@ -78,6 +78,10 @@ Return to the original checkout before running
 version need not match the app or any Maven artifact. `bb release` neither creates
 the CLI GitHub release nor pushes the Docker image.
 
+This upload is intentionally separate from Maven deployment. If a package release
+partially publishes Maven artifacts, follow the manual recovery steps in the
+[release guide](../docs/releasing.md#failure-recovery) before creating a CLI release.
+
 ### Development
 
 Building requires JDK 21 or newer, Clojure CLI, and Babashka. Run the pod artifact
