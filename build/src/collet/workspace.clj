@@ -184,7 +184,7 @@
   (let [{:keys [exit out err]}
         (shell/sh "git" "-C" root
                   "diff-tree" "--root" "--no-commit-id" "--name-status"
-                  "-r" "-M" "-z" "--first-parent" sha)]
+                  "-r" "-M" "-m" "-z" "--first-parent" sha)]
     (when-not (zero? exit)
       (fail! "Cannot inspect changed paths for package commit"
              {:commit sha :error (str/trim err)}))

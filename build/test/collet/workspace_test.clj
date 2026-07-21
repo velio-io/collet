@@ -210,6 +210,22 @@
         (is (= :patch (:reason (package plan 'example/pkg-a))))
         (is (= "1.2.4" (:version (package plan 'example/pkg-a))))))))
 
+(deftest runtime-change-introduced-by-a-merge-commit-produces-a-release
+  (with-workspace
+    (fn [root]
+      (git! root "switch" "-c" "topic")
+      (change! root "pkg-a" "notes.md" "docs: prepare A merge" "topic notes")
+      (git! root "switch" "main")
+      (tag-all! root "1.2.3")
+      (git! root "merge" "--no-ff" "--no-commit" "topic")
+      (spit (str (fs/path root "pkg-a" "src" "example" "a.clj"))
+            "(ns example.a)\n;; merge resolution\n")
+      (commit! root "fix: integrate A runtime merge resolution")
+      (let [plan (workspace/resolve-release-plan! (str root))]
+        (is (= :patch (:reason (package plan 'example/pkg-a))))
+        (is (= "1.2.4" (:version (package plan 'example/pkg-a))))
+        (is (= :dependency (:reason (package plan 'example/pkg-b))))))))
+
 (deftest rejects-meaningful-package-changes-without-a-version-bump
   (with-workspace
     (fn [root]
