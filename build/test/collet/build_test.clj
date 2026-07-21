@@ -156,6 +156,24 @@
     (is (= [selected aggregate]
            (build/release-packages context :selected)))))
 
+(deftest module-filter-closes-connected-release-candidate-graph
+  (let [core 'example/core
+        selected 'example/selected
+        sibling 'example/sibling
+        aggregate 'example/aggregate
+        packages {core {:fqn core :release? false :reason :unchanged
+                        :depends-on #{} :dependents #{selected sibling}}
+                  selected {:fqn selected :release? true :reason :patch
+                            :depends-on #{core} :dependents #{aggregate}}
+                  sibling {:fqn sibling :release? true :reason :patch
+                           :depends-on #{core} :dependents #{aggregate}}
+                  aggregate {:fqn aggregate :release? true :reason :dependency
+                             :depends-on #{selected sibling} :dependents #{}}}
+        context {:packages packages
+                 :order [core selected sibling aggregate]}]
+    (is (= [selected sibling aggregate]
+           (build/release-packages context :selected)))))
+
 (deftest resolve-context-requires-complete-docker-version-overrides
   (with-workspace
     (fn [root]

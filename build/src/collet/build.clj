@@ -185,7 +185,7 @@
           (first matches)))))
 
 (defn release-packages
-  "Return changed packages, optionally limited to a module's dependencies.
+  "Return changed packages, optionally scoped to a module's candidate closure.
 
   The result keeps the dependency-first Kmono order preserved in context."
   [{:keys [packages order]} module]
@@ -196,15 +196,25 @@
                                 (vals packages)))
         selected (if (or bootstrap? (nil? fqn))
                    (set (keys packages))
-                   (let [required (conj
+                   (let [candidates (kmono.graph/filter-by :release? packages)
+                         candidate-fqns (set (keys candidates))
+                         required (conj
                                    (kmono.graph/query-dependencies packages fqn)
                                    fqn)
-                         release-required (filter
-                                           #(get-in packages [% :release?])
-                                           required)]
-                     (into required
-                           (mapcat #(kmono.graph/query-dependents packages %))
-                           release-required)))]
+                         seed (set/intersection candidate-fqns required)]
+                     (loop [closure seed]
+                       (let [expanded
+                             (into closure
+                                   (comp
+                                    (mapcat
+                                     (fn [package]
+                                       (concat (:depends-on package)
+                                               (:dependents package))))
+                                    (filter candidate-fqns))
+                                   (map candidates closure))]
+                         (if (= closure expanded)
+                           closure
+                           (recur expanded))))))]
     (filterv #(and (contains? selected %)
                    (get-in packages [% :release?]))
              order)))
