@@ -174,12 +174,15 @@
   "Run the guarded fail-fast release pipeline, optionally for one module."
   [{:keys [root module] :or {root "."}}]
   (fetch-tags! root)
-  (let [{:keys [context packages]} (candidate-plan root module)]
+  (let [{:keys [revision]} (production-preflight! root)
+        {:keys [context packages]} (candidate-plan root module)]
+    (ensure-release-revision! root revision)
+    (println (format-plan packages))
     (if (empty? packages)
       (do
         (println "No packages require release.")
         {:tags [] :deployed [] :tag-only []})
-      (let [{:keys [revision]} (production-preflight! root)]
+      (do
         (ensure-target-tags-absent! root packages)
         (validate-credentials! (System/getenv) packages)
         (quality-gate! root "test")
@@ -187,6 +190,7 @@
         (ensure-release-revision! root revision)
         (let [artifacts (:artifacts (build-release! context packages revision))]
           (ensure-release-revision! root revision)
+          (ensure-target-tags-absent! root packages)
           (doseq [package (filter :publish? packages)]
             (deploy! root package (get artifacts (:fqn package))))
           (create-tags! root packages revision)

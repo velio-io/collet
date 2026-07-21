@@ -37,14 +37,21 @@
 (defn- release-var [name]
   (ns-resolve 'collet.release name))
 
-(defn- run-release! [revisions existing-tag events]
+(defn- quietly [f]
+  (binding [*out* (java.io.StringWriter.)]
+    (f)))
+
+(defn- run-release! [revisions tag-targets events]
   (let [remaining (atom revisions)
+        remaining-tags (atom tag-targets)
         package (first packages)]
     (with-redefs-fn
       {(release-var 'fetch-tags!) (fn [_] nil)
        (release-var 'candidate-plan)
-       (fn [_ _] {:context {:packages {(:fqn package) package}}
-                   :packages [package]})
+       (fn [_ _]
+         (swap! events conj [:plan])
+         {:context {:packages {(:fqn package) package}}
+          :packages [package]})
        (release-var 'production-preflight!)
        (fn [_]
          (let [revision (first @remaining)]
@@ -52,7 +59,12 @@
            (swap! events conj [:preflight revision])
            {:revision revision}))
        #'release/validate-credentials! (fn [& _] nil)
-       (release-var 'git-tag-target) (fn [& _] existing-tag)
+       (release-var 'git-tag-target)
+       (fn [& _]
+         (let [target (first @remaining-tags)]
+           (swap! remaining-tags rest)
+           (swap! events conj [:tag-check target])
+           target))
        (release-var 'quality-gate!)
        (fn [_ task] (swap! events conj [:quality task]))
        (release-var 'build-release!)
@@ -143,26 +155,71 @@
 
 (deftest release-revalidates-and-tags-the-captured-source-revision
   (let [events (atom [])]
-    (run-release! ["abc123" "abc123" "abc123"] nil events)
+    (quietly (fn []
+               (run-release! ["abc123" "abc123" "abc123" "abc123"]
+                             [nil nil] events)))
     (is (= [[:preflight "abc123"]
+            [:plan]
             [:preflight "abc123"]
-            [:preflight "abc123"]]
-           (filterv #(= :preflight (first %)) @events)))
-    (is (= [:tag "abc123"] (first (filter #(= :tag (first %)) @events))))))
+            [:tag-check nil]
+            [:quality "test"]
+            [:quality "verify"]
+            [:preflight "abc123"]
+            [:build]
+            [:preflight "abc123"]
+            [:tag-check nil]
+            [:deploy]
+            [:tag "abc123"]
+            [:push]]
+           @events))))
+
+(deftest release-prints-the-exact-execution-plan
+  (let [events (atom [])
+        output (with-out-str
+                 (run-release! ["abc123" "abc123" "abc123" "abc123"]
+                               [nil nil] events))]
+    (is (= (str (release/format-plan [(first packages)]) "\n") output))))
+
+(deftest source-drift-during-planning-stops-before-quality-gates
+  (let [events (atom [])
+        error (exception #(run-release! ["abc123" "other"] [] events))]
+    (is (= "Release source revision changed" (ex-message error)))
+    (is (= [[:preflight "abc123"] [:plan] [:preflight "other"]]
+           @events))))
 
 (deftest source-drift-after-build-prevents-deployment-and-tagging
   (let [events (atom [])
-        error (exception #(run-release! ["abc123" "abc123" "other"]
-                                        nil events))]
+        error (quietly
+               (fn []
+                 (exception
+                  (fn []
+                    (run-release! ["abc123" "abc123" "abc123" "other"]
+                                  [nil] events)))))]
     (is (= "Release source revision changed" (ex-message error)))
     (is (not-any? #(#{:deploy :tag :push} (first %)) @events))))
 
 (deftest an-existing-target-tag-stops-before-quality-gates
   (let [events (atom [])
-        error (exception #(run-release! ["abc123"] "other-lineage" events))]
+        error (quietly
+               (fn []
+                 (exception
+                  (fn []
+                    (run-release! ["abc123" "abc123"]
+                                  ["other-lineage"] events)))))]
     (is (= "Release target tag already exists" (ex-message error)))
     (is (= "example/pkg-a@1.2.4" (:tag (ex-data error))))
     (is (not-any? #(#{:quality :build :deploy :tag :push} (first %)) @events))))
+
+(deftest a-late-target-tag-stops-before-deployment-and-tagging
+  (let [events (atom [])
+        error (quietly
+               (fn []
+                 (exception
+                  (fn []
+                    (run-release! ["abc123" "abc123" "abc123" "abc123"]
+                                  [nil "late-collision"] events)))))]
+    (is (= "Release target tag already exists" (ex-message error)))
+    (is (not-any? #(#{:deploy :tag :push} (first %)) @events))))
 
 (deftest cli-release-check-reuses-the-public-deployable-contract
   (with-cli-artifacts

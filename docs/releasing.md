@@ -36,8 +36,8 @@ GitHub release or pushes an image.
   packages. Use a Clojars deploy token as the password. A tag-only CLI plan does not
   require Clojars credentials.
 
-Only run release commands from the repository root. CI plans and verifies releases
-but never deploys.
+Only run release commands from the repository root. CI verifies builds and artifacts
+but does not run release planning or deploy releases.
 
 ## How the build is divided
 
@@ -126,12 +126,14 @@ Use directory-style module names such as `collet-core`, `collet-action-http`,
 After reviewing `bb release:plan`, a maintainer runs the matching release command.
 It performs this guarded sequence:
 
-1. Fetches package tags, requires a clean `main`, and requires local `HEAD` to equal
-   `origin/main`.
+1. Fetches package tags, captures a clean `main` synchronized with `origin/main`,
+   resolves and prints the exact plan, revalidates the revision, and rejects existing
+   target tags.
 2. Requires Clojars credentials only when at least one selected package is
    publishable.
-3. Runs `bb test` and `bb verify` before publishing.
-4. Builds every selected artifact once with the exact planned package-version map.
+3. Runs `bb test` and `bb verify`, then revalidates the captured revision.
+4. Builds every selected artifact once with the exact planned package-version map,
+   then revalidates the revision and target-tag absence before deployment.
 5. Deploys publishable Maven artifacts through `deps-deploy` in Kmono topological
    order. The CLI archive is built but remains tag-only.
 6. Creates the selected package tags at the release revision after every deployment
@@ -139,7 +141,8 @@ It performs this guarded sequence:
 7. Atomically pushes those tags.
 
 Generated and embedded POMs contain exact internal Maven versions, SCM package tag,
-license metadata, and build identity.
+and license metadata. Build identity lives in `META-INF/collet/build.edn` inside each
+artifact.
 
 ## Failure recovery
 
