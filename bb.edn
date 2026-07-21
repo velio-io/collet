@@ -1,61 +1,80 @@
-{:paths ["scripts"]
+{:tasks
+ {:requires ([babashka.process :refer [shell]])
 
- :tasks
- {:requires
-  ([workspace :as workspace])
+  :init
+  (do
+    (defn no-args! [usage args command]
+      (when (seq args)
+        (throw (ex-info (str "Usage: bb " usage) {:args args})))
+      (apply shell command))
+
+    (defn module-command! [command usage args]
+      (when (> (count args) 1)
+        (throw (ex-info (str "Usage: bb " usage " [module]") {:args args})))
+      (apply shell
+             (cond-> ["clojure" "-T:build" command]
+               (first args) (into [":module" (str ":" (first args))]))))
+
+    (defn test-unit! []
+      (shell "clojure" "-T:build-test")
+      (shell "clojure" "-M:kmono" "run" "--M" ":test"
+             "--" "-e" ":integration"))
+
+    (defn test-integration! []
+      (shell "clojure" "-T:build" "build" ":module" ":collet-cli")
+      (shell "clojure" "-M:kmono" "run" "--M" ":test:integration"
+             "--" "-i" ":integration")))
 
   kmono
   {:doc "Run the pinned Kmono CLI"
-   :task (workspace/kmono *command-line-args*)}
+   :task (apply shell (into ["clojure" "-M:kmono"] *command-line-args*))}
 
   test
-  {:doc  "Run every unit and Docker integration test in separate JVMs"
-   :task (workspace/test-all)}
+  {:doc "Run every unit and Docker integration test in separate JVMs"
+   :task (do (test-unit!) (test-integration!))}
 
   test:unit
-  {:doc  "Run every module test suite without :integration tests"
-   :task (workspace/test-unit)}
-
-  test:scripts
-  {:doc  "Run root command-adapter tests"
-   :task (workspace/test-scripts)}
+  {:doc "Run every module test suite without :integration tests"
+   :task (test-unit!)}
 
   test:integration
-  {:doc  "Run Docker-backed and artifact startup integration tests"
-   :task (workspace/test-integration)}
+  {:doc "Run Docker-backed and artifact startup integration tests"
+   :task (test-integration!)}
 
   test:module
-  {:doc  "Test one module: bb test:module <module> [test-runner-options]"
-   :task (workspace/test-module *command-line-args*)}
+  {:doc "Test one module: bb test:module <module> [test-runner-options]"
+   :task
+   (let [[module & runner-options :as args] *command-line-args*]
+     (when-not module
+       (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
+                       {:args args})))
+     (when (#{"collet-app" "collet-cli"} module)
+       (shell "clojure" "-T:build" "build" ":module" (str ":" module)))
+     (apply shell
+            (into ["clojure" "-M:kmono" "run" "-F"
+                   (str ":io.velio/" module) "--M" ":test"]
+                  (concat (when (seq runner-options) ["--"])
+                          runner-options))))}
 
   build
-  {:doc  "Build one module (defaults to all modules)"
-   :task (workspace/build *command-line-args*)}
+  {:doc "Build one module (defaults to all modules)"
+   :task (module-command! "build" "build" *command-line-args*)}
 
   install
-  {:doc  "Install one module and its dependencies (defaults to all libraries)"
-   :task (workspace/install *command-line-args*)}
+  {:doc "Install one module and its dependencies (defaults to all libraries)"
+   :task (module-command! "install" "install" *command-line-args*)}
 
   verify
-  {:doc  "Build and check public artifact contracts"
-   :task (workspace/verify *command-line-args*)}
+  {:doc "Build and check public artifact contracts"
+   :task (no-args! "verify" *command-line-args*
+                   ["clojure" "-T:build" "verify"])}
 
   release:plan
-  {:doc "Print the independent package release plan: bb release:plan [module]"
-   :task (workspace/release-plan *command-line-args*)}
+  {:doc "Print the independent package release plan"
+   :task (no-args! "release:plan" *command-line-args*
+                   ["clojure" "-T:build" "release-plan"])}
 
   release
-  {:doc "Release a package closure locally: bb release [module]"
-   :task (workspace/release *command-line-args*)}
-
-  release:all
   {:doc "Release every changed package locally"
-   :task (workspace/release-all *command-line-args*)}
-
-  release:verify-cli
-  {:doc "Verify CLI outputs from a detached CLI package-tag checkout"
-   :task (workspace/release-verify-cli *command-line-args*)}
-
-  release:verify-image
-  {:doc "Verify a local Docker image against an app package tag"
-   :task (workspace/release-verify-image *command-line-args*)}}}
+   :task (no-args! "release" *command-line-args*
+                   ["clojure" "-T:build" "release"])}}}

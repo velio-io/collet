@@ -13,10 +13,10 @@
 (def package
   {:fqn 'example/app
    :version "3.2.1"
-   :artifact {:public-namespaces ['example.app]
-              :publish? true
-              :kind :library}
-   :deps-edn {:paths ["src"]
+   :deps-edn {:collet/artifact {:public-namespaces ['example.app]
+                                :publish? true
+                                :kind :library}
+              :paths ["src"]
               :deps {'example/core {:local/root "../core"}
                      'external/dep {:mvn/version "4.5.6"}
                      ;; Mirrors Vega's public POM-only runtime coordinate.
@@ -158,9 +158,9 @@
   (let [root (fs/create-temp-dir {:prefix "verify-executable-test-"})
         app (-> package
                 (assoc :absolute-path (str root))
-                (assoc-in [:artifact :kind] :uberjar)
-                (assoc-in [:artifact :main] 'example.app)
-                (assoc-in [:artifact :outputs] {:uberjar "app.jar"}))
+                (assoc-in [:deps-edn :collet/artifact :kind] :uberjar)
+                (assoc-in [:deps-edn :collet/artifact :main] 'example.app)
+                (assoc-in [:deps-edn :collet/artifact :outputs] {:uberjar "app.jar"}))
         app-context (assoc-in context [:packages 'example/app] app)
         jar (fs/path root "app.jar")
         entries {"META-INF/MANIFEST.MF"
@@ -186,9 +186,9 @@
   (let [root (fs/create-temp-dir {:prefix "verify-cli-test-"})
         cli (-> package
                 (assoc :absolute-path (str root))
-                (assoc-in [:artifact :kind] :distribution)
-                (assoc-in [:artifact :main] 'example.cli)
-                (assoc-in [:artifact :outputs]
+                (assoc-in [:deps-edn :collet/artifact :kind] :distribution)
+                (assoc-in [:deps-edn :collet/artifact :main] 'example.cli)
+                (assoc-in [:deps-edn :collet/artifact :outputs]
                                    {:uberjar "target/collet.pod.jar"
                            :archive "target/collet-cli.tar.gz"
                            :root "collet-cli"
@@ -224,10 +224,9 @@
 
 (deftest verification-reports-the-failing-package-and-contract
   (let [error (atom nil)
-        context {:packages {'example/app package}
-                 :order ['example/app]}]
+        packages {'example/app package}]
     (with-redefs-fn
-      {#'collet.build/resolve-context! (fn [_] context)
+      {#'collet.build/load-packages (fn [_] packages)
        #'collet.build/build (fn [_] nil)
        #'collet.verify/verify-library-artifact!
        (fn [& _] (throw (ex-info "Missing namespace" {:entry "example/app.clj"})))

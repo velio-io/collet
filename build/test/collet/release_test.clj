@@ -1,113 +1,46 @@
 (ns collet.release-test
   (:require
    [babashka.fs :as fs]
-   [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is]]
+   [clojure.tools.build.api :as b]
+   [collet.build :as build]
    [collet.release :as release]
-   [collet.verify :as verify]))
+   [k16.kaven.deploy :as kaven.deploy]))
 
 (def packages
-  [{:fqn 'example/pkg-a
-    :current-version "1.2.3"
+  {'example/pkg-a
+   {:fqn 'example/pkg-a
     :version "1.2.4"
-    :reason :patch
-    :tag "example/pkg-a@1.2.4"
-    :publish? true}
-   {:fqn 'example/pkg-b
-    :current-version "1.2.3"
-    :version "1.2.4"
-    :reason :dependency
-    :tag "example/pkg-b@1.2.4"
-    :publish? true}
+    :release? true
+    :deps-edn {:collet/artifact {:publish? true}}}
+   'example/pkg-cli
    {:fqn 'example/pkg-cli
-    :current-version "1.2.3"
     :version "1.2.4"
-    :reason :dependency
-    :tag "example/pkg-cli@1.2.4"
-    :publish? false}])
+    :release? true
+    :depends-on #{'example/pkg-a}
+    :deps-edn {:collet/artifact {:publish? false}}}})
 
 (defn- exception [f]
   (try
     (f)
     nil
-    (catch clojure.lang.ExceptionInfo error
-      error)))
+    (catch clojure.lang.ExceptionInfo error error)))
 
 (defn- release-var [name]
   (ns-resolve 'collet.release name))
 
-(defn- quietly [f]
-  (binding [*out* (java.io.StringWriter.)]
-    (f)))
-
-(defn- run-release! [revisions tag-targets events]
-  (let [remaining (atom revisions)
-        remaining-tags (atom tag-targets)
-        package (first packages)]
-    (with-redefs-fn
-      {(release-var 'fetch-tags!) (fn [_] nil)
-       (release-var 'candidate-plan)
-       (fn [_ _]
-         (swap! events conj [:plan])
-         {:context {:packages {(:fqn package) package}}
-          :packages [package]})
-       (release-var 'production-preflight!)
-       (fn [_]
-         (let [revision (first @remaining)]
-           (swap! remaining rest)
-           (swap! events conj [:preflight revision])
-           {:revision revision}))
-       #'release/validate-credentials! (fn [& _] nil)
-       (release-var 'git-tag-target)
-       (fn [& _]
-         (let [target (first @remaining-tags)]
-           (swap! remaining-tags rest)
-           (swap! events conj [:tag-check target])
-           target))
-       (release-var 'quality-gate!)
-       (fn [_ task] (swap! events conj [:quality task]))
-       (release-var 'build-release!)
-       (fn [& _]
-         (swap! events conj [:build])
-         {:artifacts {(:fqn package) {}}})
-       (release-var 'deploy!)
-       (fn [& _] (swap! events conj [:deploy]))
-       (release-var 'create-tags!)
-       (fn [_ _ & [revision]] (swap! events conj [:tag revision]))
-       (release-var 'push-tags!)
-       (fn [& _] (swap! events conj [:push]))}
-      (fn [] (release/release {:root "repo"})))))
-
-(defn- with-cli-artifacts [top-level-pod archived-pod f]
-  (let [root (fs/create-temp-dir {:prefix "verify-cli-release-test-"})
-        target (fs/path root "target")
-        archive-root (fs/path root "archive" "collet-cli")
-        archive (fs/path target "collet-cli.tar.gz")]
-    (try
-      (fs/create-dirs target)
-      (fs/create-dirs archive-root)
-      (spit (str (fs/path target "collet.pod.jar")) top-level-pod)
-      (spit (str (fs/path archive-root "collet.pod.jar")) archived-pod)
-      (let [{:keys [exit err]}
-            (shell/sh "tar" "-czf" (str archive)
-                      "-C" (str (fs/parent archive-root)) "collet-cli")]
-        (when-not (zero? exit)
-          (throw (ex-info "tar failed" {:error err}))))
-      (f (str root))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest plan-display-shows-package-current-next-reason-tag-and-publication
+(deftest plan-shows-only-package-version-tag-and-publication
   (let [output (release/format-plan packages)]
-    (doseq [text ["PACKAGE" "CURRENT" "NEXT" "REASON" "TAG" "PUBLICATION"
-                  "example/pkg-a" "1.2.3" "1.2.4" "patch"
-                  "example/pkg-a@1.2.4" "Maven"
-                  "example/pkg-cli" "tag only"]]
-      (is (str/includes? output text)))))
+    (doseq [text ["PACKAGE" "VERSION" "TAG" "PUBLICATION"
+                  "example/pkg-a" "1.2.4" "example/pkg-a@1.2.4"
+                  "Maven" "example/pkg-cli" "tag only"]]
+      (is (str/includes? output text)))
+    (is (not (str/includes? output "REASON")))
+    (is (not (str/includes? output "CURRENT")))))
 
 (deftest preflight-requires-clean-synchronized-main
-  (is (= {:revision "abc123"}
+  (is (= "abc123"
          (release/validate-preflight!
           {:branch "main" :status "" :head "abc123" :remote-head "abc123"})))
   (doseq [[state message]
@@ -117,175 +50,81 @@
             "Releases require a clean worktree"]
            [{:branch "main" :status "" :head "abc123" :remote-head "other"}
             "Local main must equal origin/main"]]]
-    (is (= message
-           (ex-message (exception #(release/validate-preflight! state)))))))
+    (is (= message (ex-message (exception #(release/validate-preflight! state)))))))
 
-(deftest publishable-plans-require-both-clojars-credentials
-  (is (nil? (release/validate-credentials!
-             {"CLOJARS_USERNAME" "user" "CLOJARS_PASSWORD" "token"}
-             packages)))
-  (is (nil? (release/validate-credentials! {} [(last packages)])))
-  (let [error (exception #(release/validate-credentials!
-                           {"CLOJARS_USERNAME" "user"}
-                           packages))]
-    (is (= "Clojars credentials are required for publishable packages"
-           (ex-message error)))
-    (is (= ["CLOJARS_PASSWORD"] (:variables (ex-data error))))))
+(deftest kaven-deploy-reuses-the-built-jar-and-pom
+  (let [called (atom nil)
+        package (get packages 'example/pkg-a)
+        artifact {:jar-file "/tmp/pkg.jar" :pom-file "/tmp/pom.xml"}]
+    (with-redefs [kaven.deploy/deploy #(reset! called %)]
+      ((release-var 'deploy!) package artifact))
+    (is (= {:jar-path "/tmp/pkg.jar"
+            :pom-path "/tmp/pom.xml"
+            :repository {:id "clojars" :url "https://repo.clojars.org/"}}
+           @called))))
 
-(deftest nondeployment-environment-removes-publication-credentials
-  (is (= {"PATH" "/bin" "OTHER" "kept"}
-         (release/nondeployment-env
-          {"PATH" "/bin"
-           "OTHER" "kept"
-           "CLOJARS_USERNAME" "secret"
-           "CLOJARS_PASSWORD" "secret"}))))
+(deftest kaven-deploys-to-a-file-maven-repository
+  (let [root (fs/create-temp-dir {:prefix "collet-kaven-test-"})
+        classes (fs/path root "classes")
+        jar (fs/path root "sample.jar")
+        pom (fs/path root "pom.xml")
+        repository (fs/path root "repository")
+        home (fs/path root "home")]
+    (try
+      (fs/create-dirs classes)
+      (fs/create-dirs (fs/path home ".m2"))
+      (spit (str (fs/path home ".m2" "settings.xml"))
+            (str "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\">"
+                 "<servers><server><id>test</id><username>user</username>"
+                 "<password>token</password></server></servers></settings>"))
+      (spit (str pom)
+            (str "<project><modelVersion>4.0.0</modelVersion>"
+                 "<groupId>example</groupId><artifactId>sample</artifactId>"
+                 "<version>1.0.0</version></project>"))
+      (b/with-project-root (str root)
+        (b/jar {:class-dir "classes" :jar-file "sample.jar"}))
+      (let [original-home (System/getProperty "user.home")]
+        (try
+          (System/setProperty "user.home" (str home))
+          (kaven.deploy/deploy
+           {:jar-path (str jar)
+            :pom-path (str pom)
+            :repository {:id "test" :url (str (.toUri repository))}})
+          (finally
+            (System/setProperty "user.home" original-home))))
+      (is (fs/regular-file?
+           (fs/path repository "example" "sample" "1.0.0" "sample-1.0.0.jar")))
+      (is (fs/regular-file?
+           (fs/path repository "example" "sample" "1.0.0" "sample-1.0.0.pom")))
+      (finally
+        (fs/delete-tree root)))))
 
-(deftest release-revalidates-and-tags-the-captured-source-revision
-  (let [events (atom [])]
-    (quietly (fn []
-               (run-release! ["abc123" "abc123" "abc123" "abc123"]
-                             [nil nil] events)))
-    (is (= [[:preflight "abc123"]
-            [:plan]
-            [:preflight "abc123"]
-            [:tag-check nil]
+(deftest release-builds-and-deploys-all-changed-packages-before-tagging
+  (let [events (atom [])
+        artifacts {'example/pkg-a {:jar-file "/tmp/a.jar" :pom-file "/tmp/a.xml"}
+                   'example/pkg-cli {:uber-file "/tmp/cli.jar"}}]
+    (with-redefs-fn
+      {(release-var 'fetch-tags!) (fn [_] (swap! events conj [:fetch]))
+       (release-var 'production-preflight!) (fn [_] "abc123")
+       (release-var 'ensure-target-tags-absent!) (fn [& _] nil)
+       #'build/load-packages (fn [_] packages)
+       (release-var 'quality-gate!) (fn [_ task] (swap! events conj [:quality task]))
+       #'build/build (fn [_] (swap! events conj [:build]) {:artifacts artifacts})
+       (release-var 'deploy!)
+       (fn [package _] (swap! events conj [:deploy (:fqn package)]))
+       (release-var 'create-tags!)
+       (fn [_ selected revision]
+         (swap! events conj [:tag (mapv :fqn (vals selected)) revision]))
+       (release-var 'push-tags!)
+       (fn [_ selected]
+         (swap! events conj [:push (mapv :fqn (vals selected))]))}
+      #(release/release {:root "repo"}))
+    (is (= [[:fetch]
             [:quality "test"]
             [:quality "verify"]
-            [:preflight "abc123"]
             [:build]
-            [:preflight "abc123"]
-            [:tag-check nil]
-            [:deploy]
-            [:tag "abc123"]
-            [:push]]
+            [:fetch]
+            [:deploy 'example/pkg-a]
+            [:tag ['example/pkg-a 'example/pkg-cli] "abc123"]
+            [:push ['example/pkg-a 'example/pkg-cli]]]
            @events))))
-
-(deftest release-prints-the-exact-execution-plan
-  (let [events (atom [])
-        output (with-out-str
-                 (run-release! ["abc123" "abc123" "abc123" "abc123"]
-                               [nil nil] events))]
-    (is (= (str (release/format-plan [(first packages)]) "\n") output))))
-
-(deftest source-drift-during-planning-stops-before-quality-gates
-  (let [events (atom [])
-        error (exception #(run-release! ["abc123" "other"] [] events))]
-    (is (= "Release source revision changed" (ex-message error)))
-    (is (= [[:preflight "abc123"] [:plan] [:preflight "other"]]
-           @events))))
-
-(deftest source-drift-after-build-prevents-deployment-and-tagging
-  (let [events (atom [])
-        error (quietly
-               (fn []
-                 (exception
-                  (fn []
-                    (run-release! ["abc123" "abc123" "abc123" "other"]
-                                  [nil] events)))))]
-    (is (= "Release source revision changed" (ex-message error)))
-    (is (not-any? #(#{:deploy :tag :push} (first %)) @events))))
-
-(deftest an-existing-target-tag-stops-before-quality-gates
-  (let [events (atom [])
-        error (quietly
-               (fn []
-                 (exception
-                  (fn []
-                    (run-release! ["abc123" "abc123"]
-                                  ["other-lineage"] events)))))]
-    (is (= "Release target tag already exists" (ex-message error)))
-    (is (= "example/pkg-a@1.2.4" (:tag (ex-data error))))
-    (is (not-any? #(#{:quality :build :deploy :tag :push} (first %)) @events))))
-
-(deftest a-late-target-tag-stops-before-deployment-and-tagging
-  (let [events (atom [])
-        error (quietly
-               (fn []
-                 (exception
-                  (fn []
-                    (run-release! ["abc123" "abc123" "abc123" "abc123"]
-                                  [nil "late-collision"] events)))))]
-    (is (= "Release target tag already exists" (ex-message error)))
-    (is (not-any? #(#{:deploy :tag :push} (first %)) @events))))
-
-(deftest cli-release-check-reuses-the-public-deployable-contract
-  (with-cli-artifacts
-    "same-pod" "same-pod"
-    (fn [root]
-      (let [package {:fqn 'io.velio/collet-cli
-                     :version "1.2.4"
-                     :tag "io.velio/collet-cli@1.2.4"
-                     :absolute-path root}
-            context {:tag (:tag package)
-                     :revision "abc123"
-                     :package package
-                     :packages {(:fqn package) package}}
-            checked (atom nil)]
-        (with-redefs-fn
-          {(release-var 'ensure-tag-checkout!) (fn [& _] context)
-           (release-var 'verify-jar) (fn [& _] :matching)
-           #'verify/verify-deployable!
-           (fn [actual-context actual-package]
-             (reset! checked [actual-context actual-package])
-             true)}
-          (fn []
-            (with-out-str
-              (release/verify-cli {:root root :tag (:tag package)}))))
-        (is (= [context package] @checked))))))
-
-(deftest cli-release-check-rejects-a-different-archived-pod
-  (with-cli-artifacts
-    "top-level-pod" "different-archived-pod"
-    (fn [root]
-      (let [package {:fqn 'io.velio/collet-cli
-                     :version "1.2.4"
-                     :tag "io.velio/collet-cli@1.2.4"
-                     :absolute-path root}
-            context {:tag (:tag package)
-                     :revision "abc123"
-                     :package package
-                     :packages {(:fqn package) package}}
-            error (with-redefs-fn
-                    {(release-var 'ensure-tag-checkout!) (fn [& _] context)
-                     (release-var 'verify-jar) (fn [& _] :matching)
-                     #'verify/verify-deployable! (fn [& _] true)}
-                    (fn []
-                      (exception #(release/verify-cli
-                                   {:root root :tag (:tag package)}))))]
-        (is (= "Archived CLI pod differs from the top-level pod"
-               (ex-message error)))))))
-
-(deftest image-verification-cleans-its-directory-when-container-creation-fails
-  (let [directory (fs/create-temp-dir {:prefix "verify-image-release-test-"})
-        context {:version "1" :revision "abc" :package {}
-                 :packages {'io.velio/collet-core {:version "1"}}}]
-    (try
-      (let [error (with-redefs-fn
-                    {(release-var 'ensure-tag-checkout!) (fn [& _] context)
-                     (release-var 'command-output)
-                     (fn [_ & command]
-                       (if (= "create" (second command))
-                         (throw (ex-info "docker create failed" {}))
-                         "1 abc"))
-                     #'fs/create-temp-dir (fn [& _] directory)}
-                    #(exception (fn [] (release/verify-image
-                                         {:tag "tag" :image "image"}))))]
-        (is (= "docker create failed" (ex-message error)))
-        (is (not (fs/exists? directory))))
-      (finally
-        (when (fs/exists? directory)
-          (fs/delete-tree directory))))))
-
-(deftest direct-dependency-rejects-a-conflicting-duplicate-version
-  (let [dependency (fn [version]
-                     (str "<dependency><groupId>io.velio</groupId>"
-                          "<artifactId>collet-core</artifactId>"
-                          "<version>" version "</version></dependency>"))
-        pom (str "<project><dependencies>"
-                 (dependency "1.7.2")
-                 (dependency "9.9.9")
-                 "</dependencies></project>")
-        error (exception #(release/verify-direct-dependency!
-                           pom 'io.velio/collet-core "1.7.2"))]
-    (is (= "POM dependency must be declared exactly once" (ex-message error)))
-    (is (= 2 (:count (ex-data error))))))

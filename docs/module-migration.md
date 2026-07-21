@@ -104,15 +104,13 @@ Tags use Kmono's `<coordinate>@<version>` format, for example
 `io.velio/collet-action-http@0.2.8`. `fix:` commits produce patch releases, `feat:`
 commits produce minor releases, and `!` or a `BREAKING CHANGE:` footer produces a
 major release. Documentation, tests, CI, and development-only changes are ignored.
-A meaningful package change with no release-producing commit is absent from the
-release plan; fix the commit or squash-merge PR title rather than adding a version.
+A meaningful package change with no release-producing commit makes planning fail;
+fix the commit or squash-merge PR title rather than adding a version.
 
 Internal dependency changes give affected dependents a patch release transitively.
 In particular, any action release also patches `io.velio/collet-actions`; a core
 release patches every affected action, the aggregate, app, and CLI through the graph.
-Use `bb release:plan` to inspect all candidates. With a module, selection reaches a
-fixed point over candidate dependency and dependent edges, so an aggregate can pull
-another changed action into a scoped plan when its POM needs both candidate versions.
-Unchanged shared packages do not connect independent candidate siblings. Maven
-publication is automated by `bb release`, while the CLI GitHub release and Docker
-push remain later, explicit operations from their own package tags.
+Use `bb release:plan` to inspect all candidates. Kmono automatically includes
+dependents whose exact internal dependency version must change. Maven publication is
+automated by `bb release`, while the CLI GitHub release and Docker push remain later,
+explicit operations from their own package tags.

@@ -567,7 +567,6 @@ from their respective package tags.
 
 ```shell
 bb kmono query
-bb test:scripts
 bb test:unit
 bb test:integration
 bb test
@@ -576,16 +575,12 @@ bb build collet-app
 bb install collet-core
 bb verify
 bb release:plan
-bb release:plan collet-action-http
-bb release collet-action-http
-bb release:all
-bb release:verify-cli io.velio/collet-cli@VERSION
-bb release:verify-image io.velio/collet-app@VERSION local-image
+bb release
 ```
 
 See [development](./docs/development.md), [module migration](./docs/module-migration.md),
 and [release](./docs/releasing.md) for prerequisites, the complete command contract,
-versioning, fail-fast manual recovery after partial Maven publication, Docker tests,
+versioning, Kaven publication, fail-fast manual recovery after partial Maven publication, Docker tests,
 and compatibility guidance. `bb release` never uploads the CLI archive or a Docker
 image; those are explicit workflows from their independently versioned package tags.
 

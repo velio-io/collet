@@ -53,8 +53,7 @@ Available prompt actions are:
 
 `bb release` builds and tags the CLI distribution but does not upload it. Later,
 build the pod uberjar and archive from a separate, clean, detached worktree of the
-exact CLI package tag. Verify the embedded version, Git revision, and Maven metadata
-before uploading:
+exact CLI package tag, then upload the result:
 
 ```shell
 tag='io.velio/collet-cli@0.2.8'
@@ -63,7 +62,6 @@ git worktree add --detach "$cli_worktree" "$tag"
 cd "$cli_worktree"
 
 bb build collet-cli
-bb release:verify-cli "$tag"
 
 gh release create "$tag" \
   collet-cli/target/collet-cli.tar.gz

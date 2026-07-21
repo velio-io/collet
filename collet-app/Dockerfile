@@ -18,8 +18,7 @@ COPY collet-app /build/collet-app
 
 RUN clojure -T:build build :module :collet-app \
       :versions "{io.velio/collet-core \"${COLLET_CORE_VERSION}\" \
-                  io.velio/collet-app \"${COLLET_VERSION}\"}" \
-      :source-revision "\"${COLLET_REVISION}\""
+                  io.velio/collet-app \"${COLLET_VERSION}\"}"
 
 
 FROM eclipse-temurin:21.0.5_11-jre

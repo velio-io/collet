@@ -1,11 +1,12 @@
 # Releasing Collet
 
-Collet packages are versioned independently by Kmono 4.12.3. Versions do not live
-in source files and are never rewritten during publication. Kmono reads package
-tags and conventional commits, and it converts internal `:local/root` dependencies
-to exact Maven versions when the root build asks it to generate POMs.
+Collet uses Kmono for package discovery, dependency ordering, change detection, and
+independent semantic versions. Kaven publishes the JAR and POM already produced by
+`tools.build`. Collet keeps only the repository-specific safety checks and artifact
+layouts around those tools.
 
-Tags use `<coordinate>@<version>`, for example:
+Versions do not live in source files. Tags use Kmono's
+`<coordinate>@<version>` format:
 
 ```text
 io.velio/collet-core@0.2.8
@@ -15,189 +16,170 @@ io.velio/collet-app@0.3.0
 io.velio/collet-cli@0.2.10
 ```
 
-The versions in this example intentionally differ. Historical `v0.2.x` tags are
-retained, but Kmono ignores them for package versioning. If no package tags exist,
-the first modular plan bootstraps all 14 packages at `0.2.8`.
+Different packages can have different versions. Historical `v0.2.x` tags remain in
+Git but are not package tags. If no package tags exist, the first modular release
+bootstraps all 14 packages at `0.2.8`.
 
-Maven publication, the CLI GitHub release, and Docker publication are separate
-operations. `bb release` deploys publishable packages to Clojars and creates the
-package tags. It builds and tags the non-Maven CLI distribution but never creates a
-GitHub release or pushes an image.
+## What each tool owns
+
+- Kmono reads the workspace from `deps.edn`, resolves its graph and package tags,
+  applies conventional-commit version changes, bumps affected dependents, converts
+  internal `:local/root` dependencies to exact Maven versions, and runs builds in
+  dependency order.
+- `tools.build` copies sources/resources and creates the POM, library JAR,
+  application uberjar, CLI pod JAR, and CLI archive.
+- Kaven reads Maven repository credentials from `~/.m2/settings.xml` and deploys the
+  exact generated JAR and POM to Clojars.
+- Babashka provides short root commands. It contains no graph or version logic.
+- `collet.release` only checks Git state, runs the quality gates, invokes the build
+  and Kaven, creates Kmono tags, and atomically pushes them.
+
+This boundary is intentional: Collet does not maintain its own version file,
+dependency graph, publication client, release transaction, or recovery journal.
 
 ## Prerequisites
 
 - JDK 21 or newer, Clojure CLI, and Babashka.
-- Docker for the complete test and artifact-verification gates.
-- Kmono/Kmono CLI 4.12.3, `tools.build` 0.10.14, and `deps-deploy` 0.2.5 are pinned
-  by the root `deps.edn`; do not install separate project versions.
-- `main` checked out with a clean worktree and exactly synchronized with
-  `origin/main`.
-- `CLOJARS_USERNAME` and `CLOJARS_PASSWORD` when the selected plan contains Maven
-  packages. Use a Clojars deploy token as the password. A tag-only CLI plan does not
-  require Clojars credentials.
+- Docker for `bb test` and the integration suite.
+- A clean local `main` exactly synchronized with `origin/main`.
+- Clojars credentials in Maven's standard `~/.m2/settings.xml` file.
 
-Only run release commands from the repository root. CI verifies builds and artifacts
-but does not run release planning or deploy releases.
+Use a Clojars deploy token as the password:
 
-## How the build is divided
+```xml
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <servers>
+    <server>
+      <id>clojars</id>
+      <username>YOUR_CLOJARS_USERNAME</username>
+      <password>YOUR_CLOJARS_DEPLOY_TOKEN</password>
+    </server>
+  </servers>
+</settings>
+```
 
-Kmono owns workspace discovery, the dependency graph, package order, conversion of
-internal `:local/root` dependencies to Maven coordinates, package-tag version lookup,
-conventional-commit version increments, and dependent patch bumps. Collet does not
-wrap or reimplement those algorithms.
+Kmono 4.12.3, Kaven 1.0.0, and `tools.build` 0.10.14 are pinned in the root
+`deps.edn`; maintainers do not install project-specific copies. CI builds and
+verifies artifacts but never publishes them.
 
-The root build contains only repository-specific work that Kmono does not provide:
-
-- `collet.build` creates library JARs, application/CLI uberjars, and the CLI archive
-  with `tools.build` while preserving their public filenames and layout.
-- `collet.release` performs the release preflight, invokes Kmono's version plan,
-  deploys Maven artifacts with `deps-deploy`, and pushes package tags.
-- `collet.verify` checks the small public artifact contract: coordinates, required
-  namespaces, filenames, entrypoints, archive layout and modes, and absence of
-  snapshot or local-root data in published POMs.
-
-Babashka tasks are shell-level entrypoints only. They contain no package graph,
-version, or release policy.
-
-## Version and change policy
+## Version policy
 
 The highest release-producing conventional commit for a package determines its next
 version:
 
-| Commit | Version change |
+| Commit | Change |
 |---|---|
 | `fix: ...` | Patch |
 | `feat: ...` | Minor |
-| `type!: ...` or a `BREAKING CHANGE:` footer | Major |
+| `type!: ...` or `BREAKING CHANGE:` | Major |
 
-Only conventional commit messages determine whether a release is produced.
-Documentation, tests, CI, and development-only commits use
-non-releasing conventional types such as `docs:`, `test:`, `ci:`, or `chore:` and do
-not publish. Runtime changes must use `fix:`, `feat:`, or a breaking-change marker;
-using `chore:` for a runtime change intentionally produces no release.
+Package Markdown, tests, test resources, sample configs, and development files are
+ignored. A remaining package change with no release-producing conventional commit
+makes planning fail with guidance. A runtime change therefore needs `fix:`, `feat:`,
+or a breaking marker in its commit message or squash-merge title.
 
-When a package changes version, its workspace dependents receive patch releases
-transitively so their generated POMs can pin the new exact dependency. Any action
-release therefore gives `io.velio/collet-actions` a patch release as well.
+When a package version changes, Kmono gives affected dependents a transitive patch
+release so their generated POMs can reference the new exact version. For example,
+changing an action also releases `io.velio/collet-actions`; changing core can release
+the actions, aggregate, app, and CLI through the graph.
 
-There is no source version file and no `bb version` command. There are also no
-release commits or follow-up development-version commits.
+There is no manual bump command, release commit, or follow-up snapshot commit.
 
-## Plan and package selection
+## Planning
 
-Planning is read-only: it reads local tags and commits, prints package, current and
-next versions, reason, package tag, and whether the result is a Maven publication or
-tag-only distribution, and does not require credentials.
+From the repository root:
 
 ```shell
-# Every changed package
 bb release:plan
-
-# Selected package, required changed dependencies, and candidate dependents
-bb release:plan collet-action-http
 ```
 
-`bb release` with no package and `bb release:all` both release every changed
-package:
+The command prints only the packages Kmono will release, with the next version, tag,
+and whether the package is published to Maven or only tagged. Planning is read-only:
+it does not build, publish, or create tags.
+
+Releases are deliberately workspace-wide. There is no module-scoped release command
+and no separate `release:all`; both were redundant with Kmono's changed-package and
+dependent selection.
+
+## Publishing
+
+After reviewing the plan, run:
 
 ```shell
 bb release
-bb release:all
 ```
 
-`bb release <module>` starts with that package and closes in both directions over
-release candidates: selected candidate dependencies and dependents can pull each
-other into the plan until it reaches a fixed point. This may broaden a scoped plan
-through an aggregate, but ensures every selected POM references available candidate
-versions. Unchanged shared packages do not connect otherwise independent candidate
-siblings. The result remains in Kmono dependency order.
+The command performs this sequence:
 
-Bootstrap is the exception: while all package tags are missing, any module filter
-expands to all 14 packages at `0.2.8` so the first release cannot leave an incomplete
-tag set that prevents later version resolution.
+1. Fetches tags and requires a clean, synchronized `main`.
+2. Resolves and prints the Kmono release candidates.
+3. Rejects any candidate tag that already exists.
+4. Runs `bb test` and `bb verify`.
+5. Rechecks that the release revision did not move.
+6. Builds the selected packages in Kmono dependency order. Generated POMs contain
+   exact Maven versions for internal dependencies, never `:local/root`.
+7. Fetches and rejects candidate tags again, then uses Kaven to deploy every
+   publishable JAR/POM to Clojars in dependency order.
+   `io.velio/collet-cli` is built but is tag-only.
+8. Creates all candidate package tags at the captured revision and pushes them to
+   `origin` atomically.
 
-```shell
-bb release collet-action-http
-```
-
-Use directory-style module names such as `collet-core`, `collet-action-http`,
-`collet-actions`, `collet-app`, or `collet-cli`.
-
-## Local release workflow
-
-After reviewing `bb release:plan`, a maintainer runs the matching release command.
-It performs this guarded sequence:
-
-1. Fetches package tags, captures a clean `main` synchronized with `origin/main`,
-   resolves and prints the exact plan, revalidates the revision, and rejects existing
-   target tags.
-2. Requires Clojars credentials only when at least one selected package is
-   publishable.
-3. Runs `bb test` and `bb verify`, then revalidates the captured revision.
-4. Builds every selected artifact once with the exact planned package-version map,
-   then revalidates the revision and target-tag absence before deployment.
-5. Deploys publishable Maven artifacts through `deps-deploy` in Kmono topological
-   order. The CLI archive is built but remains tag-only.
-6. Creates the selected package tags at the release revision after every deployment
-   succeeds.
-7. Atomically pushes those tags.
-
-Generated and embedded POMs contain exact internal Maven versions, SCM package tag,
-and license metadata. Build identity lives in `META-INF/collet/build.edn` inside each
-artifact.
+`bb release` does not create a GitHub release and does not build or push a Docker
+image. Those are explicit later operations from the CLI and app package tags.
 
 ## Failure recovery
 
-The release command is deliberately fail-fast. Maven publication cannot be rolled
-back, so recovery after a partial publication is manual.
+Maven coordinates are immutable, so the release command is fail-fast and recovery
+after publication begins is intentionally manual.
 
-- A failure before deployment changes no remote state; fix the cause and rerun.
-- A deployment failure can leave earlier Maven coordinates published because Maven
-  publication is irreversible. Record the printed plan, inspect Clojars, and finish
-  or reconcile the remaining coordinates manually before creating package tags.
-- A tag-push failure occurs after successful deployment. Inspect the local tags and
-  retry the atomic push after fixing the Git remote problem.
-- Never overwrite or reuse an existing Maven version for different source.
+- Before deployment: no remote release state changed. Fix the error and rerun.
+- During deployment: earlier coordinates may already exist on Clojars. Keep the
+  printed plan and release revision, inspect Clojars, and publish only the missing
+  JAR/POM pairs in Kmono order with Kaven. Do not reuse an existing coordinate for
+  different source.
+- After deployment but before the tag push: the local package tags identify the
+  published source. Fix Git access and retry the exact atomic tag push.
 
-This recovery is intentionally manual: partial releases are rare, and keeping a
-custom recovery engine would make the normal release path harder to understand and
-maintain.
+Do not create or push the planned tags while any planned Maven coordinate is missing.
+This rare manual path is the tradeoff for not maintaining a custom remote-probing
+transaction engine or temporary Maven repository.
 
-For a partial Maven publication, use the failed run's already-built target JAR and
-POM when they are still present. If they are not, rerun the same `bb release
-[module]` command to recreate the exact planned artifacts; expect deployment to stop
-when it reaches an existing coordinate after the build. Compare the printed plan with
-Clojars, then deploy only the missing target JAR/POM coordinates in Kmono order:
+The failed release leaves the planned artifacts in each package's `target/`
+directory. For each coordinate confirmed missing on Clojars, substitute its exact
+paths in this Kaven invocation:
 
 ```shell
-clojure -X:release :installer :remote :sign-releases? false \
-  :artifact '"/absolute/path/package.jar"' \
-  :pom-file '"/absolute/path/pom.xml"'
+clojure -Sdeps '{:deps {com.kepler16/kaven {:mvn/version "1.0.0"}}}' \
+  -M -e "(require '[k16.kaven.deploy :as d])
+          (d/deploy {:jar-path \"/absolute/path/package.jar\"
+                     :pom-path \"/absolute/path/classes/META-INF/maven/group/artifact/pom.xml\"
+                     :repository {:id \"clojars\"
+                                  :url \"https://repo.clojars.org/\"}})"
 ```
 
-After every selected Maven coordinate exists, create every exact planned package tag
-at the release revision and push all of them atomically. Copy every selected tag from
-the printed plan into this command; do not omit tag-only packages:
+After every planned Maven coordinate exists, create every planned tag at the original
+release revision and push the complete set atomically:
 
 ```shell
-release_revision=$(git rev-parse HEAD)
+release_revision='FULL_GIT_REVISION_FROM_THE_FAILED_RUN'
 planned_tags=(
   'io.velio/collet-core@0.2.9'
   'io.velio/collet-cli@0.2.9'
 )
-for planned_tag in "${planned_tags[@]}"; do
-  git tag "$planned_tag" "$release_revision"
+for tag in "${planned_tags[@]}"; do
+  git tag "$tag" "$release_revision"
 done
 git push --atomic origin "${planned_tags[@]}"
 ```
 
-Do not create or push any package tag while a selected Maven coordinate is missing.
+If tag creation already completed and only the push failed, do not recreate the
+tags; run only the final atomic push after verifying their revisions.
 
-## GitHub and CLI distribution
+## CLI GitHub release
 
-Create the CLI GitHub release later from a separate, clean, detached worktree of its
-own package tag. The verifier requires that detached checkout and checks the pod
-JAR, archive copy, Maven/build identity, version, and Git revision before upload:
+The CLI package is tag-only because its public distribution is a tar archive rather
+than a Maven artifact. Build it from a clean detached worktree of its tag and upload
+the preserved archive:
 
 ```shell
 tag='io.velio/collet-cli@0.2.8'
@@ -206,50 +188,43 @@ git worktree add --detach "$cli_worktree" "$tag"
 cd "$cli_worktree"
 
 bb build collet-cli
-bb release:verify-cli "$tag"
-
-gh release create "$tag" \
-  collet-cli/target/collet-cli.tar.gz
+tar -tzf collet-cli/target/collet-cli.tar.gz
+gh release create "$tag" collet-cli/target/collet-cli.tar.gz
 ```
 
-This preserves `collet-cli/target/collet.pod.jar`,
-`collet-cli/target/collet-cli.tar.gz`, the `collet-cli/` archive root, and executable
-`collet.bb` and `gum`. Return to the original checkout before removing the temporary
-worktree with `git worktree remove "$cli_worktree"`.
+The archive remains rooted at `collet-cli/` and contains `bb.edn`, executable
+`collet.bb`, `collet.pod.jar`, and executable `gum`. Return to the original checkout
+before removing the worktree with `git worktree remove "$cli_worktree"`.
 
 ## Docker publication
 
-Build the image later from a separate detached `io.velio/collet-app@<version>`
-worktree. Because app and core versions are independent, derive the app version from
-the tag and ask the root build for the exact Kmono-resolved core version at that tagged
-commit. Pass both values and the tag commit as build inputs, verify the local image,
-and only then upload it:
+Build an image later from a detached `io.velio/collet-app@<version>` worktree. App
+and core versions are independent, so pass both resolved versions plus the tag
+revision to Docker:
 
 ```shell
 tag='io.velio/collet-app@0.2.8'
 app_version=${tag##*@}
-docker_worktree=$(mktemp -d)
-git worktree add --detach "$docker_worktree" "$tag"
-cd "$docker_worktree"
-core_version=$(clojure -T:build package-version :module :collet-core)
+app_worktree=$(mktemp -d)
+git worktree add --detach "$app_worktree" "$tag"
+cd "$app_worktree"
+
+core_tag=$(git tag --merged HEAD --list 'io.velio/collet-core@*' \
+  --sort=-creatordate | head -1)
+core_version=${core_tag##*@}
 revision=$(git rev-parse "$tag^{}")
-registry=registry.example.com/your-team
-image="$registry/collet:$app_version"
+image="velioio/collet:$app_version"
 
 docker build -f collet-app/Dockerfile \
   --build-arg COLLET_CORE_VERSION="$core_version" \
   --build-arg COLLET_VERSION="$app_version" \
   --build-arg COLLET_REVISION="$revision" \
   -t "$image" .
-bb release:verify-image "$tag" "$image"
+docker run --rm \
+  -e PIPELINE_SPEC='{:name :release-check :tasks []}' \
+  -e PIPELINE_CONFIG='{}' \
+  "$image"
 docker push "$image"
 ```
 
-The verifier checks OCI version/revision labels, the application JAR's embedded
-identity, and that its embedded POM declares exactly one direct
-`io.velio/collet-core` dependency at the Kmono-resolved version. Return to the
-original checkout before removing the temporary worktree with
-`git worktree remove "$docker_worktree"`.
-
-See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime and
-multi-architecture deployment details.
+See [`collet-app/deploy.md`](../collet-app/deploy.md) for Buildx and runtime details.

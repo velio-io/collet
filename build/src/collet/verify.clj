@@ -5,7 +5,8 @@
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [collet.build :as build])
+   [collet.build :as build]
+   [k16.kmono.core.graph :as kmono.graph])
   (:import
    (java.nio.file Files LinkOption)
    (java.nio.file.attribute FileAttribute PosixFilePermissions)
@@ -17,6 +18,9 @@
 (defn- ensure! [condition message data]
   (when-not condition
     (fail! message data)))
+
+(defn- artifact [package]
+  (get-in package [:deps-edn :collet/artifact]))
 
 (defn- command! [dir & command]
   (let [{:keys [exit out err]} (apply shell/sh (concat command [:dir (str dir)]))]
@@ -156,7 +160,7 @@
   (let [entries (jar-entries path)]
     (verify-pom! context package (jar-entry path (pom-entry package)))
     (when (seq (get-in package [:deps-edn :paths]))
-      (doseq [namespace (get-in package [:artifact :public-namespaces])]
+      (doseq [namespace (:public-namespaces (artifact package))]
         (ensure! (contains? entries (namespace-entry namespace))
                  "Library JAR lacks a required namespace"
                  {:package (:fqn package) :namespace namespace}))))
@@ -189,7 +193,7 @@
                       error)))))
 
 (defn- verify-archive! [package]
-  (let [{:keys [archive root files]} (get-in package [:artifact :outputs])
+  (let [{:keys [archive root files]} (:outputs (artifact package))
         path (output-path package archive)
         target (temp-directory "collet-distribution-")]
     (try
@@ -215,7 +219,7 @@
 (defn verify-deployable!
   "Verify executable filenames, entrypoints, and distribution layout."
   [context package]
-  (let [{:keys [kind main outputs]} (:artifact package)
+  (let [{:keys [kind main outputs]} (artifact package)
         uberjar (output-path package (:uberjar outputs))]
     (ensure! (file? uberjar) "Deployable uberjar is missing"
              {:package (:fqn package) :path uberjar})
@@ -238,12 +242,14 @@
 (defn verify
   "Build all artifacts and check their public contracts."
   [_opts]
-  (let [{:keys [packages order] :as context} (build/resolve-context! nil)
+  (let [packages (build/load-packages {})
+        order (mapcat identity (kmono.graph/parallel-topo-sort packages))
+        context {:packages packages}
         versions (into {} (map (juxt key (comp :version val))) packages)]
     (build/build {:versions versions})
     (doseq [fqn order
             :let [package (get packages fqn)]
-            :when (get-in package [:artifact :publish?])]
+            :when (:publish? (artifact package))]
       (check-package!
        package :library
        #(verify-library-artifact!
@@ -251,7 +257,7 @@
          (output-path package (str "target/" (name fqn) "-" (:version package) ".jar")))))
     (doseq [fqn order
             :let [package (get packages fqn)]
-            :when (#{:uberjar :distribution} (get-in package [:artifact :kind]))]
+            :when (#{:uberjar :distribution} (:kind (artifact package)))]
       (check-package! package :executable #(verify-deployable! context package)))
     (let [package (get packages 'io.velio/collet-action-vega)]
       (check-package! package :vega #(verify-vega-golden! context)))

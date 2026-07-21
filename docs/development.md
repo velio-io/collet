@@ -13,9 +13,8 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
 - Docker for PostgreSQL, MySQL, LocalStack, application/CLI startup, and image
   integration tests.
 
-The workspace pins Kmono and its CLI to 4.12.3, `tools.build` to 0.10.14, and
-`deps-deploy` to 0.2.5. Artifact bases ignore user dependencies and use only the
-repository's explicit Maven Central and Clojars configuration.
+The workspace pins Kmono and its CLI to 4.12.3, Kaven to 1.0.0, and
+`tools.build` to 0.10.14.
 
 ## Source and published dependencies
 
@@ -39,18 +38,14 @@ Run build, workspace, verification, and release commands from the repository roo
 |---|---|
 | `bb kmono query` | Prints Kmono's resolved package graph. Additional Kmono query arguments may follow. |
 | `bb test:unit` | Runs build-tool tests once and every package in a separate JVM, excluding `^:integration` tests; Docker is not required. |
-| `bb test:scripts` | Runs the root command-adapter command-vector tests. |
 | `bb test:integration` | Builds app/CLI outputs, then runs only integration tests in integration-bearing packages; Docker is required. |
 | `bb test` | Runs the complete unit and integration suite; Docker is intentionally required. |
 | `bb test:module <module>` | Runs one package's complete `:test` alias in its own JVM; Docker may be required. Cognitect test-runner options may follow the module. |
 | `bb build [module]` | Builds one package and its dependencies, or every package, in dependency order. |
 | `bb install [module]` | Installs one publishable package and its dependencies, or all publishable packages, into the local Maven repository. |
 | `bb verify` | Builds artifacts and checks their public POM coordinates/internal dependency versions, namespace entries, executable entrypoints, CLI archive layout/modes, and Vega golden output. |
-| `bb release:plan [module]` | Prints a read-only independent-version release plan. |
-| `bb release [module]` | Runs the guarded local release for all changed packages or a selected package closure. |
-| `bb release:all` | Runs the guarded local release for every changed package. |
-| `bb release:verify-cli io.velio/collet-cli@VERSION` | Verifies CLI outputs from a detached CLI package-tag checkout. |
-| `bb release:verify-image io.velio/collet-app@VERSION IMAGE` | Verifies a local image against a detached app package-tag checkout. |
+| `bb release:plan` | Prints the read-only independent-version plan for every changed package. |
+| `bb release` | Tests, verifies, builds, publishes, and tags every changed package. |
 
 Package selectors are directory names such as `collet-core`,
 `collet-action-http`, `collet-actions`, `collet-app`, and `collet-cli`. Package-local
@@ -60,7 +55,7 @@ supported repository orchestration contract.
 ## Build outputs
 
 Library packages produce `target/<artifact>-<version>.jar` with Clojure sources,
-runtime resources, `LICENSE`, Maven metadata, build identity, and a publishable POM.
+runtime resources, `LICENSE`, Maven metadata, and a publishable POM.
 In addition:
 
 - `bb build collet-app` preserves `collet-app/target/collet.jar` and main namespace
@@ -89,13 +84,15 @@ dependencies or package boundaries:
    patch, `feat:` for a minor, or `!`/`BREAKING CHANGE:` for a major release.
 4. Run `bb test:module <module>`, then `bb test:unit`.
 5. Run Docker integrations when affected and finish with `bb verify` and
-   `bb release:plan [module]`.
+   `bb release:plan`.
 
-Documentation, tests, CI, and development-only changes do not publish. A meaningful
-runtime/package change without a release-producing commit is absent from the release
-plan; use the correct conventional commit or squash-merge PR title rather than
-assigning a version manually.
+Package Markdown, tests, test resources, sample configs, and development files do
+not publish. A meaningful package change without a release-producing commit makes
+release planning fail with guidance; use the correct conventional commit or
+squash-merge PR title rather than assigning a version manually. Root build and CI
+files are development-only inputs and do not select package releases. If a root
+metadata or packaging change is intended to alter a published artifact, include its
+owning package metadata in the same release-producing commit.
 
 See [module migration](./module-migration.md) for artifact boundaries and
-[releasing](./releasing.md) for independent versions, selection, publication, and
-recovery.
+[releasing](./releasing.md) for independent versions, publication, and recovery.
