@@ -203,7 +203,9 @@
                                sort
                                vec)]
           (when (seq unversioned)
-            (fail! "Meaningful package changes require a version bump"
+            (fail! (str "Meaningful package changes require a release-producing "
+                        "conventional commit. Use fix:, feat:, !, "
+                        "BREAKING CHANGE:, or fix the squash PR title")
                    {:packages unversioned}))
           (let [candidates (kmono.version/inc-package-versions
                             conventional/version-fn changed)]

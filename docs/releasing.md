@@ -1,121 +1,159 @@
 # Releasing Collet
 
-Collet uses one coordinated version for every module, application artifact, and CLI
-distribution. The version is declared once in `build/modules.edn`; internal Maven
-coordinates in module `deps.edn` files are synchronized by repository tooling and
-must never be edited individually.
+Collet packages are versioned independently by Kmono 4.12.3. Versions do not live
+in source files and are never rewritten during publication. Kmono reads package
+tags and conventional commits, while the root build converts internal `:local/root`
+dependencies to exact Maven versions in generated POMs.
 
-Maven publication, GitHub/CLI distribution, and Docker publication are separate
-operations. This keeps credentials and failure recovery isolated while allowing all
-outputs to share the same version and Git tag.
+Tags use `<coordinate>@<version>`, for example:
 
-Generated POMs are the Maven metadata shipped with each library. They are produced
-from the module base dependencies so external consumers resolve the exact released
-internal coordinates; contributors never edit generated POMs or internal pins by
-hand.
+```text
+io.velio/collet-core@0.2.8
+io.velio/collet-action-http@0.2.9
+io.velio/collet-actions@0.2.11
+io.velio/collet-app@0.3.0
+io.velio/collet-cli@0.2.10
+```
+
+The versions in this example intentionally differ. Historical `v0.2.x` tags are
+retained, but Kmono ignores them for package versioning. If no package tags exist,
+the first modular plan bootstraps all 14 packages at `0.2.8`.
+
+Maven publication, the CLI GitHub release, and Docker publication are separate
+operations. `bb release` deploys publishable packages to Clojars and creates the
+package tags. It builds and tags the non-Maven CLI distribution but never creates a
+GitHub release or pushes an image.
 
 ## Prerequisites
 
 - JDK 21 or newer, Clojure CLI, and Babashka.
-- Docker for the complete integration and artifact verification gates.
-- Clojars credentials in `CLOJARS_USERNAME` and `CLOJARS_PASSWORD`; use a Clojars
-  deploy token as the password.
-- The `main` branch checked out with a clean worktree and no commits ahead of or
-  behind `origin/main`.
+- Docker for the complete test and artifact-verification gates.
+- Kmono/Kmono CLI 4.12.3, `tools.build` 0.10.14, and `deps-deploy` 0.2.5 are pinned
+  by the root `deps.edn`; do not install separate project versions.
+- `main` checked out with a clean worktree and exactly synchronized with
+  `origin/main`.
+- `CLOJARS_USERNAME` and `CLOJARS_PASSWORD` when the selected plan contains Maven
+  packages. Use a Clojars deploy token as the password. A tag-only CLI plan does not
+  require Clojars credentials.
 
-## Coordinated versions
+Only run release commands from the repository root. CI plans and verifies releases
+but never deploys.
 
-Use `bb version` when changing the development target without publishing:
+## Version and change policy
+
+The highest release-producing conventional commit for a package determines its next
+version:
+
+| Commit | Version change |
+|---|---|
+| `fix: ...` | Patch |
+| `feat: ...` | Minor |
+| `type!: ...` or a `BREAKING CHANGE:` footer | Major |
+
+Documentation, tests, CI, and development-only paths are ignored and do not publish.
+A meaningful runtime/package change with no release-producing commit makes
+`bb release:plan` and `bb verify` fail. Fix the commit message—or the PR title that
+will become the squash commit—instead of assigning or editing a version manually.
+
+When a package changes version, its workspace dependents receive patch releases
+transitively so their generated POMs can pin the new exact dependency. Any action
+release therefore gives `io.velio/collet-actions` a patch release as well.
+
+There is no source version file and no `bb version` command. There are also no
+release commits or follow-up development-version commits.
+
+## Plan and package selection
+
+Planning is read-only: it reads local tags and commits, prints package, current and
+next versions, reason, package tag, and whether the result is a Maven publication or
+tag-only distribution, and does not require credentials.
 
 ```shell
-bb version 0.3.0-SNAPSHOT
+# Every changed package
+bb release:plan
+
+# Changed packages in the selected package's required dependency/dependent closure
+bb release:plan collet-action-http
 ```
 
-The command validates the requested version, updates the shared graph version and
-every internal Maven pin as one operation, and rejects stale or unexpected internal
-pins. Module-local `:version` entries are rejected by `bb verify`'s repository
-consistency check. `bb version` does not commit, tag, publish, or push.
-
-## Maven release
-
-Release the current snapshot with the default patch progression:
+`bb release` with no package and `bb release:all` both release every changed
+package:
 
 ```shell
 bb release
+bb release:all
 ```
 
-The optional level controls the next development snapshot:
+`bb release <module>` starts with changed packages related to that module, then
+selects the required changed dependency/dependent fixed-point closure. This keeps a
+filtered release internally consistent without publishing unrelated changes:
 
 ```shell
-bb release :patch
-bb release :minor
-bb release :major
+bb release collet-action-http
 ```
 
-For a current version of `0.2.8-SNAPSHOT`, every command releases `0.2.8`. The next
-development version is selected exactly as follows:
+Use directory-style module names such as `collet-core`, `collet-action-http`,
+`collet-actions`, `collet-app`, or `collet-cli`.
 
-| Level | Next version |
-|---|---|
-| `:patch` | `0.2.9-SNAPSHOT` |
-| `:minor` | `0.3.0-SNAPSHOT` |
-| `:major` | `1.0.0-SNAPSHOT` |
+## Local release workflow
 
-The release command performs the following workflow:
+After reviewing `bb release:plan`, a maintainer runs the matching release command.
+It performs this guarded sequence:
 
-1. Confirms the branch, worktree, remote synchronization, credentials, versions,
-   internal dependency pins, and absence of the release tag.
-2. Changes every module and internal Maven pin to the release version and commits
-   `Release <version>`.
-3. Runs the complete unit, Docker integration, build, isolated-consumer, and
-   artifact verification gates.
-4. Rechecks that the worktree is clean, `HEAD` is still the release commit, the
-   graph and pins still have the release version, and every frozen JAR/POM has the
-   captured Maven coordinates and source identity.
-5. Publishes all Maven artifacts to Clojars in dependency order.
-6. Creates one `v<version>` tag pointing to the release commit.
-7. Changes every module and internal Maven pin to the next snapshot and commits
-   `Begin <version>-SNAPSHOT`.
-8. Atomically pushes `main` and the release tag.
+1. Fetches package tags, requires a clean `main`, and requires local `HEAD` to equal
+   `origin/main`.
+2. Requires Clojars credentials only when at least one selected package is
+   publishable.
+3. Runs `bb test` and `bb verify` with Clojars credentials removed from child
+   process environments.
+4. Rechecks source identity, builds every selected artifact with the exact planned
+   package-version map, and rechecks source identity again.
+5. Inspects every selected Maven coordinate. A fresh release requires both POM and
+   JAR to be absent; an existing coordinate is never overwritten.
+6. Atomically creates the complete set of provisional local package tags at the
+   release revision before the first deployment.
+7. Deploys missing Maven artifacts through `deps-deploy` in Kmono topological order.
+   The CLI archive is built but remains tag-only.
+8. Atomically pushes all selected package tags only after every Maven deployment
+   succeeds.
 
-The CLI distribution is not a Maven publication. It is built and verified during
-the release gate but is not uploaded by `bb release`.
+Generated and embedded POMs contain exact internal Maven versions, SCM package tag,
+license metadata, and build identity. Publication checks verify POM coordinates,
+SCM tag, and the JAR's embedded version/revision before an existing coordinate may
+be skipped during recovery.
 
 ## Failure recovery
 
-Nothing is published or pushed when preflight fails. If setting the release version,
-committing, testing, verification, staging, or the final source check fails before
-the first Maven deployment, `bb release` rolls back only its version paths and
-release commit. It preserves unrelated worktree changes. Recovery refuses to move
-`HEAD` when it no longer identifies the release-owned commit, so an unexpected Git
-change is retained for manual inspection instead of being reset.
+The complete set of provisional local package tags is the only resume state. There
+is no transaction journal, auxiliary artifact state, version rewrite, or release
+commit. If deployment stops after those tags are created, leave them intact and
+rerun the same release command from the same clean revision. The rerun rebuilds the
+tagged source and the same version plan, verifies matching remote POM/JAR identity,
+skips exact matches, deploys absent coordinates, and finally pushes all tags.
 
-The command records recovery state in `target/.collet/release-state.edn` and freezes
-the exact deployable JAR/POM pairs under `target/.collet/release-artifacts/`. Once
-Maven deployment starts, do not delete or edit those files. Rerun the exact same
-command (`bb release`, `bb release :minor`, or `bb release :major`) to resume. The
-command skips coordinates recorded as complete, checks an in-flight coordinate on
-Clojars, recognizes an exact JAR/POM hash match as complete, and deploys only when
-both remote files are absent. Tag, next-snapshot commit, and atomic-push failures
-are resumed from their recorded phase without redeploying completed coordinates.
+Recovery is intentionally strict:
 
-Remote publication is irreversible. A partial coordinate, a remote hash mismatch,
-or an unavailable remote status stops automatic recovery. Inspect `:completed`,
-`:in-flight`, and the frozen `:jar-sha256`/`:pom-sha256` values in the state file;
-compare both remote files with the frozen artifacts, and reconcile the Clojars
-coordinate before rerunning. Do not delete the state file to force a fresh release
-or attempt to overwrite an existing mismatched coordinate. If a published artifact
-cannot be reconciled exactly, stop and choose a new release version with the
-maintainers. Successful completion removes the recovery state and frozen copies.
+- A fresh release stops if any planned remote coordinate already exists.
+- Only a complete set of local package tags pointing at `HEAD` qualifies as a
+  resume; missing tags stop safely.
+- A remote POM without its JAR, a JAR without its POM, mismatched coordinates, SCM
+  tag, version, or embedded source revision stops safely.
+- A local tag pointing to another revision is a collision and stops safely.
+- A failed atomic tag push leaves the complete local tags available for the same
+  verified rerun.
+
+Maven publication is irreversible. Do not delete or move provisional tags to force
+a new release, and do not try to overwrite a mismatched Clojars coordinate. Inspect
+the reported package and reconcile it with the maintainers before rerunning.
 
 ## GitHub and CLI distribution
 
-After the Maven release succeeds, build the CLI archive from a separate, clean,
-detached worktree of the coordinated tag. Verify its embedded version, Git revision,
-and Maven metadata before uploading it. This is not performed by `bb release`:
+Create the CLI GitHub release later from a separate, clean, detached worktree of its
+own package tag. The verifier requires that detached checkout and checks the pod
+JAR, archive copy, Maven/build identity, version, and Git revision before upload:
 
 ```shell
-tag=v0.2.8
+tag='io.velio/collet-cli@0.2.8'
 cli_worktree=$(mktemp -d)
 git worktree add --detach "$cli_worktree" "$tag"
 cd "$cli_worktree"
@@ -127,36 +165,42 @@ gh release create "$tag" \
   collet-cli/target/collet-cli.tar.gz
 ```
 
-Return to the original checkout before removing the temporary worktree with
-`git worktree remove "$cli_worktree"`.
+This preserves `collet-cli/target/collet.pod.jar`,
+`collet-cli/target/collet-cli.tar.gz`, the `collet-cli/` archive root, and executable
+`collet.bb` and `gum`. Return to the original checkout before removing the temporary
+worktree with `git worktree remove "$cli_worktree"`.
 
 ## Docker publication
 
-Use a new clean detached tag worktree for the application image as well. Pass the
-tag-derived version and exact tag commit into the build, then verify both OCI labels
-and the embedded application JAR identity before pushing. `bb release` never builds
-or pushes Docker images:
+Build the image later from a separate detached `io.velio/collet-app@<version>`
+worktree. Because app and core versions are independent, pass both exact values;
+use the app package version from the tag and the exact core version recorded in the
+released app POM/release plan. Pass the tag commit as the source revision, verify the
+local image, and only then upload it:
 
 ```shell
-tag=v0.2.8
-version=${tag#v}
+tag='io.velio/collet-app@0.2.8'
+app_version=${tag##*@}
+core_version='0.2.8' # use the exact io.velio/collet-core version in this app POM
 docker_worktree=$(mktemp -d)
 git worktree add --detach "$docker_worktree" "$tag"
 cd "$docker_worktree"
 revision=$(git rev-parse "$tag^{}")
 registry=registry.example.com/your-team
-image="$registry/collet:$version"
+image="$registry/collet:$app_version"
 
 docker build -f collet-app/Dockerfile \
-  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_CORE_VERSION="$core_version" \
+  --build-arg COLLET_VERSION="$app_version" \
   --build-arg COLLET_REVISION="$revision" \
   -t "$image" .
 bb release:verify-image "$tag" "$image"
 docker push "$image"
 ```
 
-Return to the original checkout before removing this temporary worktree with
-`git worktree remove "$docker_worktree"`.
+The verifier checks OCI version/revision labels and the application JAR's embedded
+identity against the app package tag. Return to the original checkout before
+removing the temporary worktree with `git worktree remove "$docker_worktree"`.
 
-See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime configuration and
-deployment details.
+See [`collet-app/deploy.md`](../collet-app/deploy.md) for runtime and
+multi-architecture deployment details.

@@ -183,7 +183,7 @@
                "(ns example.a)\n;; meaningful\n")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
-           #"Meaningful package changes require a version bump"
+           #"Use fix:, feat:, !, BREAKING CHANGE:, or fix the squash PR title"
            (workspace/resolve-release-plan! (str root)))))))
 
 (deftest module-filter-keeps-required-changed-dependency-and-dependent-closure

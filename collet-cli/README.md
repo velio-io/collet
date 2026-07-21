@@ -51,12 +51,13 @@ Available prompt actions are:
 
 ### Deploy the script
 
-After the coordinated Maven release creates `v<version>`, build the pod uberjar and
-distribution archive from a separate, clean, detached worktree of that exact tag.
-Verify the embedded version, Git revision, and Maven coordinates before uploading:
+`bb release` builds and tags the CLI distribution but does not upload it. Later,
+build the pod uberjar and archive from a separate, clean, detached worktree of the
+exact CLI package tag. Verify the embedded version, Git revision, and Maven metadata
+before uploading:
 
 ```shell
-tag=v0.2.8
+tag='io.velio/collet-cli@0.2.8'
 cli_worktree=$(mktemp -d)
 git worktree add --detach "$cli_worktree" "$tag"
 cd "$cli_worktree"
@@ -73,8 +74,9 @@ This produces `collet-cli/target/collet.pod.jar` and
 directory with `bb.edn`, executable `collet.bb`, `collet.pod.jar`, and executable
 `gum`. The pod main namespace remains `pod.collet.core`.
 Return to the original checkout before running
-`git worktree remove "$cli_worktree"`. `bb release` publishes Maven artifacts only;
-it neither creates the CLI GitHub release nor pushes the Docker image.
+`git worktree remove "$cli_worktree"`. The CLI is independently versioned; its
+version need not match the app or any Maven artifact. `bb release` neither creates
+the CLI GitHub release nor pushes the Docker image.
 
 ### Development
 

@@ -29,6 +29,10 @@ module that contains the namespaces a pipeline needs:
 ```
 
 Use `[io.velio/collet-actions "VERSION"]` when compatibility with all legacy action
-namespaces is more important than classpath size. See the
+namespaces is more important than classpath size. `VERSION` always means the
+version published for that specific coordinate; Collet modules are independently
+versioned and their versions do not need to match. The aggregate's generated POM
+pins the exact compatible versions of all action modules transitively, so consumers
+must not add or synchronize those internal versions themselves. See the
 [module graph](./module-migration.md#module-graph) for every coordinate and its direct
 internal dependencies.

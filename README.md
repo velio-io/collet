@@ -414,7 +414,8 @@ Collet provides optional actions as isolated artifacts. The compatibility aggreg
 so existing pipeline specifications and action types do not change. Applications can
 instead depend only on the action modules they use; see the
 [action dependency table](./docs/module-migration.md#module-graph).
-Replace `VERSION` in dependency examples with the release version you use.
+Replace `VERSION` in dependency examples with that coordinate's release version;
+different Collet artifacts need not have the same version.
 This library contains such actions as `:collet.actions.http/request`, `:collet.actions.http/oauth2`,
 `:collet.actions.odata/request`, `:collet.actions.jdbc/query`, `:collet.actions.s3/sink`, `:collet.actions.file/sink`,
 `:collet.actions.queue/enqueue`, `:collet.actions.jslt/apply`, `:collet.actions.llm/openai`
@@ -549,25 +550,28 @@ After adding Collet to your project dependencies, you can use it as follows:
 
 ### Modules and development
 
-The repository is a Clojure CLI workspace built with `tools.build` and orchestrated
-with Babashka. Shared build implementation and the single module graph live in
-`build/`; reusable unpublished test-only code lives in `test-fixtures/`. The graph
-owns one coordinated workspace version. Module `deps.edn` files contain managed
-internal Maven pins for published POMs, so contributors never edit those pins by
-hand; use `bb version 0.3.0-SNAPSHOT` to update the graph and pins together.
+The repository is a Clojure CLI workspace built with `tools.build`, orchestrated
+with Babashka, and resolved by Kmono 4.12.3. Shared build implementation lives in
+`build/`; reusable unpublished test-only code lives in `test-fixtures/`. Each
+module declares its artifact contract in its own `deps.edn`, and internal source
+dependencies use `:local/root`. Kmono replaces those local roots with the exact
+released Maven versions only while generating POMs, so source checkouts stay easy
+to edit and published consumers still receive normal Maven coordinates.
 
-`bb release` publishes Maven artifacts as one coordinated release and creates one
-`v<version>` Git tag. Creating the CLI GitHub release and pushing the Docker image
-are separate manual operations; see the release guide for their commands and
-failure boundaries.
+Packages are versioned independently from Git tags such as
+`io.velio/collet-core@0.2.8`. Versions are not stored or manually bumped in source.
+`bb release:plan` calculates the next versions from conventional commits, and
+`bb release` publishes the selected Maven artifacts in dependency order. Creating
+the CLI GitHub release and pushing the Docker image are later, explicit operations
+from their respective package tags.
 
 ```shell
+bb kmono query
 bb test:unit
 bb test:module collet-action-http
 bb build collet-app
 bb verify
-bb version 0.3.0-SNAPSHOT
-bb release :patch
+bb release:plan
 ```
 
 See [development](./docs/development.md), [module migration](./docs/module-migration.md),

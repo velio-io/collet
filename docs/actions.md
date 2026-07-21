@@ -10,10 +10,13 @@ dependency families they use. Existing consumers may continue to use the
 through transitive dependencies. Namespace names, configuration keys, and action
 types are unchanged. The complete artifact-to-namespace mapping is in the
 [module migration guide](./module-migration.md#module-graph).
-Replace `VERSION` in the examples below with the release version you use.
-All action artifacts use the repository's one coordinated release version and one
-`v<version>` tag. Maven publication is automated by `bb release`; the CLI GitHub
-release and Docker image push are separate manual distribution steps.
+Replace `VERSION` in the examples below with the version published for that
+coordinate. Action artifacts are versioned independently and may have different
+versions. A change to an action also gives the `io.velio/collet-actions` aggregate
+a dependent patch release, so consumers of the aggregate only need its own latest
+version. Package releases use tags such as
+`io.velio/collet-action-http@0.2.8`; see the
+[release guide](./releasing.md) for the conventional-commit policy and workflow.
 
 For example, an HTTP-only application can use:
 

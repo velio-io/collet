@@ -17,7 +17,7 @@ The application library JAR can be installed independently with
 ## Local Docker image
 
 The Docker build context must be the repository root because the builder consumes
-the shared graph, build support, core, and application modules:
+the Kmono workspace, root build implementation, core, and application packages:
 
 ```shell
 docker build -f collet-app/Dockerfile -t collet .
@@ -44,23 +44,27 @@ docker buildx use collet-builder
 docker buildx inspect --bootstrap
 ```
 
-After the coordinated Maven release creates its one `v<version>` tag, authenticate
-to the target registry and create a separate, clean, detached worktree of that tag.
-Derive both image identity values from the tag checkout:
+After `bb release` creates an application package tag, authenticate to the target
+registry and create a separate, clean, detached worktree of that exact tag. App and
+core versions are independent: derive the app version from the tag and set the core
+version to the exact `io.velio/collet-core` version in the released app POM or
+reviewed release plan. Both versions and the tag revision are required build inputs:
 
 ```shell
-tag=v0.2.8
-version=${tag#v}
+tag='io.velio/collet-app@0.2.8'
+app_version=${tag##*@}
+core_version='0.2.8' # exact io.velio/collet-core version used by this app
 docker_worktree=$(mktemp -d)
 git worktree add --detach "$docker_worktree" "$tag"
 cd "$docker_worktree"
 revision=$(git rev-parse "$tag^{}")
-image="velioio/collet:$version"
+image="velioio/collet:$app_version"
 
 # Build one local platform first so its labels and embedded JAR can be checked.
 docker buildx build \
   -f collet-app/Dockerfile \
-  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_CORE_VERSION="$core_version" \
+  --build-arg COLLET_VERSION="$app_version" \
   --build-arg COLLET_REVISION="$revision" \
   --tag "$image" \
   --platform linux/amd64 \
@@ -70,7 +74,8 @@ bb release:verify-image "$tag" "$image"
 # Only publish the multi-architecture image after local verification succeeds.
 docker buildx build \
   -f collet-app/Dockerfile \
-  --build-arg COLLET_VERSION="$version" \
+  --build-arg COLLET_CORE_VERSION="$core_version" \
+  --build-arg COLLET_VERSION="$app_version" \
   --build-arg COLLET_REVISION="$revision" \
   --tag "$image" \
   --tag velioio/collet:latest \
@@ -78,7 +83,7 @@ docker buildx build \
   --push .
 ```
 
-Repository release tasks publish Maven artifacts only. Docker pushes remain an
-explicit deployment operation. Return to the original checkout before running
-`git worktree remove "$docker_worktree"`. A Docker push failure does not change
-Maven publication, GitHub release creation, or the coordinated version state.
+Repository release tasks never push Docker images. Docker publication remains an
+explicit operation from the app package tag. Return to the original checkout before
+running `git worktree remove "$docker_worktree"`. A Docker push failure does not
+change Maven publication, the CLI GitHub release, or any package version tag.

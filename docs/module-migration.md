@@ -6,9 +6,11 @@ entrypoints, and distribution filenames remain compatible.
 
 ## Module graph
 
-All coordinates below use the one version declared in `build/modules.edn`. New
-action modules begin at `0.2.8-SNAPSHOT` in source as part of that coordinated
-workspace version, not as module-local versions.
+Each coordinate below has an independent version derived from its Kmono package
+tags. There is no version in source and versions need not match. With no package
+tags, the first modular release plans every package at `0.2.8`; historical
+`v0.2.x` tags remain in Git but are not package-version tags.
+All rows except the CLI distribution are Maven coordinates published to Clojars.
 
 | Coordinate | Preserved namespaces | Direct internal dependencies |
 |---|---|---|
@@ -25,18 +27,19 @@ workspace version, not as module-local versions.
 | `io.velio/collet-action-lucene` | `collet.actions.lucene` | core |
 | `io.velio/collet-actions` | All eleven action namespaces above | All ten action artifacts |
 | `io.velio/collet-app` | Application API and `collet.main` | core |
-| CLI distribution | `pod.collet.core` | app |
+| `io.velio/collet-cli` (distribution, not Maven) | `pod.collet.core` | app |
 
-The graph is topologically ordered and is the authority for artifact names,
-versions, internal edges, main namespaces, output filenames, and integration-test
-selection.
+Kmono resolves this graph from the packages' `deps.edn` files and topologically
+orders builds, tests, verification, and publication. Each package's
+`:collet/artifact` metadata owns its namespaces, publishability, kind, main
+namespace, and exceptional output filenames.
 
 ## Consumer migration
 
 An existing consumer can retain its pipeline specs and aggregate dependency:
 
 ```clojure
-{:deps {io.velio/collet-actions {:mvn/version "VERSION"}}}
+{:deps {io.velio/collet-actions {:mvn/version "ACTIONS_VERSION"}}}
 ```
 
 The aggregate is a deliberately small JAR/POM. Its exact dependencies make all
@@ -44,7 +47,7 @@ legacy namespaces available transitively. To reduce the classpath, replace only 
 coordinate and retain the same namespace and action types:
 
 ```clojure
-{:deps {io.velio/collet-action-http {:mvn/version "VERSION"}}}
+{:deps {io.velio/collet-action-http {:mvn/version "HTTP_VERSION"}}}
 ```
 
 ```clojure
@@ -54,18 +57,22 @@ coordinate and retain the same namespace and action types:
 
 Use multiple action coordinates only when a pipeline uses multiple families. Direct
 internal edges are already transitive; for example S3 brings file, which brings HTTP.
+Those artifacts may all have different versions; each generated POM records the
+exact compatible internal versions. Consumers choose only the published version of
+each coordinate they declare directly.
+
 JDBC includes the PostgreSQL driver because `collet.actions.jdbc-pg` imports its
 classes. The MySQL driver remains test-only and consumers add their chosen driver.
 
 ## Dependency isolation
 
-Base module dependencies always use Maven coordinates. Development and tests
-override internal coordinates with `:local/root`; those local paths never appear in
-generated POMs. The build generates POMs from the base maps so published consumers
-resolve exact internal Maven coordinates. Do not manually edit those pins; `bb
-version <version>` updates the graph and all internal pins together. `bb verify`
-installs every library into a temporary Maven repository,
-starts a minimal consumer process for each coordinate, requires its promised
+Source checkouts use top-level `:local/root` dependencies between packages. Kmono
+converts each local root into that package's exact Maven coordinate and resolved
+version only when generating a publishable POM; local paths never appear in
+published metadata. External consumers continue to use `:mvn/version`. There are no
+internal pins or source versions to update manually. `bb verify` installs every
+library into a temporary Maven repository, starts a minimal consumer process for
+each coordinate, requires its promised
 namespaces, and checks forbidden optional dependency families in each dependency
 tree.
 
@@ -93,12 +100,16 @@ license attribution and provenance under `META-INF`. Graal versions remain pinne
 
 ## Version policy
 
-The graph owns one workspace version, and every internal Maven pin must equal it.
-Use `bb version 0.3.0-SNAPSHOT` to choose the next development target; it rewrites
-all internal pins together and does not publish, tag, or commit.
+Tags use Kmono's `<coordinate>@<version>` format, for example
+`io.velio/collet-action-http@0.2.8`. `fix:` commits produce patch releases, `feat:`
+commits produce minor releases, and `!` or a `BREAKING CHANGE:` footer produces a
+major release. Documentation, tests, CI, and development-only changes are ignored.
+A meaningful package change with no release-producing commit fails planning and
+verification with guidance to fix the commit or squash-merge PR title.
 
-`bb release` releases the current snapshot and creates one `v<version>` tag for all
-Maven artifacts. `:patch`, `:minor`, and `:major` advance the following snapshot
-respectively (for `0.2.8-SNAPSHOT`: `0.2.9-SNAPSHOT`, `0.3.0-SNAPSHOT`, and
-`1.0.0-SNAPSHOT`). Maven publication is automated; the CLI GitHub release and
-Docker push are separate manual operations.
+Internal dependency changes give affected dependents a patch release transitively.
+In particular, any action release also patches `io.velio/collet-actions`; a core
+release patches every affected action, the aggregate, app, and CLI through the graph.
+Use `bb release:plan [module]` to inspect the exact fixed-point closure before a
+release. Maven publication is automated by `bb release`; the CLI GitHub release and
+Docker push remain later, explicit operations from their own package tags.
