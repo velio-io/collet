@@ -85,3 +85,17 @@
            "OTHER" "kept"
            "CLOJARS_USERNAME" "secret"
            "CLOJARS_PASSWORD" "secret"}))))
+
+(deftest direct-dependency-rejects-a-conflicting-duplicate-version
+  (let [dependency (fn [version]
+                     (str "<dependency><groupId>io.velio</groupId>"
+                          "<artifactId>collet-core</artifactId>"
+                          "<version>" version "</version></dependency>"))
+        pom (str "<project><dependencies>"
+                 (dependency "1.7.2")
+                 (dependency "9.9.9")
+                 "</dependencies></project>")
+        error (exception #(release/verify-direct-dependency!
+                           pom 'io.velio/collet-core "1.7.2"))]
+    (is (= "POM dependency must be declared exactly once" (ex-message error)))
+    (is (= 2 (:count (ex-data error))))))

@@ -251,20 +251,24 @@
   [pom expected-fqn expected-version]
   (try
     (let [project (parse-pom pom)
-          dependencies (mapcat #(get (direct-elements %) "dependency")
-                               (get (direct-elements project) "dependencies"))
-          expected {:group (namespace expected-fqn) :artifact (name expected-fqn)
-                    :version expected-version}
-          matches (filter (fn [dependency]
-                            (let [elements (direct-elements dependency)]
-                              (= expected
-                                 {:group (element-value (exactly-one elements "groupId") "groupId")
-                                  :artifact (element-value (exactly-one elements "artifactId") "artifactId")
-                                  :version (element-value (exactly-one elements "version") "version")})))
+          dependencies (map (fn [dependency]
+                              (let [elements (direct-elements dependency)]
+                                {:group (element-value (exactly-one elements "groupId") "groupId")
+                                 :artifact (element-value (exactly-one elements "artifactId") "artifactId")
+                                 :version (element-value (exactly-one elements "version") "version")}))
+                            (mapcat #(get (direct-elements %) "dependency")
+                                    (get (direct-elements project) "dependencies")))
+          matches (filter #(and (= (namespace expected-fqn) (:group %))
+                                (= (name expected-fqn) (:artifact %)))
                           dependencies)]
       (when-not (= 1 (count matches))
         (fail! "POM dependency must be declared exactly once"
                {:dependency expected-fqn :count (count matches)}))
+      (when-not (= expected-version (:version (first matches)))
+        (fail! "POM dependency version does not match"
+               {:dependency expected-fqn
+                :expected expected-version
+                :actual (:version (first matches))}))
       true)
     (catch clojure.lang.ExceptionInfo error (throw error))
     (catch Exception error (throw (ex-info "Malformed Maven POM" {} error)))))
