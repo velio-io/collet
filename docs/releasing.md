@@ -110,6 +110,10 @@ required dependencies, in Kmono dependency order. It does not add dependents
 automatically; use `bb release:plan` without a module when the complete independent
 package plan is required:
 
+Bootstrap is the exception: while all package tags are missing, any module filter
+expands to all 14 packages at `0.2.8` so the first release cannot leave an incomplete
+tag set that prevents later version resolution.
+
 ```shell
 bb release collet-action-http
 ```

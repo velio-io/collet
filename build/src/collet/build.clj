@@ -189,9 +189,14 @@
 
   The result keeps the dependency-first Kmono order preserved in context."
   [{:keys [packages order]} module]
-  (let [selected (if-let [fqn (package-fqn packages module)]
-                   (conj (set (kmono.graph/query-dependencies packages fqn)) fqn)
-                   (set (keys packages)))]
+  (let [fqn (package-fqn packages module)
+        bootstrap? (and (seq packages)
+                        (every? #(and (:release? %)
+                                      (= :bootstrap (:reason %)))
+                                (vals packages)))
+        selected (if (or bootstrap? (nil? fqn))
+                   (set (keys packages))
+                   (conj (set (kmono.graph/query-dependencies packages fqn)) fqn))]
     (filterv #(and (contains? selected %)
                    (get-in packages [% :release?]))
              order)))

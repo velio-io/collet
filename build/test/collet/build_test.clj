@@ -109,6 +109,20 @@
             (is (= :distribution
                    (get-in packages ['example/pkg-cli :artifact :kind])))))))))
 
+(deftest module-filtered-release-bootstraps-the-complete-workspace
+  (with-workspace
+    (fn [root]
+      (let [{:keys [packages order] :as context}
+            (build/resolve-context! root {:changes? true})]
+        (is (= order (build/release-packages context :pkg-a)))
+        (doseq [fqn order]
+          (git! root "tag" (get-in packages [fqn :tag])))
+        (change! root :pkg-a "fix: change A after bootstrap")
+        (is (= ['example/pkg-a]
+               (build/release-packages
+                (build/resolve-context! root {:changes? true})
+                :pkg-a)))))))
+
 (deftest resolve-context-requires-complete-docker-version-overrides
   (with-workspace
     (fn [root]
