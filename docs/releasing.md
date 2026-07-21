@@ -93,7 +93,7 @@ tag-only distribution, and does not require credentials.
 # Every changed package
 bb release:plan
 
-# Changed packages in the selected package and its required dependency chain
+# Selected package, required changed dependencies, and candidate dependents
 bb release:plan collet-action-http
 ```
 
@@ -105,10 +105,10 @@ bb release
 bb release:all
 ```
 
-`bb release <module>` selects release candidates only from that package and its
-required dependencies, in Kmono dependency order. It does not add dependents
-automatically; use `bb release:plan` without a module when the complete independent
-package plan is required:
+`bb release <module>` starts with that package and its required dependency closure,
+then includes their transitive dependents when those packages are release candidates.
+The result remains in Kmono dependency order, while unchanged packages are omitted,
+so dependent and aggregate patch candidates cannot be stranded by a filtered release:
 
 Bootstrap is the exception: while all package tags are missing, any module filter
 expands to all 14 packages at `0.2.8` so the first release cannot leave an incomplete

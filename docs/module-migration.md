@@ -111,6 +111,7 @@ Internal dependency changes give affected dependents a patch release transitivel
 In particular, any action release also patches `io.velio/collet-actions`; a core
 release patches every affected action, the aggregate, app, and CLI through the graph.
 Use `bb release:plan` to inspect all candidates. With a module, the plan shows only
-that module and its dependencies; Maven publication is automated by `bb release`,
-while the CLI GitHub release and Docker push remain later, explicit operations from
-their own package tags.
+that module, its required changed dependencies, and their release-candidate
+dependents; Maven publication is automated by `bb release`, while the CLI GitHub
+release and Docker push remain later, explicit operations from their own package
+tags.

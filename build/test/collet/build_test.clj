@@ -123,10 +123,20 @@
         (doseq [fqn order]
           (git! root "tag" (get-in packages [fqn :tag])))
         (change! root :pkg-a "fix: change A after bootstrap")
-        (is (= ['example/pkg-a]
+        (is (= ['example/pkg-a 'example/pkg-b 'example/pkg-cli]
                (build/release-packages
                 (build/resolve-context! root {:changes? true})
                 :pkg-a)))))))
+
+(deftest module-filtered-release-includes-dependent-candidates
+  (with-workspace
+    (fn [root]
+      (tag-all! root "1.2.3")
+      (change! root :pkg-b "fix: change B")
+      (is (= ['example/pkg-b 'example/pkg-cli]
+             (build/release-packages
+              (build/resolve-context! root {:changes? true})
+              :pkg-b))))))
 
 (deftest resolve-context-requires-complete-docker-version-overrides
   (with-workspace

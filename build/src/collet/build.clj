@@ -196,7 +196,12 @@
                                 (vals packages)))
         selected (if (or bootstrap? (nil? fqn))
                    (set (keys packages))
-                   (conj (set (kmono.graph/query-dependencies packages fqn)) fqn))]
+                   (let [required (conj
+                                   (kmono.graph/query-dependencies packages fqn)
+                                   fqn)]
+                     (into required
+                           (mapcat #(kmono.graph/query-dependents packages %))
+                           required)))]
     (filterv #(and (contains? selected %)
                    (get-in packages [% :release?]))
              order)))
