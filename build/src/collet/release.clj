@@ -7,9 +7,11 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [collet.build :as build]
+   [collet.verify :as verify]
    [k16.kmono.version :as kmono.version])
   (:import
    (java.io StringReader)
+   (java.nio.file Files)
    (java.util Properties)
    (java.util.jar JarFile)))
 
@@ -122,6 +124,18 @@
     :head (git-output root "rev-parse" "HEAD")
     :remote-head (git-output root "rev-parse" "origin/main")}))
 
+(defn- ensure-release-revision! [root expected]
+  (let [actual (:revision (production-preflight! root))]
+    (when-not (= expected actual)
+      (fail! "Release source revision changed"
+             {:expected expected :actual actual}))))
+
+(defn- ensure-target-tags-absent! [root packages]
+  (doseq [{:keys [tag]} packages
+          :let [revision (git-tag-target root tag)]
+          :when revision]
+    (fail! "Release target tag already exists" {:tag tag :revision revision})))
+
 (defn- quality-gate! [root task]
   (command! {:dir root :env (nondeployment-env)} "bb" task))
 
@@ -141,9 +155,9 @@
               ":artifact" (pr-str jar-file)
               ":pom-file" (pr-str pom-file))))
 
-(defn- create-tags! [root packages]
+(defn- create-tags! [root packages revision]
   (doseq [{:keys [tag]} packages]
-    (command! {} "git" "-C" root "tag" tag)))
+    (command! {} "git" "-C" root "tag" tag revision)))
 
 (defn- push-tags! [root packages]
   (apply command! {} "git" "-C" root "push" "--atomic" "origin"
@@ -166,13 +180,16 @@
         (println "No packages require release.")
         {:tags [] :deployed [] :tag-only []})
       (let [{:keys [revision]} (production-preflight! root)]
+        (ensure-target-tags-absent! root packages)
         (validate-credentials! (System/getenv) packages)
         (quality-gate! root "test")
         (quality-gate! root "verify")
+        (ensure-release-revision! root revision)
         (let [artifacts (:artifacts (build-release! context packages revision))]
+          (ensure-release-revision! root revision)
           (doseq [package (filter :publish? packages)]
             (deploy! root package (get artifacts (:fqn package))))
-          (create-tags! root packages)
+          (create-tags! root packages revision)
           (push-tags! root packages)
           {:revision revision
            :tags (mapv :tag packages)
@@ -329,6 +346,7 @@
     (doseq [path [pod archive]]
       (when-not (fs/regular-file? path)
         (fail! "CLI release artifact is missing" {:path (str path)})))
+    (verify/verify-deployable! context package)
     (when-not (= :matching (verify-jar package revision pod))
       (fail! "CLI JAR identity does not match its package tag" {:jar (str pod)}))
     (let [directory (fs/create-temp-dir {:prefix "collet-cli-release-"})]
@@ -337,6 +355,8 @@
         (let [archived-pod (fs/path directory "collet-cli" "collet.pod.jar")]
           (when-not (fs/regular-file? archived-pod)
             (fail! "CLI archive lacks collet.pod.jar" {}))
+          (when-not (= -1 (Files/mismatch pod archived-pod))
+            (fail! "Archived CLI pod differs from the top-level pod" {}))
           (when-not (= :matching (verify-jar package revision archived-pod))
             (fail! "Archived CLI JAR identity does not match its package tag"
                    {:jar (str archived-pod)})))

@@ -1,8 +1,11 @@
 (ns collet.release-test
   (:require
+   [babashka.fs :as fs]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
-   [collet.release :as release]))
+   [collet.release :as release]
+   [collet.verify :as verify]))
 
 (def packages
   [{:fqn 'example/pkg-a
@@ -30,6 +33,58 @@
     nil
     (catch clojure.lang.ExceptionInfo error
       error)))
+
+(defn- release-var [name]
+  (ns-resolve 'collet.release name))
+
+(defn- run-release! [revisions existing-tag events]
+  (let [remaining (atom revisions)
+        package (first packages)]
+    (with-redefs-fn
+      {(release-var 'fetch-tags!) (fn [_] nil)
+       (release-var 'candidate-plan)
+       (fn [_ _] {:context {:packages {(:fqn package) package}}
+                   :packages [package]})
+       (release-var 'production-preflight!)
+       (fn [_]
+         (let [revision (first @remaining)]
+           (swap! remaining rest)
+           (swap! events conj [:preflight revision])
+           {:revision revision}))
+       #'release/validate-credentials! (fn [& _] nil)
+       (release-var 'git-tag-target) (fn [& _] existing-tag)
+       (release-var 'quality-gate!)
+       (fn [_ task] (swap! events conj [:quality task]))
+       (release-var 'build-release!)
+       (fn [& _]
+         (swap! events conj [:build])
+         {:artifacts {(:fqn package) {}}})
+       (release-var 'deploy!)
+       (fn [& _] (swap! events conj [:deploy]))
+       (release-var 'create-tags!)
+       (fn [_ _ & [revision]] (swap! events conj [:tag revision]))
+       (release-var 'push-tags!)
+       (fn [& _] (swap! events conj [:push]))}
+      (fn [] (release/release {:root "repo"})))))
+
+(defn- with-cli-artifacts [top-level-pod archived-pod f]
+  (let [root (fs/create-temp-dir {:prefix "verify-cli-release-test-"})
+        target (fs/path root "target")
+        archive-root (fs/path root "archive" "collet-cli")
+        archive (fs/path target "collet-cli.tar.gz")]
+    (try
+      (fs/create-dirs target)
+      (fs/create-dirs archive-root)
+      (spit (str (fs/path target "collet.pod.jar")) top-level-pod)
+      (spit (str (fs/path archive-root "collet.pod.jar")) archived-pod)
+      (let [{:keys [exit err]}
+            (shell/sh "tar" "-czf" (str archive)
+                      "-C" (str (fs/parent archive-root)) "collet-cli")]
+        (when-not (zero? exit)
+          (throw (ex-info "tar failed" {:error err}))))
+      (f (str root))
+      (finally
+        (fs/delete-tree root)))))
 
 (deftest release-steps-follow-the-fail-fast-pipeline
   (is (= [:quality-gate
@@ -85,6 +140,76 @@
            "OTHER" "kept"
            "CLOJARS_USERNAME" "secret"
            "CLOJARS_PASSWORD" "secret"}))))
+
+(deftest release-revalidates-and-tags-the-captured-source-revision
+  (let [events (atom [])]
+    (run-release! ["abc123" "abc123" "abc123"] nil events)
+    (is (= [[:preflight "abc123"]
+            [:preflight "abc123"]
+            [:preflight "abc123"]]
+           (filterv #(= :preflight (first %)) @events)))
+    (is (= [:tag "abc123"] (first (filter #(= :tag (first %)) @events))))))
+
+(deftest source-drift-after-build-prevents-deployment-and-tagging
+  (let [events (atom [])
+        error (exception #(run-release! ["abc123" "abc123" "other"]
+                                        nil events))]
+    (is (= "Release source revision changed" (ex-message error)))
+    (is (not-any? #(#{:deploy :tag :push} (first %)) @events))))
+
+(deftest an-existing-target-tag-stops-before-quality-gates
+  (let [events (atom [])
+        error (exception #(run-release! ["abc123"] "other-lineage" events))]
+    (is (= "Release target tag already exists" (ex-message error)))
+    (is (= "example/pkg-a@1.2.4" (:tag (ex-data error))))
+    (is (not-any? #(#{:quality :build :deploy :tag :push} (first %)) @events))))
+
+(deftest cli-release-check-reuses-the-public-deployable-contract
+  (with-cli-artifacts
+    "same-pod" "same-pod"
+    (fn [root]
+      (let [package {:fqn 'io.velio/collet-cli
+                     :version "1.2.4"
+                     :tag "io.velio/collet-cli@1.2.4"
+                     :absolute-path root}
+            context {:tag (:tag package)
+                     :revision "abc123"
+                     :package package
+                     :packages {(:fqn package) package}}
+            checked (atom nil)]
+        (with-redefs-fn
+          {(release-var 'ensure-tag-checkout!) (fn [& _] context)
+           (release-var 'verify-jar) (fn [& _] :matching)
+           #'verify/verify-deployable!
+           (fn [actual-context actual-package]
+             (reset! checked [actual-context actual-package])
+             true)}
+          (fn []
+            (with-out-str
+              (release/verify-cli {:root root :tag (:tag package)}))))
+        (is (= [context package] @checked))))))
+
+(deftest cli-release-check-rejects-a-different-archived-pod
+  (with-cli-artifacts
+    "top-level-pod" "different-archived-pod"
+    (fn [root]
+      (let [package {:fqn 'io.velio/collet-cli
+                     :version "1.2.4"
+                     :tag "io.velio/collet-cli@1.2.4"
+                     :absolute-path root}
+            context {:tag (:tag package)
+                     :revision "abc123"
+                     :package package
+                     :packages {(:fqn package) package}}
+            error (with-redefs-fn
+                    {(release-var 'ensure-tag-checkout!) (fn [& _] context)
+                     (release-var 'verify-jar) (fn [& _] :matching)
+                     #'verify/verify-deployable! (fn [& _] true)}
+                    (fn []
+                      (exception #(release/verify-cli
+                                   {:root root :tag (:tag package)}))))]
+        (is (= "Archived CLI pod differs from the top-level pod"
+               (ex-message error)))))))
 
 (deftest direct-dependency-rejects-a-conflicting-duplicate-version
   (let [dependency (fn [version]
