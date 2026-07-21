@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "21"
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
+          restore-keys: m2-${{ runner.os }}-
+      - run: bb test:unit
+
+  integration:
+    name: Docker integrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
+          restore-keys: m2-${{ runner.os }}-
+      - run: docker info
+      - run: bb test:integration
+      - name: Build and start the application image
+        run: |
+          docker build -f collet-app/Dockerfile -t collet-ci .
+          docker run --rm \
+            -e PIPELINE_SPEC='{:name :ci :tasks []}' \
+            -e PIPELINE_CONFIG='{}' \
+            collet-ci
+
+  artifacts:
+    name: Public artifact contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: "1.12.5.1654"
+          bb: "1.12.218"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
+          restore-keys: m2-${{ runner.os }}-
+      - run: bb verify

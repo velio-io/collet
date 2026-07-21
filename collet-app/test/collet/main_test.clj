@@ -2,27 +2,15 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as string]
-   [clojure.test :refer :all]
+   [clojure.test :refer [deftest is testing]]
    [clojure.tools.cli :as tools.cli]
    [clojure.java.shell :refer [sh]]
    [clj-test-containers.core :as tc]
+   [collet.test-containers :as containers]
    [collet.aws :as aws]
    [collet.main :as sut])
   (:import
    [java.util.regex Pattern]))
-
-
-(defn localstack-container []
-  (-> (tc/create {:image-name    "localstack/localstack"
-                  :exposed-ports [4566 4510]
-                  :wait-for      {:wait-strategy :http
-                                  :path          "/_localstack/health"
-                                  :port          4566
-                                  :method        "GET"}
-                  :env-vars      {"AWS_ACCESS_KEY_ID"     "test-user"
-                                  "AWS_SECRET_ACCESS_KEY" "test-pass"
-                                  "AWS_DEFAULT_REGION"    "eu-west-1"}})
-      (tc/start!)))
 
 
 (deftest parse-options-test
@@ -88,34 +76,34 @@
   (testing "parsing regex in edn"
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :parent-pipe :regex #rgx \"foo\"}") sut/cli-options)]
       (is (nil? errors))
-      (is (instance? Pattern (-> options :pipeline-spec :regex)))))
+      (is (instance? Pattern (-> options :pipeline-spec :regex))))))
 
-  (testing "file upload from S3"
-    (let [container      (localstack-container)
-          container-port (get-in container [:mapped-ports 4566])
-          aws-creds      {:aws-region        "eu-west-1"
-                          :aws-key           "test-user"
-                          :aws-secret        "test-pass"
-                          :endpoint-override {:protocol :http
-                                              :hostname "localhost"
-                                              :port     container-port}}
-          s3-client      (aws/make-client :s3 aws-creds)]
-      (aws/invoke! s3-client :CreateBucket
-                   {:Bucket                    "test-bucket"
-                    :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+(deftest ^:integration s3-config-test
+  (let [container      (containers/localstack)
+        container-port (get-in container [:mapped-ports 4566])
+        aws-creds      {:aws-region        "eu-west-1"
+                        :aws-key           "test-user"
+                        :aws-secret        "test-pass"
+                        :endpoint-override {:protocol :http
+                                            :hostname "localhost"
+                                            :port     container-port}}
+        s3-client      (aws/make-client :s3 aws-creds)]
+    (aws/invoke! s3-client :CreateBucket
+                 {:Bucket                    "test-bucket"
+                  :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
-      (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
-        (aws/invoke! s3-client :PutObject
-                     {:Bucket "test-bucket"
-                      :Key    "test-pipeline-config.edn"
-                      :Body   file-stream}))
+    (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
+      (aws/invoke! s3-client :PutObject
+                   {:Bucket "test-bucket"
+                    :Key    "test-pipeline-config.edn"
+                    :Body   file-stream}))
 
-      (with-redefs [aws/make-client (fn [& _] s3-client)]
-        (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1") sut/cli-options)]
-          (is (nil? errors))
-          (is (= :test-pipeline (-> options :pipeline-spec :name)))))
+    (with-redefs [aws/make-client (fn [& _] s3-client)]
+      (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1") sut/cli-options)]
+        (is (nil? errors))
+        (is (= :test-pipeline (-> options :pipeline-spec :name)))))
 
-      (tc/stop! container))))
+    (tc/stop! container)))
 
 
 (deftest config-string-parse-test
@@ -125,8 +113,13 @@
       (is (string/includes? (:pwd config) "collet")))))
 
 
-(deftest pipeline-execution-test
+(deftest ^:integration pipeline-execution-test
   (let [{:keys [exit out]}
-        (sh "/usr/local/bin/lein" "run" "-s" "configs/sample-pipeline.edn" "-c" "{}")]
+        (sh "java"
+            "--add-opens=java.base/java.nio=ALL-UNNAMED"
+            "--enable-native-access=ALL-UNNAMED"
+            "-jar" "target/collet.jar"
+            "-s" "configs/sample-pipeline.edn"
+            "-c" "{}")]
     (is (zero? exit))
     (is (string/includes? out "Pipeline completed."))))

@@ -18,8 +18,11 @@
         (.setContextClassLoader thread dynamic-classloader)))))
 
 
-(def in-repl?
-  (bound? #'*1))
+(defn- repl-classloader []
+  (when (bound? Compiler/LOADER)
+    (let [loader @Compiler/LOADER]
+      (when (instance? DynamicClassLoader loader)
+        (.getParent ^DynamicClassLoader loader)))))
 
 
 (def deps-spec
@@ -45,12 +48,14 @@
       ;; load and add deps to the classpath
       (ensure-dynamic-classloader)
 
-      ;; REPL has its own classloader
-      (when in-repl?
+      ;; A REPL may have its own classloader. Compiler/LOADER is unbound when
+      ;; launched through clojure.main, so test the loader itself rather than
+      ;; unrelated REPL result vars such as *1.
+      (when-let [classloader (repl-classloader)]
         (pom/add-dependencies
          :coordinates coordinates
          :repositories maven-and-clojars
-         :classloader (.getParent ^DynamicClassLoader @Compiler/LOADER)))
+         :classloader classloader))
 
       ;; add deps to the current classloader
       (pom/add-dependencies

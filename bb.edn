@@ -1,35 +1,80 @@
-{:paths
- ["scripts"]
+{:tasks
+ {:requires ([babashka.process :refer [shell]])
 
- :deps
- {babashka/fs      {:mvn/version "0.5.22"}
-  babashka/process {:mvn/version "0.5.22"}}
+  :init
+  (do
+    (defn no-args! [usage args command]
+      (when (seq args)
+        (throw (ex-info (str "Usage: bb " usage) {:args args})))
+      (apply shell command))
 
- :tasks
- {:requires
-  ([babashka.fs :as fs]
-   [babashka.process :as ps]
-   [release :as release])
+    (defn module-command! [command usage args]
+      (when (> (count args) 1)
+        (throw (ex-info (str "Usage: bb " usage " [module]") {:args args})))
+      (apply shell
+             (cond-> ["clojure" "-T:build" command]
+               (first args) (into [":module" (str ":" (first args))]))))
 
-  dev-setup
-  {:doc  "Create a checkouts folders and symlinks for sub projects"
-   :task (do (ps/shell {:dir "collet-core"} "lein" "install")
-             (fs/create-dir "collet-actions/checkouts")
-             (fs/create-sym-link "collet-actions/checkouts/collet-core" "../../collet-core/")
-             (fs/create-dir "collet-app/checkouts")
-             (fs/create-sym-link "collet-app/checkouts/collet-core" "../../collet-core/")
-             (ps/shell {:dir "collet-app"} "lein" "install")
-             (fs/create-dir "collet-cli/checkouts")
-             (fs/create-sym-link "collet-cli/checkouts/collet-app" "../../collet-app/"))}
+    (defn test-unit! []
+      (shell "clojure" "-T:build-test")
+      (shell "clojure" "-M:kmono" "run" "--M" ":test"
+             "--" "-e" ":integration"))
 
+    (defn test-integration! []
+      (shell "clojure" "-T:build" "build" ":module" ":collet-cli")
+      (shell "clojure" "-M:kmono" "run" "--M" ":test:integration"
+             "--" "-i" ":integration")))
 
-  dev-cleanup
-  {:doc  "Cleanup dev resources"
-   :task (do (fs/delete-tree "collet-actions/checkouts")
-             (fs/delete-tree "collet-app/checkouts")
-             (fs/delete-tree "collet-cli/checkouts"))}
+  kmono
+  {:doc "Run the pinned Kmono CLI"
+   :task (apply shell (into ["clojure" "-M:kmono"] *command-line-args*))}
 
+  test
+  {:doc "Run every unit and Docker integration test in separate JVMs"
+   :task (do (test-unit!) (test-integration!))}
+
+  test:unit
+  {:doc "Run every module test suite without :integration tests"
+   :task (test-unit!)}
+
+  test:integration
+  {:doc "Run Docker-backed and artifact startup integration tests"
+   :task (test-integration!)}
+
+  test:module
+  {:doc "Test one module: bb test:module <module> [test-runner-options]"
+   :task
+   (let [[module & runner-options :as args] *command-line-args*]
+     (when-not module
+       (throw (ex-info "Usage: bb test:module <module> [test-runner-options]"
+                       {:args args})))
+     (when (#{"collet-app" "collet-cli"} module)
+       (shell "clojure" "-T:build" "build" ":module" (str ":" module)))
+     (apply shell
+            (into ["clojure" "-M:kmono" "run" "-F"
+                   (str ":io.velio/" module) "--M" ":test"]
+                  (concat (when (seq runner-options) ["--"])
+                          runner-options))))}
+
+  build
+  {:doc "Build one module (defaults to all modules)"
+   :task (module-command! "build" "build" *command-line-args*)}
+
+  install
+  {:doc "Install one module and its dependencies (defaults to all libraries)"
+   :task (module-command! "install" "install" *command-line-args*)}
+
+  verify
+  {:doc "Build and check public artifact contracts"
+   :task (no-args! "verify" *command-line-args*
+                   ["clojure" "-T:build" "verify"])}
+
+  release:plan
+  {:doc "Print the independent package release plan"
+   :task (no-args! "release:plan" *command-line-args*
+                   ["clojure" "-T:build" "release-plan"])}
 
   release
-  {:doc  "Make a new Collet release"
-   :task (release/make-release)}}}
+  {:doc "Release every changed package locally"
+   :task (no-args! "release" *command-line-args*
+                   ["clojure" "-T:build" "release"])}}}

@@ -1,0 +1,20 @@
+{:collet/artifact
+ {:description "Lucene actions for Collet"
+  :public-namespaces [collet.actions.lucene]
+  :publish? true
+  :kind :library}
+
+ :paths ["src"]
+ :deps {org.clojure/clojure                     {:mvn/version "1.12.0"}
+        io.velio/collet-core                    {:local/root "../collet-core"}
+        metosin/malli                           {:mvn/version "0.16.4"}
+        techascent/tech.ml.dataset              {:mvn/version "7.032"}
+        org.apache.lucene/lucene-core           {:mvn/version "10.3.2"}
+        org.apache.lucene/lucene-queryparser    {:mvn/version "10.3.2"}
+        org.apache.lucene/lucene-analyzers-common {:mvn/version "8.11.4"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "cognitect.test-runner"]}}}

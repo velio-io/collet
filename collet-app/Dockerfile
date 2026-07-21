@@ -1,17 +1,33 @@
-FROM clojure:temurin-21-lein AS builder
+ARG COLLET_CORE_VERSION="0.0.0-local"
+ARG COLLET_VERSION="0.0.0-local"
+ARG COLLET_REVISION="docker-build"
 
-RUN mkdir -p /build
-COPY project.clj /build/project.clj
-COPY src /build/src
+FROM clojure:temurin-21-tools-deps AS builder
 
-# for local builds
-#RUN mkdir -p /root/.m2/repository/io
-#ADD velio /root/.m2/repository/io/velio
+ARG COLLET_CORE_VERSION
+ARG COLLET_VERSION
+ARG COLLET_REVISION
 
-RUN cd /build && lein uberjar
+WORKDIR /build
+
+COPY LICENSE /build/LICENSE
+COPY deps.edn /build/deps.edn
+COPY build /build/build
+COPY collet-core /build/collet-core
+COPY collet-app /build/collet-app
+
+RUN clojure -T:build build :module :collet-app \
+      :versions "{io.velio/collet-core \"${COLLET_CORE_VERSION}\" \
+                  io.velio/collet-app \"${COLLET_VERSION}\"}"
 
 
 FROM eclipse-temurin:21.0.5_11-jre
+
+ARG COLLET_VERSION
+ARG COLLET_REVISION
+
+LABEL org.opencontainers.image.version="${COLLET_VERSION}" \
+      org.opencontainers.image.revision="${COLLET_REVISION}"
 
 ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
@@ -23,11 +39,11 @@ ENV TINI_VERSION=v0.19.0
 #ADD velio /root/.m2/repository/io/velio
 
 RUN mkdir -p /app
-COPY --from=builder /build/target/collet.jar /app/collet.jar
+COPY --from=builder /build/collet-app/target/collet.jar /app/collet.jar
 
 RUN mkdir /app/jmx
-COPY resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
-COPY resources/jmx.yaml /app/jmx/jmx.yaml
+COPY collet-app/resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
+COPY collet-app/resources/jmx.yaml /app/jmx/jmx.yaml
 
 
 ARG TARGETPLATFORM

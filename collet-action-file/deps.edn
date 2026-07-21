@@ -1,0 +1,20 @@
+{:collet/artifact
+ {:description "File actions for Collet"
+  :public-namespaces [collet.actions.file]
+  :publish? true
+  :kind :library}
+
+ :paths ["src"]
+ :deps {org.clojure/clojure          {:mvn/version "1.12.0"}
+        io.velio/collet-core         {:local/root "../collet-core"}
+        io.velio/collet-action-http  {:local/root "../collet-action-http"}
+        com.cnuernber/charred        {:mvn/version "1.034"}
+        techascent/tech.ml.dataset   {:mvn/version "7.032"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}
+                      io.velio/collet-action-jdbc {:local/root "../collet-action-jdbc"}}
+         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "cognitect.test-runner"]}
+  :integration {}}}

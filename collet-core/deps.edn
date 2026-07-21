@@ -1,0 +1,48 @@
+{:collet/artifact
+ {:description "Collet workflow engine core"
+  :public-namespaces [collet.core]
+  :publish? true
+  :kind :library}
+
+ :paths ["src" "resources"]
+ :deps
+ {org.clojure/clojure                  {:mvn/version "1.12.0"}
+  weavejester/dependency               {:mvn/version "0.2.1"}
+  metosin/malli                        {:mvn/version "0.16.4"}
+  diehard/diehard                      {:mvn/version "0.11.12"}
+  clj-commons/pomegranate              {:mvn/version "1.2.24"}
+  org.babashka/sci                     {:mvn/version "0.9.44"}
+  com.brunobonacci/mulog               {:mvn/version "0.9.0"}
+  org.slf4j/slf4j-nop                  {:mvn/version "2.0.16"}
+  techascent/tech.ml.dataset           {:mvn/version "7.032"}
+  org.apache.arrow/arrow-vector        {:mvn/version "18.1.0"}
+  org.apache.arrow/arrow-memory-netty  {:mvn/version "18.1.0"}
+  com.cnuernber/jarrow                 {:mvn/version "1.000"}
+  org.apache.commons/commons-compress  {:mvn/version "1.21"}
+  org.lz4/lz4-java                     {:mvn/version "1.8.0"}
+  net.java.dev.jna/jna                 {:mvn/version "5.10.0"}
+  com.github.luben/zstd-jni            {:mvn/version "1.5.4-1"}}
+ :aliases
+ {:test
+  {:extra-paths ["test"]
+   :extra-deps  {io.velio/collet-test-fixtures
+                 {:local/root "../test-fixtures"}
+                 io.github.cognitect-labs/test-runner
+                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :jvm-opts    ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
+                 "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+                 "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"
+                 "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
+                 "--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED"
+                 "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                 "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+                 "--add-opens=java.base/java.io=ALL-UNNAMED"
+                 "--add-opens=java.base/java.util=ALL-UNNAMED"
+                 "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+                 "--enable-native-access=ALL-UNNAMED"]
+   :main-opts   ["-m" "cognitect.test-runner"]}
+  :dev
+  {:extra-paths ["dev/src"]
+   :extra-deps  {eftest/eftest                 {:mvn/version "0.6.0"}
+                 vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
+                 djblue/portal                 {:mvn/version "0.58.2"}}}}}

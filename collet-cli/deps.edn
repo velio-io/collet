@@ -1,0 +1,36 @@
+{:collet/artifact
+ {:description "CLI interface for Collet"
+  :public-namespaces [pod.collet.core]
+  :publish? false
+  :kind :distribution
+  :main pod.collet.core
+  :outputs
+  {:uberjar "target/collet.pod.jar"
+   :archive "target/collet-cli.tar.gz"
+   :root "collet-cli"
+   :files [{:from "collet-bb-deps.edn" :to "bb.edn" :mode "rw-r--r--"}
+           {:from "collet.bb" :to "collet.bb" :mode "rwxr-xr-x"}
+           {:from "target/collet.pod.jar" :to "collet.pod.jar" :mode "rw-r--r--"}
+           {:from "gum" :to "gum" :mode "rwxr-xr-x"}]}}
+
+ :paths ["src"]
+ :deps {org.clojure/clojure    {:mvn/version "1.12.0"}
+        io.velio/collet-app    {:local/root "../collet-app"}
+        nrepl/bencode          {:mvn/version "1.1.0"}
+        djblue/portal          {:mvn/version "0.58.2"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+         :jvm-opts ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
+                    "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+                    "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"
+                    "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
+                    "--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED"
+                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+                    "--add-opens=java.base/java.io=ALL-UNNAMED"
+                    "--add-opens=java.base/java.util=ALL-UNNAMED"
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--enable-native-access=ALL-UNNAMED"]
+         :main-opts ["-m" "cognitect.test-runner"]}
+  :integration {}}}

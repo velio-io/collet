@@ -1,37 +1,96 @@
-### Local build
+# Application deployment
+
+The application requires JDK 21 or newer. Build its preserved uberjar filename from
+the repository root:
 
 ```shell
-cp -r ~/.m2/repository/io/velio velio
-
-docker build -t collet .
-
-docker run \
-    -e PIPELINE_SPEC="/data/pipeline.edn" \
-    -e PIPELINE_CONFIG="/data/config.edn" \
-    -p 8080:8080 \
-    -m 500m \
-    collet
+bb build collet-app
+java -jar collet-app/target/collet.jar \
+  -s collet-app/configs/sample-pipeline.edn \
+  -c '{}'
 ```
 
-### Production build
+The application library JAR can be installed independently with
+`bb install collet-app`; the executable artifact remains
+`collet-app/target/collet.jar` with main namespace `collet.main`.
 
-Create a builder for multi-arch builds
+## Local Docker image
+
+The Docker build context must be the repository root because the builder consumes
+the Kmono workspace, root build implementation, core, and application packages:
+
+```shell
+docker build -f collet-app/Dockerfile -t collet .
+
+docker run --rm \
+  -e PIPELINE_SPEC='{:name :example :tasks []}' \
+  -e PIPELINE_CONFIG='{}' \
+  -p 8080:8080 \
+  -m 500m \
+  collet
+```
+
+The builder uses Clojure CLI with JDK 21. The runtime image preserves the existing
+JVM options, JMX agent on port 8080, `/tini` entrypoint, environment variables, and
+startup command.
+
+Docker is required for this workflow. The repository release command creates the app
+package tag but never builds or pushes a registry image; image publication is a
+separate, explicit operation from that tag.
+
+## Multi-architecture image
+
+Create and bootstrap a Docker Buildx builder once:
 
 ```shell
 docker buildx create --name collet-builder
 docker buildx use collet-builder
-```
-
-Verify that the builder is created
-
-```shell
 docker buildx inspect --bootstrap
 ```
 
-Login to Docker Hub.
-
-Build and push the image
+After `bb release` creates an application package tag, authenticate to the target
+registry and create a separate, clean, detached worktree of that exact tag. App and
+core versions are independent: derive the app version from the tag and ask the root
+build for the exact Kmono-resolved `io.velio/collet-core` version at that tagged
+commit. Both versions and the tag revision are required build inputs:
 
 ```shell
-docker buildx build --tag velioio/collet:0.1.0 --tag velioio/collet:latest --platform linux/arm64,linux/amd64 --push .
+tag='io.velio/collet-app@0.2.8'
+app_version=${tag##*@}
+docker_worktree=$(mktemp -d)
+git worktree add --detach "$docker_worktree" "$tag"
+cd "$docker_worktree"
+core_tag=$(git tag --merged HEAD --list 'io.velio/collet-core@*' \
+  --sort=-creatordate | head -1)
+core_version=${core_tag##*@}
+revision=$(git rev-parse "$tag^{}")
+image="velioio/collet:$app_version"
+
+# Build one local platform first so its labels and embedded JAR can be checked.
+docker buildx build \
+  -f collet-app/Dockerfile \
+  --build-arg COLLET_CORE_VERSION="$core_version" \
+  --build-arg COLLET_VERSION="$app_version" \
+  --build-arg COLLET_REVISION="$revision" \
+  --tag "$image" \
+  --platform linux/amd64 \
+  --load .
+docker run --rm -e PIPELINE_SPEC='{:name :release-check :tasks []}' \
+  -e PIPELINE_CONFIG='{}' "$image"
+
+# Only publish the multi-architecture image after local verification succeeds.
+docker buildx build \
+  -f collet-app/Dockerfile \
+  --build-arg COLLET_CORE_VERSION="$core_version" \
+  --build-arg COLLET_VERSION="$app_version" \
+  --build-arg COLLET_REVISION="$revision" \
+  --tag "$image" \
+  --tag velioio/collet:latest \
+  --platform linux/arm64,linux/amd64 \
+  --push .
 ```
+
+Repository release tasks never push Docker images. Docker publication remains an
+explicit operation from the app package tag. Return to the original checkout before
+running `git worktree remove "$docker_worktree"`. A Docker push failure does not
+change Maven publication, the CLI GitHub release, or any package version tag.

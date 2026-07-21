@@ -51,16 +51,43 @@ Available prompt actions are:
 
 ### Deploy the script
 
-Build the uberjar file for collet pod and pack it as a tar file.
+`bb release` builds and tags the CLI distribution but does not upload it. Later,
+build the pod uberjar and archive from a separate, clean, detached worktree of the
+exact CLI package tag, then upload the result:
 
 ```shell
-bb build
+tag='io.velio/collet-cli@0.2.8'
+cli_worktree=$(mktemp -d)
+git worktree add --detach "$cli_worktree" "$tag"
+cd "$cli_worktree"
+
+bb build collet-cli
+
+gh release create "$tag" \
+  collet-cli/target/collet-cli.tar.gz
 ```
 
-This will produce a `target/collet-cli.tar.gz` file.
-You can upload this file to GitHub releases.
+This produces `collet-cli/target/collet.pod.jar` and
+`collet-cli/target/collet-cli.tar.gz`. The archive contains the `collet-cli/`
+directory with `bb.edn`, executable `collet.bb`, `collet.pod.jar`, and executable
+`gum`. The pod main namespace remains `pod.collet.core`.
+Return to the original checkout before running
+`git worktree remove "$cli_worktree"`. The CLI is independently versioned; its
+version need not match the app or any Maven artifact. `bb release` neither creates
+the CLI GitHub release nor pushes the Docker image.
+
+This upload is intentionally separate from Maven deployment. If a package release
+partially publishes Maven artifacts, follow the manual recovery steps in the
+[release guide](../docs/releasing.md#failure-recovery) before creating a CLI release.
 
 ### Development
+
+Building requires JDK 21 or newer, Clojure CLI, and Babashka. Run the pod artifact
+startup test with:
+
+```shell
+bb test:module collet-cli
+```
 
 When you are developing the collet-cli, you can use the following command to run the CLI.
 
