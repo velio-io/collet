@@ -69,6 +69,48 @@ In addition:
 Build outputs and tests use package-local `target` and temporary directories. Tests
 create and remove their own fixtures; no pre-existing `tmp` directory is required.
 
+## Branch names
+
+Create branches from an up-to-date `main` using this form:
+
+```text
+<kind>/<issue-number>-<short-description>
+```
+
+Use lowercase kebab-case and keep the description short enough to scan in GitHub.
+Use one of these kinds:
+
+| Kind | Use for | Example |
+|---|---|---|
+| `feature` | New user-visible behavior | `feature/43-modular-action-artifacts` |
+| `fix` | Bug fixes | `fix/118-odata-pagination` |
+| `docs` | Documentation-only changes | `docs/122-release-recovery` |
+| `test` | Test-only changes | `test/96-http-retry` |
+| `refactor` | Internal restructuring with no behavior change | `refactor/81-action-registration` |
+| `ci` | CI and automation changes | `ci/77-jdk-21-cache` |
+| `chore` | Maintenance that does not fit another kind | `chore/update-testcontainers` |
+
+Include the GitHub issue number when the work has one. For small untracked
+maintenance, omit only the number, as in `chore/update-testcontainers`. Tool-managed
+branches may use the tool's required prefix while keeping the same issue-and-summary
+shape, for example `codex/43-deps-modules`.
+
+For example, start issue #43 and publish its branch with:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c feature/43-modular-action-artifacts
+git push -u origin feature/43-modular-action-artifacts
+```
+
+Keep one logical change per branch and open its pull request against `main`. Do not
+reuse a merged branch for later work; update `main` and create a new branch instead.
+The branch kind is for navigation only: Kmono determines release versions from
+conventional commits or the squash-merge pull-request title. For example, a feature
+branch intended to produce a minor release should use a title such as
+`feat: add modular action artifacts`.
+
 ## Changing a package
 
 Keep runtime implementation and package-specific tests/resources in the owning
