@@ -107,9 +107,51 @@ git push -u origin feature/43-modular-action-artifacts
 Keep one logical change per branch and open its pull request against `main`. Do not
 reuse a merged branch for later work; update `main` and create a new branch instead.
 The branch kind is for navigation only: Kmono determines release versions from
-conventional commits or the squash-merge pull-request title. For example, a feature
-branch intended to produce a minor release should use a title such as
-`feat: add modular action artifacts`.
+the resulting Git commit messages, not from the branch name.
+
+### Pull request titles and Kmono versions
+
+When a pull request is squash-merged, its final title becomes the squash commit's
+subject and therefore controls Kmono's version calculation. Before merging, edit the
+title to describe the release impact. If the repository uses rebase or merge commits
+instead, Kmono reads the commit messages that actually land on `main`; the live pull
+request title has no special meaning by itself.
+
+Assuming the changed package's latest tag is `1.2.3`, these squash-merge titles
+produce the following results:
+
+| Pull request title | Package changes | Kmono result |
+|---|---|---|
+| `fix: handle an empty HTTP response` | Runtime source or resources | Patch release `1.2.4` |
+| `feat: add OAuth bearer-token support` | Runtime source or resources | Minor release `1.3.0` |
+| `feat!: replace the pipeline configuration schema` | Breaking runtime/API change | Major release `2.0.0` |
+| `docs: explain HTTP authentication` | Markdown only | No release; Markdown is ignored |
+| `test: cover retry exhaustion` | Files under `test/` only | No release; test changes are ignored |
+| `docs: explain HTTP authentication` | Runtime source also changed | `bb release:plan` fails because the runtime change has no release-producing title |
+
+For a major release, putting `!` before the colon is the clearest title form:
+`fix!: remove a deprecated action option`, `feat!: change the pipeline API`, or
+`refactor!: replace the action registration contract`. A conventional commit with a
+`BREAKING CHANGE:` footer also produces a major release, but that footer must be
+present in the final squash commit message; it is not inferred from the pull request
+description.
+
+When several release-producing commits have accumulated since a package's latest
+tag, the highest change wins. Starting from `1.2.3`, a `fix:` followed by a `feat:`
+produces `1.3.0`; adding any `!` or `BREAKING CHANGE:` commit produces `2.0.0`.
+
+Kmono also patches unchanged dependent packages whose generated POMs must point to
+the new exact dependency version. For example, if `io.velio/collet-action-lucene` is
+at `0.4.1` and a pull request titled `feat: add fuzzy Lucene queries` changes it,
+Kmono plans `collet-action-lucene` `0.5.0`. If `io.velio/collet-actions` is at
+`0.7.2`, it is automatically planned at `0.7.3` even when that aggregate's source
+was untouched. A dependent with its own `feat:` or breaking change receives that
+higher bump instead of only the automatic patch.
+
+The first modular release is the exception: when no Kmono package tags exist, every
+package is bootstrapped at `0.2.8`. Title-based increments apply after those initial
+package tags have been created. Always run `bb release:plan` before merging or
+releasing to confirm the exact affected packages and versions.
 
 ## Changing a package
 
