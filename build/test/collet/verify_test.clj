@@ -18,7 +18,14 @@
               :kind :library}
    :deps-edn {:paths ["src"]
               :deps {'example/core {:local/root "../core"}
-                     'external/dep {:mvn/version "4.5.6"}}}})
+                     'external/dep {:mvn/version "4.5.6"}
+                     ;; Mirrors Vega's public POM-only runtime coordinate.
+                     'example/vega-runtime {:mvn/version "24.2.2"
+                                            :extension "pom"}
+                     ;; Mirrors the queue artifact's preserved exclusions.
+                     'example/queue {:mvn/version "0.2.1"
+                                     :exclusions ['example/encore
+                                                  'example/chronicle]}}}})
 
 (def context
   {:packages {'example/core {:fqn 'example/core :version "1.7.2"}
@@ -57,14 +64,33 @@
 
 (defn- pom-text
   ([] (pom-text {}))
-  ([{:keys [app-version core-version suffix]
-     :or {app-version "3.2.1" core-version "1.7.2" suffix ""}}]
+  ([{:keys [app-version core-version external-version include-external?
+            vega-type queue-exclusions suffix]
+     :or {app-version "3.2.1"
+          core-version "1.7.2"
+          external-version "4.5.6"
+          include-external? true
+          vega-type "pom"
+          queue-exclusions ['example/encore 'example/chronicle]
+          suffix ""}}]
    (str "<project><groupId>example</groupId><artifactId>app</artifactId>"
         "<version>" app-version "</version><dependencies>"
         "<dependency><groupId>example</groupId><artifactId>core</artifactId>"
         "<version>" core-version "</version></dependency>"
-        "<dependency><groupId>external</groupId><artifactId>dep</artifactId>"
-        "<version>4.5.6</version></dependency>"
+        (when include-external?
+          (str "<dependency><groupId>external</groupId><artifactId>dep</artifactId>"
+               "<version>" external-version "</version></dependency>"))
+        "<dependency><groupId>example</groupId><artifactId>vega-runtime</artifactId>"
+        "<version>24.2.2</version><type>" vega-type "</type></dependency>"
+        "<dependency><groupId>example</groupId><artifactId>queue</artifactId>"
+        "<version>0.2.1</version><exclusions>"
+        (apply str
+               (map (fn [excluded]
+                      (str "<exclusion><groupId>" (namespace excluded)
+                           "</groupId><artifactId>" (name excluded)
+                           "</artifactId></exclusion>"))
+                    queue-exclusions))
+        "</exclusions></dependency>"
         "</dependencies>" suffix "</project>")))
 
 (defn- mode! [path mode]
@@ -85,7 +111,15 @@
           [["wrong coordinate" {:app-version "3.2.2"}
             "POM Maven coordinates do not match"]
            ["wrong internal version" {:core-version "3.2.1"}
-            "POM internal dependency versions differ"]
+            "POM direct dependencies differ"]
+           ["wrong external version" {:external-version "9.9.9"}
+            "POM direct dependencies differ"]
+           ["removed external dependency" {:include-external? false}
+            "POM direct dependencies differ"]
+           ["Vega POM extension changed" {:vega-type "jar"}
+            "POM direct dependencies differ"]
+           ["queue exclusion removed" {:queue-exclusions ['example/encore]}
+            "POM direct dependencies differ"]
            ["snapshot leakage" {:suffix "<!-- SNAPSHOT -->"}
             "POM leaks a local-root or snapshot dependency"]
            ["local-root leakage" {:suffix "<local-root>../core</local-root>"}

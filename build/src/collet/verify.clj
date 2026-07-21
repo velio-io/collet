@@ -69,6 +69,10 @@
 (defn- child-text [element tag]
   (element-text (only-child element tag)))
 
+(defn- optional-child-text [element tag]
+  (when-let [child (first (child-elements element tag))]
+    (element-text child)))
+
 (defn- parse-pom [pom]
   (let [project (xml/parse-str pom
                                :support-dtd false
@@ -86,29 +90,38 @@
 (defn- expected-coordinate [{:keys [fqn version]}]
   {:group (namespace fqn) :artifact (name fqn) :version version})
 
+(defn- dependency-data [dependency]
+  {:lib (symbol (str (child-text dependency "groupId") "/"
+                     (child-text dependency "artifactId")))
+   :version (child-text dependency "version")
+   :extension (or (optional-child-text dependency "type") "jar")
+   :exclusions (if-let [container (first (child-elements dependency "exclusions"))]
+                 (into #{}
+                       (map #(symbol (str (child-text % "groupId") "/"
+                                          (child-text % "artifactId"))))
+                       (child-elements container "exclusion"))
+                 #{})})
+
 (defn- pom-dependencies [project]
   (if-let [container (first (child-elements project "dependencies"))]
-    (mapv (fn [dependency]
-            [(symbol (str (child-text dependency "groupId") "/"
-                          (child-text dependency "artifactId")))
-             (child-text dependency "version")])
-          (child-elements container "dependency"))
+    (mapv dependency-data (child-elements container "dependency"))
     []))
 
-(defn- expected-internal-dependencies [{:keys [packages]} package]
-  (->> (get-in package [:deps-edn :deps])
-       (keep (fn [[fqn _]]
-               (when-let [dependency (get packages fqn)]
-                 [fqn (:version dependency)])))
-       vec))
+(defn- expected-dependencies [{:keys [packages]} package]
+  (mapv (fn [[lib dependency]]
+          {:lib lib
+           :version (or (:mvn/version dependency)
+                        (get-in packages [lib :version]))
+           :extension (or (:extension dependency) "jar")
+           :exclusions (set (:exclusions dependency))})
+        (get-in package [:deps-edn :deps])))
 
 (defn verify-pom!
-  "Verify public Maven coordinates and internal dependency versions."
+  "Verify public Maven coordinates and exact direct dependencies."
   [context package pom]
   (let [project (parse-pom pom)
         expected (expected-coordinate package)
-        actual (pom-coordinate project)
-        internal? #(contains? (:packages context) (first %))]
+        actual (pom-coordinate project)]
     (ensure! (= expected actual)
              "POM Maven coordinates do not match"
              {:package (:fqn package) :expected expected :actual actual})
@@ -117,10 +130,13 @@
                       (str/includes? pom "local-root")))
              "POM leaks a local-root or snapshot dependency"
              {:package (:fqn package)})
-    (ensure! (= (frequencies (expected-internal-dependencies context package))
-                (frequencies (filter internal? (pom-dependencies project))))
-             "POM internal dependency versions differ"
-             {:package (:fqn package)})
+    (let [expected-deps (expected-dependencies context package)
+          actual-deps (pom-dependencies project)]
+      (ensure! (= (frequencies expected-deps) (frequencies actual-deps))
+               "POM direct dependencies differ"
+               {:package (:fqn package)
+                :expected expected-deps
+                :actual actual-deps}))
     true))
 
 (defn- namespace-entry [namespace]
