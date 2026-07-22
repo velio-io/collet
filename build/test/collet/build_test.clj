@@ -89,6 +89,18 @@
          (set (get-in (edn/read-string (slurp "deps.edn"))
                       [:kmono/workspace :ignore-changes])))))
 
+(deftest integration-tests-prefetch-git-dependencies-before-parallel-packages
+  (let [init-form (:init (:tasks (edn/read-string (slurp "bb.edn"))))
+        task-form (some #(when (and (seq? %)
+                                    (= 'defn (first %))
+                                    (= 'test-integration! (second %)))
+                           %)
+                        (rest init-form))]
+    (is (= '((shell "clojure" "-P" "-X:build-test")
+             (shell "clojure" "-M:kmono" "run" "--M" ":test:integration"
+                    "--" "-i" ":integration"))
+           (take-last 2 (drop 3 task-form))))))
+
 (deftest load-packages-bootstraps-the-full-workspace-at-0-2-8
   (with-workspace
     (fn [root]
