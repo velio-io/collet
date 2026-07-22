@@ -499,7 +499,8 @@ You can change this using the `JMX_PORT` environment variable.
 ### Collet as a library
 
 Collet core library heavily relies on latest Java features, such as virtual threads.
-So you'll need JDK 21 or higher to run it.
+Java 25 is the new minimum supported version, which is a compatibility break from
+previous releases. You'll need JDK 25 or higher to run it.
 Add the following dependency to your project:
 Replace `VERSION` with the release version you use.
 

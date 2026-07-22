@@ -95,8 +95,10 @@ license attribution and provenance under `META-INF`. Graal versions remain pinne
   `pod.collet.core`.
 - The CLI archive remains `collet-cli/target/collet-cli.tar.gz`, rooted at
   `collet-cli/`, with executable `collet.bb` and `gum` files.
-- Docker uses a Clojure CLI/JDK 21 builder and retains the existing runtime image,
-  JVM options, JMX setup, entrypoint, and environment contract.
+- Docker uses a Clojure CLI/JDK 25 builder and Java 25 runtime image, retaining the
+  existing JVM options, JMX setup, entrypoint, and environment contract. Java 25 is
+  the new minimum supported version, which is a compatibility break from previous
+  releases.
 
 ## Version policy
 

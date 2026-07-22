@@ -7,7 +7,8 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
 
 ## Prerequisites
 
-- JDK 21 or newer. CI runs on JDK 21.
+- JDK 25 or newer. CI runs on JDK 25. Java 25 is the new minimum supported
+  version, which is a compatibility break from previous releases.
 - Clojure CLI.
 - Babashka.
 - Docker for PostgreSQL, MySQL, LocalStack, application/CLI startup, and image
@@ -87,7 +88,7 @@ Use one of these kinds:
 | `docs` | Documentation-only changes | `docs/122-release-recovery` |
 | `test` | Test-only changes | `test/96-http-retry` |
 | `refactor` | Internal restructuring with no behavior change | `refactor/81-action-registration` |
-| `ci` | CI and automation changes | `ci/77-jdk-21-cache` |
+| `ci` | CI and automation changes | `ci/77-jdk-25-cache` |
 | `chore` | Maintenance that does not fit another kind | `chore/update-testcontainers` |
 
 Include the GitHub issue number when the work has one. For small untracked
