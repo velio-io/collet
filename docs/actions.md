@@ -612,7 +612,7 @@ The request map can contain the following keys:
 ```clojure
 {:name  :products-bought-by-users
  :deps  {:coordinates [[io.velio/collet-actions "VERSION"]
-                       [com.mysql/mysql-connector-j "9.0.0"]]}
+                       [com.mysql/mysql-connector-j "9.7.0"]]}
  :tasks [{:name    :query
           :actions [{:name   :query-action
                      :type   :collet.actions.jdbc/query

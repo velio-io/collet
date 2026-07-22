@@ -20,7 +20,7 @@
               :deps {'example/core {:local/root "../core"}
                      'external/dep {:mvn/version "4.5.6"}
                      ;; Mirrors Vega's public POM-only runtime coordinate.
-                     'example/vega-runtime {:mvn/version "24.2.2"
+                     'example/vega-runtime {:mvn/version "25.1.3"
                                             :extension "pom"}
                      ;; Mirrors the queue artifact's preserved exclusions.
                      'example/queue {:mvn/version "0.2.1"
@@ -81,7 +81,7 @@
           (str "<dependency><groupId>external</groupId><artifactId>dep</artifactId>"
                "<version>" external-version "</version></dependency>"))
         "<dependency><groupId>example</groupId><artifactId>vega-runtime</artifactId>"
-        "<version>24.2.2</version><type>" vega-type "</type></dependency>"
+        "<version>25.1.3</version><type>" vega-type "</type></dependency>"
         "<dependency><groupId>example</groupId><artifactId>queue</artifactId>"
         "<version>0.2.1</version><exclusions>"
         (apply str

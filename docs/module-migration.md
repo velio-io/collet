@@ -85,7 +85,7 @@ versions. This conversion is owned by Kmono, not a Collet dependency-rewrite lay
 The former unpublished `lib/darkstar.jar` is not part of the build. The Vega module
 packages the required existing source/resources directly and includes upstream MIT
 license attribution and provenance under `META-INF`. Graal versions remain pinned at
-24.2.2. Vega tests compare rendered output with the preserved golden result.
+25.1.3. Vega tests compare rendered output with the preserved golden result.
 
 ## Application and CLI contracts
 
