@@ -5,9 +5,9 @@
   :kind :library}
 
  :paths ["src"]
- :deps {org.clojure/clojure            {:mvn/version "1.12.0"}
+ :deps {org.clojure/clojure            {:mvn/version "1.12.5"}
         io.velio/collet-core           {:local/root "../collet-core"}
-        metosin/malli                  {:mvn/version "0.16.4"}
+        metosin/malli                  {:mvn/version "0.20.1"}
         com.schibsted.spt.data/jslt    {:mvn/version "0.1.14"}}
  :aliases
  {:test {:extra-paths ["test"]

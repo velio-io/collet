@@ -5,16 +5,16 @@
   :kind :library}
 
  :paths ["src"]
- :deps {org.clojure/clojure          {:mvn/version "1.12.0"}
+ :deps {org.clojure/clojure          {:mvn/version "1.12.5"}
         io.velio/collet-core         {:local/root "../collet-core"}
-        techascent/tech.ml.dataset   {:mvn/version "7.032"}
+        techascent/tech.ml.dataset   {:mvn/version "8.024"}
         io.zalky/cues                {:mvn/version "0.2.1"
                                       :exclusions [com.taoensso/encore
                                                    net.openhft/chronicle-queue]}
-        com.taoensso/encore          {:mvn/version "3.122.0"}
-        net.openhft/chronicle-queue  {:mvn/version "5.26ea5"
+        com.taoensso/encore          {:mvn/version "3.169.1"}
+        net.openhft/chronicle-queue  {:mvn/version "2026.5"
                                       :exclusions [net.openhft/chronicle-analytics]}
-        org.slf4j/slf4j-nop          {:mvn/version "2.0.16"}}
+        org.slf4j/slf4j-nop          {:mvn/version "2.0.18"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
@@ -27,6 +27,6 @@
                     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
                     "--add-opens=java.base/java.io=ALL-UNNAMED"
                     "--add-opens=java.base/java.util=ALL-UNNAMED"
-                    "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
                     "--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "cognitect.test-runner"]}}}

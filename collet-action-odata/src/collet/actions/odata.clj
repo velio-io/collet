@@ -107,19 +107,24 @@
 
 
 (def segment-parser
-  (m/parser segment-spec {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser segment-spec {:registry registry})))
 
 (def filter-parser
-  (m/parser filter-spec {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser filter-spec {:registry registry})))
 
 (def select-parser
-  (m/parser select-spec {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser select-spec {:registry registry})))
 
 (def order-by-parser
-  (m/parser order-by-spec {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser order-by-spec {:registry registry})))
 
 (def expand-parser
-  (m/parser expand-spec {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser expand-spec {:registry registry})))
 
 
 (defn dispatch-fn [x]

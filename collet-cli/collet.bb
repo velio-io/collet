@@ -25,7 +25,7 @@
   "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
   "--add-opens=java.base/java.io=ALL-UNNAMED"
   "--add-opens=java.base/java.util=ALL-UNNAMED"
-  "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+  "--add-opens=java.base/java.nio=ALL-UNNAMED"
   "--enable-native-access=ALL-UNNAMED"
   "-jar" pod-jar-path])
 (require '[pod.collet.core :as collet])
