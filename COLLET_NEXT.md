@@ -33,7 +33,7 @@ The revival should retain Collet's strongest ideas:
 - virtual threads and bounded concurrency suit I/O-heavy workloads;
 - the runtime remains useful as an embedded Clojure library and a local CLI.
 
-Clojure remains the implementation language. It should not remain an adoption requirement: pipeline data, artifact contracts, telemetry, and future worker APIs should be language-neutral where practical.
+Clojure remains the implementation language. It should not remain an adoption requirement: pipeline data, artifact contracts, telemetry, and future worker APIs should be language-neutral where practical. Datalevin 1.0 already exposes local and remote APIs in Clojure, Java, Python, and JavaScript, which removes one database-access barrier for future worker SDKs without defining the Collet worker protocol for us.
 
 ## Desired architecture
 
@@ -42,7 +42,7 @@ flowchart TB
     SPEC["Versioned pipeline definition"] --> PLAN["Immutable compiled plan"]
     PLAN --> RUN["Pipeline run"]
 
-    RUN --> DLV["Datalevin coordination state"]
+    RUN --> DLV["Datalevin 1.x coordination state"]
     DLV <--> CPU["CPU workers"]
     DLV <--> GPU["GPU / model workers"]
     DLV <--> IDX["Index workers"]
@@ -123,6 +123,17 @@ Execution is **at least once**. Worker death, lease expiry, network partitions, 
 
 Datalevin stores coordination metadata, not workload payloads.
 
+The coordination baseline is [Datalevin 1.0.0](https://github.com/datalevin/datalevin/blob/1.0.0/CHANGELOG.md#100-2026-07-20), released on 2026-07-20. It requires Java 21, which already matches Collet. The release turns several former infrastructure assumptions into available platform capabilities, but it does not remove the need for Collet's own work, artifact, and reconciliation semantics:
+
+| Datalevin 1.0 capability | Collet decision |
+|---|---|
+| Attribute predicates, `:db/ensure`, CAS, and explicit-transaction timeouts | Enforce schema invariants and postconditions inside short claim, renewal, and commit transactions. Keep fencing tokens and idempotent materialization because database invariants do not fence external side effects. |
+| WAL watermarks, transaction-log access, snapshots, and log GC | Use them for database health, lag, backup, and recovery evidence. Durable Collet entities remain the workflow source of truth; the transaction log is not a second job-event model. |
+| Server, asynchronous read-only replicas, and consensus-lease HA | Use the server for shared workers and HA for production availability. Send all claims and commits to the write leader; replicas may serve stale-tolerant inspection and operational reads. |
+| Server-safe query resolution and registered UDFs | Prefer data transactions, built-ins, CAS, and `:db/ensure`. Any custom server-side coordination function must be versioned, registered on every server, and readiness-checked before a node may lead; workers must not depend on arbitrary client-side Clojure resolution. |
+| `datalog-kv` access to the underlying DLMDB store | A co-located sortable queue projection is now possible, but remains an optimization justified by profiling and rebuildable from Datalog. |
+| Java, Python, and JavaScript API parity | Future non-Clojure workers can use supported Datalevin clients, but they still need a versioned Collet work-unit/artifact contract and SDK-level atomic operations. |
+
 It should contain:
 
 - normalized pipeline definitions and content hashes;
@@ -134,19 +145,23 @@ It should contain:
 
 It should not contain terabytes of profiles, embedding matrices, large model responses, or search indexes.
 
-Datalog is initially both the source of truth and the ready-work queue. Workers present their capabilities when claiming; a persistent worker registry or heartbeat model is added only when autoscaling or operational evidence requires it. Workers query indexed candidate work and claim it in an atomic transaction. Datalevin KV may later become a sortable queue projection only if profiling proves it necessary. That projection must remain disposable: every claim is revalidated against Datalog, stale entries are harmless, and the entire KV index can be rebuilt from authoritative state.
+Datalog is initially both the source of truth and the ready-work queue. Workers present their capabilities when claiming; a persistent worker registry or heartbeat model is added only when autoscaling or operational evidence requires it. Workers query indexed candidate work and claim it in an atomic transaction with a bounded timeout. Claim, renewal, and terminal commit transactions use schema predicates and `:db/ensure` where they make invalid states unrepresentable. Datalevin KV may later become a sortable queue projection only if profiling proves it necessary. That projection must remain disposable: every claim is revalidated against Datalog, stale entries are harmless, and the entire KV index can be rebuilt from authoritative state.
 
-The recovery model must not assume every recently acknowledged coordination write survives every infrastructure failure. Durable artifacts and idempotent external materializations are therefore reconstructable inputs to reconciliation, not consequences that exist only because a run-state row says they do.
+Datalevin 1.0 HA is single-writer. Its consensus control plane decides who may write, while followers replicate the leader's WAL asynchronously. HA requires WAL and defaults to the `:strict` durability profile, but a successful write is not a quorum-replication acknowledgement. The recovery model therefore must not assume every recently acknowledged coordination write survives permanent loss of the leader before a follower has pulled its tail. Durable artifacts and idempotent external materializations are reconstructable inputs to reconciliation, not consequences that exist only because a run-state row says they do. Collet operations must monitor committed, durable, applied, follower, and authority-confirmed LSNs and make the accepted recovery-point window explicit.
 
 Deployment grows without changing the conceptual model:
 
 | Deployment | Run state | Artifacts | Execution |
 |---|---|---|---|
-| Local development | Embedded Datalevin | Local filesystem | One Collet process |
-| Small team | Datalevin server | S3-compatible store | A few pull-based workers |
-| Cluster | Datalevin HA / partitioned run stores | Object storage | Autoscaled capability-specific workers |
+| Local development | Embedded Datalevin 1.x | Local filesystem | One Collet process |
+| Small team | Datalevin 1.x server; optional read-only replicas | S3-compatible store | A few pull-based workers |
+| Cluster | Datalevin 1.x consensus-lease HA | Object storage | Autoscaled capability-specific workers |
 
 When a worker participates in a shared deployment, an optional embedded Datalevin database is only a local journal and cache. The shared database remains authoritative.
+
+Datalevin 1.0 HA has static, operator-managed membership and requires an idempotent external fencing hook for promotion. It is neither multi-leader storage nor automatic elastic membership. These constraints belong in the deployment and upgrade runbooks. Read-only replicas and HA followers can reduce inspection load, but readiness queries that precede a claim may be stale; the leader-side claim transaction is always authoritative.
+
+Datalevin 1.0 also includes document, full-text, vector, embedding, local-model, and MCP features. They do not change Collet's storage boundary. Collet may use selectively indexed documents for small, evolving control records after measurement, but workload documents, embeddings, model responses, and search indexes remain in artifact or serving systems.
 
 True scale-to-zero still requires an external observer—such as Kubernetes/KEDA, a cloud event, or one sentinel—to start workers when work arrives.
 
@@ -323,7 +338,7 @@ EDN remains the native authoring format. A versioned intermediate representation
 
 Action dependencies should be modular. Trusted local execution may retain dynamic JVM dependencies and custom functions. Shared or multi-tenant deployments require pinned dependencies, explicit secret references, capability-restricted workers, network policy, and isolation for arbitrary code.
 
-Clojure/JVM actions are the first worker implementation, not the permanent worker boundary. The artifact and work-unit contracts should later allow Python workers, OCI container jobs, HTTP actions, SQL jobs, and MCP tools to participate without moving large payloads through Datalevin. Cross-language support is added only for a real workload; it is not required to complete the local durable foundation.
+Clojure/JVM actions are the first worker implementation, not the permanent worker boundary. The artifact and work-unit contracts should later allow Python workers, OCI container jobs, HTTP actions, SQL jobs, and MCP tools to participate without moving large payloads through Datalevin. Datalevin 1.0's supported Java, Python, and JavaScript clients make this path more credible, but Collet still needs language-neutral claim and commit operations; it must not expose client-language transaction callbacks as the protocol. Cross-language support is added only for a real workload; it is not required to complete the local durable foundation.
 
 ## Product boundary
 
@@ -358,12 +373,12 @@ deployment. Dependency order matters more than issue number:
 ```
 
 - [#43](https://github.com/velio-io/collet/issues/43) modernizes the build and separates optional action dependencies.
-- [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
+- [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin 1.x on the existing Java 21 baseline, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
 - [#45](https://github.com/velio-io/collet/issues/45) selects the durable dataset format and task-local analytical integration using evidence.
 - [#46](https://github.com/velio-io/collet/issues/46) implements the selected nested and extended Arrow type boundary.
 - [#48](https://github.com/velio-io/collet/issues/48) establishes artifact, one-entry dataset snapshot, materialization, publication, and lineage identities for exact whole-task reuse.
 - [#47](https://github.com/velio-io/collet/issues/47) consumes #48 to add task-local DuckDB SQL; it is not a prerequisite for the artifact store.
-- [#49](https://github.com/velio-io/collet/issues/49) replaces the local scheduler authority with pull-based claims, leases, fencing, and durable attempts.
+- [#49](https://github.com/velio-io/collet/issues/49) replaces the local scheduler authority with pull-based claims, leases, fencing, and durable attempts, using bounded leader-side transactions and Datalevin 1.x invariant checks.
 - [#50](https://github.com/velio-io/collet/issues/50) extends #48 snapshots from one entry to deterministic partition entries, adds predecessor diffs, and schedules selective work through #49.
 - [#51](https://github.com/velio-io/collet/issues/51) adds durable retry, backoff, deadline, and cancellation policy.
 - [#52](https://github.com/velio-io/collet/issues/52) adds the S3-compatible artifact backend and proves shared-worker data exchange.
@@ -378,7 +393,7 @@ foundation exposes their exact contracts:
 
 - **Source discovery and initial snapshots** — turn files, object listings, database cursors, or manifests into deterministic source partitions. The existing file/S3 reading draft is related but does not yet define snapshot identity.
 - **External sink materialization** — idempotent Solr/index publication, explicit delete propagation, validation, and alias promotion.
-- **Datalevin evolution and operations** — store schema compatibility, migrations, backup/restore, client/server packaging, and the documented HA recovery point.
+- **Datalevin 1.x operations** — store schema compatibility and migration, backup/restore, WAL snapshot and retention policy, explicit durability profiles, LSN/replica-lag monitoring, static HA membership, fencing hooks, and a tested recovery-point runbook.
 - **Secrets and worker authorization** — secret references, least-privilege resolution, worker identity, and access to Datalevin, artifacts, providers, and sinks.
 - **AI execution economics** — provider-neutral model calls, batching, rate limits, request caching, token/cost accounting, quality gates, and model/prompt version policy.
 - **Retention and garbage collection** — reachability from snapshots/runs, retention policy, orphan quarantine, and safe deletion.
@@ -406,6 +421,7 @@ The architecture is working when one pipeline can process a multi-terabyte profi
 - bounded memory at every worker;
 - dynamic CPU, GPU/model, and indexing workers;
 - recovery after killing workers without losing committed outputs;
+- Datalevin leader failover preserves write authority, exposes any asynchronous-replication tail risk through LSN evidence, and lets reconciliation recover from durable artifacts within the documented recovery-point objective;
 - no stale worker can publish obsolete results;
 - unchanged partitions and model responses are reused during a backfill;
 - changing one source partition or one task definition recomputes only its transitive dependents;
