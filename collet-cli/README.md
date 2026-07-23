@@ -82,8 +82,9 @@ partially publishes Maven artifacts, follow the manual recovery steps in the
 
 ### Development
 
-Building requires JDK 21 or newer, Clojure CLI, and Babashka. Run the pod artifact
-startup test with:
+Building requires JDK 25 or newer, Clojure CLI, and Babashka. Java 25 is the new
+minimum supported version, which is a compatibility break from previous releases.
+Run the pod artifact startup test with:
 
 ```shell
 bb test:module collet-cli

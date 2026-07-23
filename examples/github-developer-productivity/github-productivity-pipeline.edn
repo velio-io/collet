@@ -1,6 +1,6 @@
 {:name  :devs-productivity-pipeline
  ;; add extra dependencies
- :deps  {:coordinates [[io.velio/collet-actions "0.2.7"]]
+ :deps  {:coordinates [[io.velio/collet-actions "0.2.9"]]
          :imports     [java.lang.Math
                        java.time.LocalDate
                        java.time.LocalDateTime
@@ -180,4 +180,3 @@
                                  :format      :csv
                                  :csv-header? true
                                  :file-name   "./reports/average-time-to-merge.csv"}}]}]}
-

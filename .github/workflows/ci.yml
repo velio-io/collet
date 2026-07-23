@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  JAVA_VERSION: "21"
+  JAVA_VERSION: "25"
 
 jobs:
   unit:

@@ -1014,7 +1014,8 @@
 
 
 (def expression-parser
-  (m/parser ::expression {:registry registry}))
+  (comp m/old-parse-format
+        (m/parser ::expression {:registry registry})))
 
 
 (defn dispatch-fn [x]

@@ -421,7 +421,7 @@
     (testing "execute pipeline with jdbc action"
       (let [pipeline (collet/compile-pipeline
                       {:name  :employees
-                       :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
+                       :deps  {:coordinates '[[com.mysql/mysql-connector-j "9.7.0"]]}
                        :tasks [{:name       :query
                                 :keep-state true
                                 :actions    [{:name      :query-action
@@ -499,7 +499,7 @@
     (testing "query with join tables"
       (let [pipeline (collet/compile-pipeline
                       {:name      :products-bought-by-users
-                       :deps      {:coordinates '[[com.mysql/mysql-connector-j "9.0.0"]]}
+                       :deps      {:coordinates '[[com.mysql/mysql-connector-j "9.7.0"]]}
                        :use-arrow false
                        :tasks     [{:name       :query
                                     :keep-state true

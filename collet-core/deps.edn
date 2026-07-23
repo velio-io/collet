@@ -6,22 +6,22 @@
 
  :paths ["src" "resources"]
  :deps
- {org.clojure/clojure                  {:mvn/version "1.12.0"}
-  weavejester/dependency               {:mvn/version "0.2.1"}
-  metosin/malli                        {:mvn/version "0.16.4"}
-  diehard/diehard                      {:mvn/version "0.11.12"}
-  clj-commons/pomegranate              {:mvn/version "1.2.24"}
-  org.babashka/sci                     {:mvn/version "0.9.44"}
-  com.brunobonacci/mulog               {:mvn/version "0.9.0"}
-  org.slf4j/slf4j-nop                  {:mvn/version "2.0.16"}
-  techascent/tech.ml.dataset           {:mvn/version "7.032"}
-  org.apache.arrow/arrow-vector        {:mvn/version "18.1.0"}
-  org.apache.arrow/arrow-memory-netty  {:mvn/version "18.1.0"}
+ {org.clojure/clojure                  {:mvn/version "1.12.5"}
+  weavejester/dependency               {:mvn/version "1.0.1"}
+  metosin/malli                        {:mvn/version "0.20.1"}
+  diehard/diehard                      {:mvn/version "0.12.1"}
+  clj-commons/pomegranate              {:mvn/version "1.3.27"}
+  org.babashka/sci                     {:mvn/version "0.15.56"}
+  com.brunobonacci/mulog               {:mvn/version "0.10.1"}
+  org.slf4j/slf4j-nop                  {:mvn/version "2.0.18"}
+  techascent/tech.ml.dataset           {:mvn/version "8.024"}
+  org.apache.arrow/arrow-vector        {:mvn/version "19.0.0"}
+  org.apache.arrow/arrow-memory-unsafe {:mvn/version "19.0.0"}
   com.cnuernber/jarrow                 {:mvn/version "1.000"}
-  org.apache.commons/commons-compress  {:mvn/version "1.21"}
-  org.lz4/lz4-java                     {:mvn/version "1.8.0"}
-  net.java.dev.jna/jna                 {:mvn/version "5.10.0"}
-  com.github.luben/zstd-jni            {:mvn/version "1.5.4-1"}}
+  org.apache.commons/commons-compress  {:mvn/version "1.28.0"}
+  at.yawk.lz4/lz4-java                  {:mvn/version "1.8.1"}
+  net.java.dev.jna/jna                 {:mvn/version "5.19.1"}
+  com.github.luben/zstd-jni            {:mvn/version "1.5.7-11"}}
  :aliases
  {:test
   {:extra-paths ["test"]
@@ -38,11 +38,11 @@
                  "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
                  "--add-opens=java.base/java.io=ALL-UNNAMED"
                  "--add-opens=java.base/java.util=ALL-UNNAMED"
-                 "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED"
+                 "--add-opens=java.base/java.nio=ALL-UNNAMED"
                  "--enable-native-access=ALL-UNNAMED"]
    :main-opts   ["-m" "cognitect.test-runner"]}
   :dev
   {:extra-paths ["dev/src"]
    :extra-deps  {eftest/eftest                 {:mvn/version "0.6.0"}
                  vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
-                 djblue/portal                 {:mvn/version "0.58.2"}}}}}
+                 djblue/portal                 {:mvn/version "0.67.0"}}}}}

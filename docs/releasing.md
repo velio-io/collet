@@ -39,7 +39,8 @@ dependency graph, publication client, release transaction, or recovery journal.
 
 ## Prerequisites
 
-- JDK 21 or newer, Clojure CLI, and Babashka.
+- JDK 25 or newer, Clojure CLI, and Babashka. Java 25 is the new minimum supported
+  version, which is a compatibility break from previous releases.
 - Docker for `bb test` and the integration suite.
 - A clean local `main` exactly synchronized with `origin/main`.
 - Clojars credentials in Maven's standard `~/.m2/settings.xml` file.

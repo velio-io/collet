@@ -1,7 +1,8 @@
 # Application deployment
 
-The application requires JDK 21 or newer. Build its preserved uberjar filename from
-the repository root:
+The application requires JDK 25 or newer. Java 25 is the new minimum supported
+version, which is a compatibility break from previous releases. Build its preserved
+uberjar filename from the repository root:
 
 ```shell
 bb build collet-app
@@ -30,9 +31,9 @@ docker run --rm \
   collet
 ```
 
-The builder uses Clojure CLI with JDK 21. The runtime image preserves the existing
-JVM options, JMX agent on port 8080, `/tini` entrypoint, environment variables, and
-startup command.
+The builder uses Clojure CLI with JDK 25 and the runtime image uses Java 25. The
+runtime image preserves the existing JVM options, JMX agent on port 8080, `/tini`
+entrypoint, environment variables, and startup command.
 
 Docker is required for this workflow. The repository release command creates the app
 package tag but never builds or pushes a registry image; image publication is a

@@ -22,6 +22,7 @@
 
     (defn test-integration! []
       (shell "clojure" "-T:build" "build" ":module" ":collet-cli")
+      (shell "clojure" "-P" "-X:build-test")
       (shell "clojure" "-M:kmono" "run" "--M" ":test:integration"
              "--" "-i" ":integration")))
 

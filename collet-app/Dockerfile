@@ -2,7 +2,7 @@ ARG COLLET_CORE_VERSION="0.0.0-local"
 ARG COLLET_VERSION="0.0.0-local"
 ARG COLLET_REVISION="docker-build"
 
-FROM clojure:temurin-21-tools-deps AS builder
+FROM clojure:temurin-25-tools-deps AS builder
 
 ARG COLLET_CORE_VERSION
 ARG COLLET_VERSION
@@ -21,7 +21,7 @@ RUN clojure -T:build build :module :collet-app \
                   io.velio/collet-app \"${COLLET_VERSION}\"}"
 
 
-FROM eclipse-temurin:21.0.5_11-jre
+FROM eclipse-temurin:25.0.3_9-jre
 
 ARG COLLET_VERSION
 ARG COLLET_REVISION
@@ -45,11 +45,13 @@ RUN mkdir /app/jmx
 COPY collet-app/resources/jmx_prometheus_javaagent-0.20.0.jar /app/jmx/jmx_prometheus_javaagent-0.20.0.jar
 COPY collet-app/resources/jmx.yaml /app/jmx/jmx.yaml
 
-
 ARG TARGETPLATFORM
 ARG TINI_ARCH
+ARG WGET_VERSION=1.25.0-2ubuntu4.3
 
-RUN echo "Building for ${TARGETPLATFORM}" && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget="${WGET_VERSION}" && \
+    echo "Building for ${TARGETPLATFORM}" && \
     case ${TARGETPLATFORM} in \
          "linux/amd64")  TINI_ARCH=amd64  ;; \
          "linux/arm64")  TINI_ARCH=arm64  ;; \
@@ -57,7 +59,9 @@ RUN echo "Building for ${TARGETPLATFORM}" && \
          "linux/arm/v6") TINI_ARCH=armel  ;; \
          "linux/386")    TINI_ARCH=i386   ;; \
     esac && \
-    wget -O /tini https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TINI_ARCH}
+    wget -O /tini https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TINI_ARCH} && \
+    apt-get purge -y --auto-remove wget && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN chmod +x /tini
 
@@ -76,7 +80,7 @@ CMD java \
 --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
 --add-opens=java.base/java.io=ALL-UNNAMED \
 --add-opens=java.base/java.util=ALL-UNNAMED \
---add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED \
+--add-opens=java.base/java.nio=ALL-UNNAMED \
 --enable-native-access=ALL-UNNAMED \
 -javaagent:/app/jmx/jmx_prometheus_javaagent-0.20.0.jar=$JMX_PORT:/app/jmx/jmx.yaml \
 -jar collet.jar -s "${PIPELINE_SPEC}" -c "${PIPELINE_CONFIG}"

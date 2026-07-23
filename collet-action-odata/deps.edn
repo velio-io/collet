@@ -5,10 +5,10 @@
   :kind :library}
 
  :paths ["src"]
- :deps {org.clojure/clojure         {:mvn/version "1.12.0"}
+ :deps {org.clojure/clojure         {:mvn/version "1.12.5"}
         io.velio/collet-core        {:local/root "../collet-core"}
         io.velio/collet-action-http {:local/root "../collet-action-http"}
-        metosin/malli               {:mvn/version "0.16.4"}}
+        metosin/malli               {:mvn/version "0.20.1"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}

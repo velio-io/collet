@@ -14,10 +14,10 @@
            {:from "gum" :to "gum" :mode "rwxr-xr-x"}]}}
 
  :paths ["src"]
- :deps {org.clojure/clojure    {:mvn/version "1.12.0"}
+ :deps {org.clojure/clojure    {:mvn/version "1.12.5"}
         io.velio/collet-app    {:local/root "../collet-app"}
-        nrepl/bencode          {:mvn/version "1.1.0"}
-        djblue/portal          {:mvn/version "0.58.2"}}
+        nrepl/bencode          {:mvn/version "1.2.0"}
+        djblue/portal          {:mvn/version "0.67.0"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
