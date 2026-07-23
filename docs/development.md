@@ -11,6 +11,9 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
   version, which is a compatibility break from previous releases.
 - Clojure CLI.
 - Babashka.
+- `clj-paren-repair` for the agent Clojure workflow.
+- `clj-nrepl-eval` is the preferred eval client; the repository includes a
+  Babashka fallback when it is unavailable.
 - Docker for PostgreSQL, MySQL, LocalStack, application/CLI startup, and image
   integration tests.
 
@@ -37,6 +40,7 @@ Run build, workspace, verification, and release commands from the repository roo
 
 | Command | Behavior |
 |---|---|
+| `clojure -M:dev:nrepl` | Starts a loopback-only worktree nREPL with project-scoped reload tooling. |
 | `bb kmono query` | Prints Kmono's resolved package graph. Additional Kmono query arguments may follow. |
 | `bb test:unit` | Runs build-tool tests once and every package in a separate JVM, excluding `^:integration` tests; Docker is not required. |
 | `bb test:integration` | Builds app/CLI outputs, then runs only integration tests in integration-bearing packages; Docker is required. |
@@ -52,6 +56,11 @@ Package selectors are directory names such as `collet-core`,
 `collet-action-http`, `collet-actions`, `collet-app`, and `collet-cli`. Package-local
 `clojure -M:test` remains useful while developing one module; the table above is the
 supported repository orchestration contract.
+
+Agent-driven Clojure work is REPL-first. See the
+[REPL workflow](./repl-workflow.md) for worktree isolation, port discovery,
+evaluation clients, project-scoped `(user/reload)`, parenthesis repair, and
+sandbox recovery.
 
 ## Build outputs
 

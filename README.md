@@ -567,6 +567,7 @@ the CLI GitHub release and pushing the Docker image are later, explicit operatio
 from their respective package tags.
 
 ```shell
+clojure -M:dev:nrepl
 bb kmono query
 bb test:unit
 bb test:integration
@@ -579,11 +580,14 @@ bb release:plan
 bb release
 ```
 
-See [development](./docs/development.md), [module migration](./docs/module-migration.md),
-and [release](./docs/releasing.md) for prerequisites, the complete command contract,
-versioning, Kaven publication, fail-fast manual recovery after partial Maven publication, Docker tests,
-and compatibility guidance. `bb release` never uploads the CLI archive or a Docker
-image; those are explicit workflows from their independently versioned package tags.
+See [development](./docs/development.md), the agent
+[REPL workflow](./docs/repl-workflow.md),
+[module migration](./docs/module-migration.md), and
+[release](./docs/releasing.md) for prerequisites, the complete command contract,
+interactive reloads, parenthesis repair, versioning, Kaven publication, fail-fast
+manual recovery after partial Maven publication, Docker tests, and compatibility
+guidance. `bb release` never uploads the CLI archive or a Docker image; those are
+explicit workflows from their independently versioned package tags.
 
 ## License
 
