@@ -123,7 +123,7 @@ Execution is **at least once**. Worker death, lease expiry, network partitions, 
 
 Datalevin stores coordination metadata, not workload payloads.
 
-The coordination baseline is [Datalevin 1.0.0](https://github.com/datalevin/datalevin/blob/1.0.0/CHANGELOG.md#100-2026-07-20), released on 2026-07-20. It requires Java 21, which already matches Collet. The release turns several former infrastructure assumptions into available platform capabilities, but it does not remove the need for Collet's own work, artifact, and reconciliation semantics:
+The coordination baseline is [Datalevin 1.0.0](https://github.com/datalevin/datalevin/blob/1.0.0/CHANGELOG.md#100-2026-07-20), released on 2026-07-20. It requires Java 25, which already matches Collet. The release turns several former infrastructure assumptions into available platform capabilities, but it does not remove the need for Collet's own work, artifact, and reconciliation semantics:
 
 | Datalevin 1.0 capability | Collet decision |
 |---|---|
@@ -373,7 +373,7 @@ deployment. Dependency order matters more than issue number:
 ```
 
 - [#43](https://github.com/velio-io/collet/issues/43) modernizes the build and separates optional action dependencies.
-- [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin 1.x on the existing Java 21 baseline, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
+- [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin 1.x on the existing Java 25 baseline, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
 - [#45](https://github.com/velio-io/collet/issues/45) selects the durable dataset format and task-local analytical integration using evidence.
 - [#46](https://github.com/velio-io/collet/issues/46) implements the selected nested and extended Arrow type boundary.
 - [#48](https://github.com/velio-io/collet/issues/48) establishes artifact, one-entry dataset snapshot, materialization, publication, and lineage identities for exact whole-task reuse.
