@@ -94,8 +94,8 @@
                                     :iterator     {:next false}
                                     :return       [:state :events-request]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {:city "London"})
-            {:keys [area-events]} pipeline]
+            run           (tf/run-pipeline! pipeline {:city "London"})
+            {:keys [area-events]} run]
         (is (= (count area-events) 10))
         (reset! events area-events)))
 
@@ -125,8 +125,8 @@
                                               :return     [{:artist-rate [:state :artist-details :rating :value]
                                                             :event-id    [:$mapper/item :id]}]}]}
             pipeline                (collet/compile-pipeline pipeline-spec)
-            _                       @(pipeline {:events @events})
-            {:keys [event-artists-rating]} pipeline
+            run                     (tf/run-pipeline! pipeline {:events @events})
+            {:keys [event-artists-rating]} run
             event-artists-rating-ds (first (collet/arrow->dataset event-artists-rating))
             events-with-artists-num (->> (mapcat :relations @events)
                                          (filter (comp identity :artist))
@@ -156,18 +156,18 @@
                                                    :name      :calculated-rating
                                                    :selectors {'event-ratings [:$mapper/item]}
                                                    :params    ['event-ratings]
-                                                   :fn        (fn [{:keys [event-id artist-rate]}]
-                                                                (let [rating (if (seq artist-rate)
-                                                                               (double (/ (apply + artist-rate)
-                                                                                          (count artist-rate)))
-                                                                               0)]
-                                                                  {:event-id event-id
-                                                                   :rating   rating}))}]
+                                                   :fn        '(fn [{:keys [event-id artist-rate]}]
+                                                                 (let [rating (if (seq artist-rate)
+                                                                                (double (/ (apply + artist-rate)
+                                                                                           (count artist-rate)))
+                                                                                0)]
+                                                                   {:event-id event-id
+                                                                    :rating   rating}))}]
                                      :iterator   {:next [:true? [:$mapper/has-next-item]]}
                                      :return     [:state :calculated-rating]}]}
             pipeline       (collet/compile-pipeline pipeline-spec)
-            _              @(pipeline {:artists @artists})
-            {:keys [best-events]} pipeline
+            run            (tf/run-pipeline! pipeline {:artists @artists})
+            {:keys [best-events]} run
             best-events-ds (first (collet/arrow->dataset best-events))]
         (is (every? #(contains? % :rating) (ds/rows best-events-ds))
             "All events should have a rating")
@@ -262,20 +262,20 @@
                                                     :name      :event-with-rating
                                                     :selectors {'event-ratings [:$mapper/item]}
                                                     :params    ['event-ratings]
-                                                    :fn        (fn [{:keys [artist] :as event}]
-                                                                 (let [ratings (->> artist
-                                                                                    (map (comp :value :rating))
-                                                                                    (filter number?))
-                                                                       rating  (if (seq ratings)
-                                                                                 (double (/ (apply + ratings)
-                                                                                            (count ratings)))
-                                                                                 0)]
-                                                                   (assoc event :rating rating)))}]
+                                                    :fn        '(fn [{:keys [artist] :as event}]
+                                                                  (let [ratings (->> artist
+                                                                                     (map (comp :value :rating))
+                                                                                     (filter number?))
+                                                                        rating  (if (seq ratings)
+                                                                                  (double (/ (apply + ratings)
+                                                                                             (count ratings)))
+                                                                                  0)]
+                                                                    (assoc event :rating rating)))}]
                                       :iterator   {:next [:true? [:$mapper/has-next-item]]}}]}
-          pipeline      (collet/compile-pipeline pipeline-spec)]
-      @(pipeline {:city "London"})
+          pipeline      (collet/compile-pipeline pipeline-spec)
+          run           (tf/run-pipeline! pipeline {:city "London"})]
 
-      (let [{:keys [area-events events-with-artists rated-events]} pipeline
+      (let [{:keys [area-events events-with-artists rated-events]} run
             events-with-artists-num (->> (mapcat :relations area-events)
                                          (filter (comp identity :artist))
                                          (count))

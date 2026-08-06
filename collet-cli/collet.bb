@@ -26,6 +26,7 @@
   "--add-opens=java.base/java.io=ALL-UNNAMED"
   "--add-opens=java.base/java.util=ALL-UNNAMED"
   "--add-opens=java.base/java.nio=ALL-UNNAMED"
+  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
   "--enable-native-access=ALL-UNNAMED"
   "-jar" pod-jar-path])
 (require '[pod.collet.core :as collet])

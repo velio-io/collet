@@ -325,7 +325,7 @@
                                                                        :y {:field "users/age", :type "quantitative"}}}
                                                      :svg-file-path "./tmp/vega-sink-test.svg"}}]}]})]
 
-      @(pipeline {:connection connection-map})
+      (tf/run-pipeline! pipeline {:connection connection-map})
 
       (is (= "3A9089DC5AA1150F08417FADCBF358F9" (file->md5 "./tmp/vega-sink-test.svg")))
 

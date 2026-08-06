@@ -1,0 +1,3 @@
+{:lint-as {datalevin.core/with-transaction clojure.core/let}
+ :linters {:unresolved-var    {:exclude [datalevin.core/with-transaction]}
+           :unresolved-symbol {:exclude [datalevin.core/with-transaction]}}}

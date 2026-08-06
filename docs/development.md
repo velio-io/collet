@@ -11,6 +11,8 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
   version, which is a compatibility break from previous releases.
 - Clojure CLI.
 - Babashka.
+- zprint is pinned by the repository and runs through `bb fmt:check` and
+  `bb fmt:fix`; no standalone formatter installation is required.
 - `clj-paren-repair` for the agent Clojure workflow.
 - `clj-nrepl-eval` is the preferred eval client; the repository includes a
   Babashka fallback when it is unavailable.
@@ -41,6 +43,8 @@ Run build, workspace, verification, and release commands from the repository roo
 | Command | Behavior |
 |---|---|
 | `clojure -M:dev:nrepl` | Starts a loopback-only worktree nREPL with project-scoped reload tooling. |
+| `bb fmt:check [--file <path>] [--root <path>]` | Checks Clojure and EDN formatting using `.zprint.edn`; defaults to the repository. |
+| `bb fmt:fix [--file <path>] [--root <path>]` | Formats Clojure and EDN files in place; defaults to the repository. |
 | `bb kmono query` | Prints Kmono's resolved package graph. Additional Kmono query arguments may follow. |
 | `bb test:unit` | Runs build-tool tests once and every package in a separate JVM, excluding `^:integration` tests; Docker is not required. |
 | `bb test:integration` | Builds app/CLI outputs, then runs only integration tests in integration-bearing packages; Docker is required. |
@@ -56,6 +60,11 @@ Package selectors are directory names such as `collet-core`,
 `collet-action-http`, `collet-actions`, `collet-app`, and `collet-cli`. Package-local
 `clojure -M:test` remains useful while developing one module; the table above is the
 supported repository orchestration contract.
+
+Always invoke the formatter through `bb fmt:check` or `bb fmt:fix`. This uses
+the pinned Clojure formatter even on macOS, where `/usr/bin/zprint` is an
+unrelated system diagnostic command. Editor integrations should invoke
+`fmt:fix` rather than clojure-lsp formatting, which is cljfmt-based.
 
 Agent-driven Clojure work is REPL-first. See the
 [REPL workflow](./repl-workflow.md) for worktree isolation, port discovery,

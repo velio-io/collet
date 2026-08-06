@@ -25,12 +25,16 @@
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
    [collet.deps :as collet.deps]
-   [collet.arrow :as collet.arrow])
+   [collet.arrow :as collet.arrow]
+   [collet.store :as store]
+   [collet.store.datalevin :as datalevin])
   (:import
-   [clojure.lang IFn ILookup]
-   [java.io File]
-   [java.util.concurrent ExecutorService Executors Future Semaphore]
-   [weavejester.dependency MapDependencyGraph]))
+    [clojure.lang IDeref ILookup]
+    [java.io File]
+    [java.util.regex Pattern]
+    [java.util.concurrent Callable ExecutorService Executors Future Semaphore
+     TimeUnit]
+    [weavejester.dependency MapDependencyGraph]))
 
 
 (def context-spec
@@ -38,7 +42,9 @@
    [:config map?]
    [:state [:map-of :keyword :any]]
    [:inputs {:optional true}
-    [:map-of :keyword :any]]])
+    [:map-of :keyword :any]]
+   [:store {:optional true}
+    [:fn #(satisfies? store/Store %)]]])
 
 
 (defn ->context
@@ -58,7 +64,7 @@
   [:map
    [:name :keyword]
    [:type :keyword]
-   [:fn {:optional true} [:or fn? list?]]
+   [:fn {:optional true} [:or fn? list? symbol? [:fn var?]]]
    [:when {:optional true} collet.conds/condition?]
    [:keep-state {:optional true} :boolean]
    [:params {:optional true}
@@ -74,7 +80,9 @@
    Takes the action spec and the context and returns the evaluated parameters.
    Clojure symbols used as parameter value placeholders. If the same symbol is found in the parameters map
    and as the selectors key it will be replaced with the corresponding value from the context."
-  {:malli/schema [:=> [:cat (mu/select-keys action-spec [:params :selectors]) context-spec utils/eval-context-spec]
+  {:malli/schema [:=>
+                  [:cat (mu/select-keys action-spec [:params :selectors])
+                   context-spec utils/eval-context-spec]
                   [:maybe (mu/get action-spec :params)]]}
   [{:keys [params selectors]} context eval-context]
   (when (some? params)
@@ -119,9 +127,20 @@
                               ;; Custom functions
                               (= action-type :custom)
                               (let [func (:fn action-spec)]
-                                (if (list? func)
-                                  ;; if the function is a list, evaluate it
+                                (cond
+                                  (list? func)
                                   (utils/eval-form eval-context func)
+
+                                  (symbol? func)
+                                  (or (requiring-resolve func)
+                                      (throw
+                                       (ex-info "Custom function cannot be resolved."
+                                                {:function func})))
+
+                                  (var? func)
+                                  @func
+
+                                  :else
                                   func))
 
                               (= action-type :switch)
@@ -141,15 +160,19 @@
         (fn [context]
           (try
             (if (or (nil? execute-when-fn) (execute-when-fn context))
-              (ml/trace :collet/executing-action [:action action-name :type action-type]
+              (ml/trace :collet/executing-action
+                [:action action-name :type action-type]
                 (if (= action-type :switch)
                   (let [context' (action-fn context)]
                     (update context :state merge (:state context')))
 
-                  (let [params  (compile-action-params action-spec context eval-context)
+                  (let [params  (compile-action-params action-spec
+                                                       context
+                                                       eval-context)
                         result  (cond
                                   ;; multiple parameters passed
-                                  (vector? params) (apply action-fn params)
+                                  (vector? params) (apply action-fn
+                                                          params)
                                   ;; single map parameter
                                   (map? params) (action-fn params)
                                   ;; no parameters
@@ -157,17 +180,26 @@
                         result' (if (some? return)
                                   (collet.select/select return result)
                                   result)]
-                    (tap> {:action action-name :type action-type :params params :result result'})
+                    (tap> {:action action-name
+                           :type   action-type
+                           :params params
+                           :result result'})
                     (assoc-in context [:state action-name] result'))))
-              (do (ml/log :collet/action-skipped :action action-name :type action-type)
-                  ;; need to reset action state to prevent discrepancies between iterations
+              (do (ml/log :collet/action-skipped
+                          :action action-name
+                          :type action-type)
+                  ;; need to reset action state to prevent discrepancies
+                  ;; between iterations
                   (when-not (:keep-state action-spec)
                     (assoc-in context [:state action-name] nil))))
             (catch Exception e
               (throw (ex-info "Action failed"
                               (-> (merge (ex-data e)
                                          {:action action-name
-                                          :params (compile-action-params action-spec context eval-context)})
+                                          :params (compile-action-params
+                                                   action-spec
+                                                   context
+                                                   eval-context)})
                                   (utils/samplify))
                               e)))))))))
 
@@ -217,28 +249,37 @@
      [:vector action-spec]]
     [:actions
      [:vector {:min 1} action-spec]]
-    [:return {:optional    true
-              :description "specifies how to get the data when all actions are executed"}
-     [:or collet.select/select-path fn?]]
+    [:return
+     {:optional true
+      :description
+      "specifies how to get the data when all actions are executed"}
+     [:or collet.select/select-path fn? list? symbol? [:fn var?]]]
     [:iterator {:optional true}
      [:map
-      [:next {:description "answers on the question should we iterate over task actions again"}
+      [:next
+       {:description
+        "answers on the question should we iterate over task actions again"}
        [:or collet.conds/condition? :boolean]]]]
     [:parallel {:optional true}
-     [:and [:map
-            [:items {:optional true} collet.select/select-path]
-            [:range {:optional true}
-             [:map
-              [:end :int]
-              [:start {:optional true} :int]
-              [:step {:optional true} :int]]]
-            [:threads {:optional true} :int]]
-      [:fn {:error/message "either :items or :range should be specified but not both"}
+     [:and
+      [:map
+       [:items {:optional true} collet.select/select-path]
+       [:range {:optional true}
+        [:map
+         [:end :int]
+         [:start {:optional true} :int]
+         [:step {:optional true} :int]]]
+       [:threads {:optional true} :int]]
+      [:fn
+       {:error/message
+        "either :items or :range should be specified but not both"}
        (fn [{:keys [items range]}]
          (if (or items range)
            (not (and items range))
            true))]]]]
-   [:fn {:error/message "either :iterator or :parallel should be specified but not both"}
+   [:fn
+    {:error/message
+     "either :iterator or :parallel should be specified but not both"}
     (fn [{:keys [iterator parallel]}]
       (if (or iterator parallel)
         (not (and iterator parallel))
@@ -257,13 +298,21 @@
 
 (defn extract-data-fn
   "Returns a function that extracts data from the context based on the iterator spec."
-  {:malli/schema [:=> [:cat task-spec]
+  {:malli/schema [:=> [:cat utils/eval-context-spec task-spec]
                   [:=> [:cat context-spec] :any]]}
-  [{:keys [actions return]}]
-  (let [last-action (-> actions last :name)]
+  [eval-context {:keys [actions return]}]
+  (let [last-action (-> actions
+                        last
+                        :name)]
     (cond
       (nil? return) (fn [context] (get-in context [:state last-action]))
       (vector? return) (fn [context] (collet.select/select return context))
+      (list? return) (utils/eval-form eval-context return)
+      (symbol? return) (or (requiring-resolve return)
+                           (throw
+                            (ex-info "Task return function cannot be resolved."
+                                     {:function return})))
+      (var? return) @return
       :otherwise return)))
 
 
@@ -299,14 +348,46 @@
   (re-pattern rgx))
 
 
+(defn- rehydrate-value
+  [value]
+  (cond
+    (and (map? value)
+         (= :regex (:collet.runtime/type value))
+         (string? (:pattern value))
+         (int? (:flags value)))
+    (Pattern/compile (:pattern value) (:flags value))
+
+    (map? value)
+    (reduce-kv (fn [result key item]
+                 (assoc result key (rehydrate-value item)))
+               {}
+               value)
+
+    (vector? value)
+    (mapv rehydrate-value value)
+
+    (list? value)
+    (apply list (map rehydrate-value value))
+
+    (set? value)
+    (into #{} (map rehydrate-value) value)
+
+    :else
+    value))
+
+
 (defn read-action
   "Read the action from EDN file if it exists"
   [path-key]
   (let [sep       File/separator
-        file-path (str (string/replace (namespace path-key) "." sep) sep (name path-key))
+        file-path (str (string/replace (namespace path-key) "." sep)
+                       sep
+                       (name path-key))
         file      (io/as-file file-path)]
     (if (.exists file)
-      (->> file slurp (edn/read-string {:eof nil :readers {'rgx read-regex}}))
+      (->> file
+           slurp
+           (edn/read-string {:eof nil :readers {'rgx read-regex}}))
       (throw (ex-info "File does not exist" {:file file-path})))))
 
 
@@ -316,8 +397,10 @@
   (mapv
    (fn [action]
      (if (= (:type action) :switch)
-       (assoc action :case (map #(update % :actions replace-external-actions)
-                                (:case action)))
+       (assoc action
+         :case (mapv #(update % :actions replace-external-actions)
+                     (:case action)))
+
        (if (string/ends-with? (name (:type action)) ".edn")
          (utils/deep-merge action (read-action (:type action)))
          action)))
@@ -334,22 +417,41 @@
      (if (= (:type action) :switch)
        (reduce (fn [task-acc switch-action]
                  (collet.action/expand task-acc switch-action))
-               t (->> action :case (mapcat :actions)))
+               t
+               (->> action
+                    :case
+                    (mapcat :actions)))
        (collet.action/expand t action)))
-   task actions))
+   task
+   actions))
+
+
+(defn- prepare-task-plan
+  [task]
+  (cond-> task
+    :always (update :actions replace-external-actions)
+    (some? (:setup task)) (update :setup replace-external-actions)
+    :always (expand-on-actions)
+    (some? (:parallel task))
+    (utils/replace-all {:$parallel/item [:state :$parallel/item]})))
 
 
 (defrecord Task
-  [name                       ;; task name
-   spec                       ;; full task spec (after processing)
-   inputs                     ;; set of task-ids that must be completed first
-   skip-on-error              ;; whether to skip the task if a dependency fails
-   keep-state                 ;; whether to keep the result in the context
-   state-format               ;; one of :latest, :flatten. default (if not set) is left as is
-   task-fn                    ;; (fn []) actual work to do
-   status                     ;; one of :waiting, :running, :completed, :failed, :skipped, :interrupted
-   result                     ;; the result of (run-fn) here
-   error])                    ;; exception if any
+  [name          ;; task name
+   spec          ;; full task spec (after processing)
+   inputs        ;; set of task-ids that must be completed first
+   skip-on-error ;; whether to skip the task if a dependency fails
+   keep-state    ;; whether to keep the result in the context
+   state-format  ;; one of :latest, :flatten. default (if not set) is left
+   ;; as is
+   task-fn       ;; (fn []) actual work to do
+   status        ;; one of :waiting, :running, :completed, :failed,
+   ;; :skipped, :interrupted
+   result        ;; the result of (run-fn) here
+   error])
+
+
+;; exception if any
 
 
 (def task?
@@ -360,109 +462,115 @@
     {:error/message "should be an instance of Task"}}))
 
 
-(defn compile-task
-  "Compiles a task spec into a function.
-   Resulting function can be executed with a configuration map,
-   representing a single run of all actions attached to it.
-   Actions should run in the order they are defined in the spec."
-  {:malli/schema [:=> [:cat utils/eval-context-spec task-spec]
-                  task?]}
+(defn- compile-prepared-task
   [eval-context task]
   (let [{:keys [name setup actions iterator parallel retry
                 skip-on-error inputs keep-state state-format]
-         :as   task} (cond-> task
-                       :always (update :actions replace-external-actions)
-                       :always (expand-on-actions)
-                       (some? (:parallel task))
-                       (utils/replace-all {:$parallel/item [:state :$parallel/item]}))
+         :as   task} task
 
         {:keys [max-retries backoff-ms]
          :or   {max-retries 2
                 backoff-ms  [200 3000]}} retry
 
         compile-action-ctx (partial compile-action eval-context)
-        setup-actions      (flatten (map compile-action-ctx setup))
-        task-actions       (flatten (map compile-action-ctx actions))
-        extract-data       (extract-data-fn task)
+        setup-actions (flatten (map compile-action-ctx setup))
+        task-actions (flatten (map compile-action-ctx actions))
+        extract-data (extract-data-fn eval-context task)
 
-        task-exec-fn       (fn execute-task [ctx]
-                             (try
-                               (if (some? retry)
-                                 (dh/with-retry {:retry-on    Exception
-                                                 :max-retries max-retries
-                                                 :backoff-ms  backoff-ms
-                                                 :on-retry    (fn [_ ex]
-                                                                (ml/log :collet/retrying-task
-                                                                        :task name
-                                                                        :reason (ex-data ex)
-                                                                        :message (ex-message ex)))}
-                                   (execute-actions task-actions ctx))
-                                 ;; execute without retry
-                                 (execute-actions task-actions ctx))
-                               (catch Exception e
-                                 (throw (ex-info "Task failed" (merge (ex-data e) {:task name}) e)))))
+        task-exec-fn
+        (fn execute-task [ctx]
+          (try
+            (if (some? retry)
+              (dh/with-retry {:retry-on    Exception
+                              :max-retries max-retries
+                              :backoff-ms  backoff-ms
+                              :on-retry    (fn [_ ex]
+                                             (ml/log :collet/retrying-task
+                                                     :task name
+                                                     :reason (ex-data ex)
+                                                     :message (ex-message ex)))}
+                             (execute-actions task-actions ctx))
+              ;; execute without retry
+              (execute-actions task-actions ctx))
+            (catch Exception e
+              (throw
+               (ex-info "Task failed" (merge (ex-data e) {:task name}) e)))))
 
-        task-fn            (cond
-                             (some? parallel)
-                             (fn [context]
-                               ;; run actions to set up the task
-                               (let [context'    (cond->> context
-                                                   (seq setup-actions) (execute-actions setup-actions))
-                                     items       (if (some? (:range parallel))
-                                                   (let [{:keys [start end step]
-                                                          :or   {start 0 step 1}} (:range parallel)]
-                                                     (range start end step))
-                                                   (collet.select/select (:items parallel) context'))
-                                     executor    (Executors/newVirtualThreadPerTaskExecutor)
-                                     semaphore   (Semaphore. (or (:threads parallel) 10))
-                                     submit-task (fn [arrow-columns item]
-                                                   (.submit executor
-                                                            ^Callable
-                                                            (fn []
-                                                              ; Block if limit is reached
-                                                              (.acquire semaphore)
-                                                              (try
-                                                                (let [item (if (some? arrow-columns)
-                                                                             (collet.arrow/prep-record item arrow-columns)
-                                                                             item)]
-                                                                  (-> context'
-                                                                      (assoc-in [:state :$parallel/item] item)
-                                                                      (task-exec-fn)
-                                                                      (extract-data)))
-                                                                (finally
-                                                                  ; Release permit
-                                                                  (.release semaphore))))))
-                                     [items' arrow-columns] (cond
-                                                              (ds/dataset? items) [(ds/rows items) nil]
-                                                              (utils/ds-seq? items) [(mapcat ds/rows items)
-                                                                                     (-> items meta :arrow-columns)]
-                                                              :otherwise [items nil])
-                                     futures     (doall (map (partial submit-task arrow-columns) items'))]
-                                 (try
-                                   ;; Collect results in original order by dereferencing futures
-                                   (mapv (fn [^Future future]
-                                           (.get future))
-                                         futures)
-                                   (finally
-                                     (.shutdown executor)))))
+        task-fn
+        (cond
+          (some? parallel)
+          (fn [context]
+            ;; run actions to set up the task
+            (let [context' (cond->> context
+                             (seq setup-actions) (execute-actions
+                                                  setup-actions))
+                  items (if (some? (:range parallel))
+                          (let [{:keys [start end step]
+                                 :or   {start 0 step 1}} (:range parallel)]
+                            (range start end step))
+                          (collet.select/select (:items parallel) context'))
+                  executor (Executors/newVirtualThreadPerTaskExecutor)
+                  semaphore (Semaphore. (or (:threads parallel) 10))
 
-                             (some? iterator)
-                             (let [next-iteration (next-fn iterator)]
-                               (fn [context]
-                                 ;; run actions to set up the task
-                                 (let [context' (cond->> context
-                                                  (seq setup-actions) (execute-actions setup-actions))]
-                                   (-> (iteration task-exec-fn
-                                                  :initk context'
-                                                  :vf extract-data
-                                                  :kf next-iteration)
-                                       (with-meta {:iteration true})))))
+                  submit-task
+                  (fn [arrow-columns item]
+                    (.submit executor
+                             ^Callable
+                             (fn []
+                               ; Block if limit is reached
+                               (.acquire semaphore)
+                               (try
+                                 (let [item (if (some? arrow-columns)
+                                              (collet.arrow/prep-record
+                                               item
+                                               arrow-columns)
+                                              item)]
+                                   (-> context'
+                                       (assoc-in [:state :$parallel/item]
+                                                 item)
+                                       (task-exec-fn)
+                                       (extract-data)))
+                                 (finally
+                                  ; Release permit
+                                  (.release semaphore))))))
 
-                             :otherwise
-                             (fn [context]
-                               (let [context' (cond->> context
-                                                (seq setup-actions) (execute-actions setup-actions))]
-                                 (extract-data (task-exec-fn context')))))]
+                  [items' arrow-columns] (cond
+                                           (ds/dataset? items) [(ds/rows items) nil]
+                                           (utils/ds-seq? items) [(mapcat ds/rows items)
+                                                                  (-> items
+                                                                      meta
+                                                                      :arrow-columns)]
+                                           :otherwise [items nil])
+                  futures (doall (map (partial submit-task arrow-columns)
+                                      items'))]
+              (try
+                ;; Collect results in original order by dereferencing
+                ;; futures
+                (mapv (fn [^Future future]
+                        (.get future))
+                      futures)
+                (finally
+                 (.shutdown executor)))))
+
+          (some? iterator)
+          (let [next-iteration (next-fn iterator)]
+            (fn [context]
+              ;; run actions to set up the task
+              (let [context' (cond->> context
+                               (seq setup-actions) (execute-actions
+                                                    setup-actions))]
+                (-> (iteration task-exec-fn
+                               :initk context'
+                               :vf extract-data
+                               :kf next-iteration)
+                    (with-meta {:iteration true})))))
+
+          :otherwise
+          (fn [context]
+            (let [context' (cond->> context
+                             (seq setup-actions) (execute-actions
+                                                  setup-actions))]
+              (extract-data (task-exec-fn context')))))]
     (map->Task
      {:name          name
       :spec          task
@@ -472,6 +580,17 @@
       :status        :waiting
       :inputs        inputs
       :task-fn       task-fn})))
+
+
+(defn compile-task
+  "Compiles a task spec into a function.
+   Resulting function can be executed with a configuration map,
+   representing a single run of all actions attached to it.
+   Actions should run in the order they are defined in the spec."
+  {:malli/schema [:=> [:cat utils/eval-context-spec task-spec]
+                  task?]}
+  [eval-context task]
+  (compile-prepared-task eval-context (prepare-task-plan task)))
 
 
 (defn find-task
@@ -504,7 +623,8 @@
                        (fn [is i]
                          (let [input-data (get-in context [:state i])]
                            (assoc is i input-data)))
-                       {} inputs)
+                       {}
+                       inputs)
          task-context (merge (->context config) context {:inputs inputs})
          result       (task-fn task-context)]
      (cond-> result
@@ -521,8 +641,11 @@
 (def pipeline-spec
   [:map
    [:name :keyword]
+   [:version {:optional true}
+    [:and :int [:fn pos-int?]]]
    [:use-arrow {:optional true} :boolean]
-   [:max-parallelism {:optional true} :int]
+   [:max-parallelism {:optional true}
+    [:and :int [:fn pos-int?]]]
    [:deps {:optional true} collet.deps/deps-spec]
    [:tasks [:vector task-spec]]])
 
@@ -548,21 +671,23 @@
 
 (defn add-task-and-deps
   "Adds dependencies to the graph for the given task."
-  {:malli/schema [:=> [:cat graph? :keyword [:maybe (mu/get-in task-spec [0 :inputs])]]
-                  graph?]}
+  {:malli/schema
+   [:=> [:cat graph? :keyword [:maybe (mu/get-in task-spec [0 :inputs])]]
+    graph?]}
   [graph task-key inputs]
   (if (seq inputs)
     (reduce
      (fn [g input]
        (dep/depend g task-key input))
-     graph inputs)
+     graph
+     inputs)
     ;; add node without dependencies
     (dep/depend graph task-key ::root)))
 
 
 (defn ->pipeline-graph
   "Creates a dependency graph from the tasks map."
-  {:malli/schema [:=> [:cat [:map-of :keyword task?]]
+  {:malli/schema [:=> [:cat [:map-of :keyword [:or task? task-spec]]]
                   graph?]}
   [tasks]
   (reduce-kv
@@ -626,15 +751,15 @@
 
 
 (defn dependencies-met?
-  "Returns true if ALL dependencies are in :completed status (or :skipped if skip-on-error?=false)."
+  "Returns true when all of a durable task run's direct inputs completed."
   [task tasks]
   (every?
    (fn [input]
      (let [input-task (get tasks input)]
        (when-not input-task
          (throw (ex-info (str "Missing dependency: " input) {:input input})))
-       (= (:status input-task) :completed)))
-   (:inputs task)))
+       (= (:task/status input-task) :completed)))
+   (:task/inputs task)))
 
 
 (defn has-dependants?
@@ -645,250 +770,559 @@
 
 (defn all-completed?
   [tasks]
-  (->> (vals tasks)
-       (some (fn [task]
-               (or (= (:status task) :waiting)
-                   (= (:status task) :running))))
-       (not)))
+  (not-any? #(contains? #{:waiting :running} (:task/status %)) tasks))
 
 
-(defn skip-downstream-tasks
-  [task-name tasks-graph tasks]
-  (let [dependants (dep/transitive-dependents tasks-graph task-name)]
-    (swap! tasks (fn [ts]
-                   (reduce
-                    (fn [ts task-name]
-                      (if (= (get-in ts [task-name :status]) :waiting)
-                        (assoc-in ts [task-name :status] :skipped)
-                        ts))
-                    ts dependants)))))
+(def ^:private terminal-run-statuses
+  #{:done :failed :stopped})
 
 
-(declare run-task-thread)
+(def ^:private terminal-task-statuses
+  #{:completed :failed :skipped :interrupted})
 
 
-(defprotocol IPipelineLifeCycle
-  "Defines the lifecycle methods for a pipeline."
-  (start [this config])
-  (stop [this])
-  (pause [this])
-  (resume [this config]))
+(defrecord Context
+  [store
+   executor
+   runs
+   closed?
+   on-task-start
+   on-task-complete
+   on-task-error
+   on-task-skipped])
 
 
-(defprotocol IPipeline
-  "Defines the pipeline interface.
-   Pipeline is a collection of tasks that are executed in a specific order.
-   Pipeline properties are id, name, status, and error.
-   You shouldn't call the run-pipeline method directly, use the start method instead."
-  (pipe-status [this])
-  (pipe-error [this])
-  (run-pipeline [this config]))
+(declare deref-run)
 
 
-(deftype Pipeline
-  [id                         ;; pipeline id
-   name                       ;; pipeline name
-   status                     ;; pipeline status; atom :pending, :running, :done, :stopped, :paused, :failed
-   error                      ;; atom holding the error map; atom {:message, :task, :action, :exception}
-   tasks                      ;; atom holding the tasks map; atom {task-id -> Task}
-   tasks-graph                ;; graph of tasks based on their dependencies
-   running-count              ;; atom (long) how many tasks are currently running
-   max-parallelism            ;; max number of tasks that can run in parallel
-   use-arrow                  ;; boolean; if true, use Arrow for data serialization
-   executor                   ;; executor service to spawn virtual threads
-   on-task-start              ;; (fn [task]) called just before a task starts
-   on-task-complete           ;; (fn [task]) called on success
-   on-task-error              ;; (fn [task]) called on error
-   on-task-skipped]           ;; (fn [task]) called if skipping due to dep failure
-
-  IPipeline
-  (pipe-status [_] @status)
-  (pipe-error [_] @error)
-
-  (run-pipeline [this config]
-    (future
-     (ml/with-context {:app-name "collet" :pipeline-name name :pipeline-id id}
-       (ml/trace :collet/pipeline-execution []
-         (loop []
-           (when (= @status :running)
-             (let [all-tasks @tasks]
-               (if (all-completed? all-tasks)
-                 (do
-                   ;; TODO clean uo all Arrow temp files
-                   (ml/log :collet/pipeline-execution-finished)
-                   (reset! status :done))
-
-                 (do
-                   (when (< @running-count max-parallelism)
-                     (let [ready-tasks (->> (vals all-tasks)
-                                            (filter #(and (= :waiting (:status %))
-                                                          (dependencies-met? % all-tasks)))
-                                            (take (- max-parallelism @running-count)))]
-                       (doseq [task ready-tasks]
-                         (run-task-thread this config task))))
-                   (Thread/sleep 100)
-                   (recur))))))))))
+(deftype Run [ctx id]
+  IDeref
+  (deref [this]
+    (deref-run this))
 
   ILookup
-  (valAt [this k]
-    (.valAt this k nil))
+  (valAt [this key]
+    (.valAt this key nil))
 
-  (valAt [this k not-found]
-    (get-in @tasks [k :result] not-found))
+  (valAt [_ key not-found]
+    (cond
+      (= key :run/id)
+      id
 
-  IFn
-  (invoke [this]
-    (this {}))
-
-  (invoke [this config]
-    (start this config))
-
-  IPipelineLifeCycle
-  (start [this config]
-    (when (= :pending @status)
-      (ml/log :collet/starting-pipeline-execution)
-      (reset! status :running)
-      (run-pipeline this config)))
-
-  (stop [this]
-    (ml/log :collet/stopping-pipeline-execution)
-    (reset! status :stopped)
-    (.shutdown ^ExecutorService executor))
-
-  (pause [this]
-    (when (= :running @status)
-      (ml/log :collet/pausing-pipeline-execution)
-      (reset! status :paused)))
-
-  (resume [this config]
-    (when (contains? #{:paused :failed} @status)
-      (ml/log :collet/resuming-pipeline-execution)
-      (reset! status :running)
-      (run-pipeline this config))))
+      :else
+      (if-let [runtime (get @(:runs ctx) id)]
+        (get @(:results runtime) key not-found)
+        not-found))))
 
 
-(defn run-task-thread
-  [^Pipeline pipeline config
-   {:keys     [skip-on-error]
-    task-name :name
-    task-spec :spec
-    :as       task}]
-  (ml/trace :collet/starting-task [:task task-name]
-    (let [log-ctx          (ml/local-context)
-          executor         ^ExecutorService (.-executor pipeline)
-          status           (.-status pipeline)
-          error            (.-error pipeline)
-          tasks            (.-tasks pipeline)
-          running-count    (.-running-count pipeline)
-          use-arrow        (.-use-arrow pipeline)
-          tasks-graph      (.-tasks-graph pipeline)
-          on-task-start    (.-on-task-start pipeline)
-          on-task-complete (.-on-task-complete pipeline)
-          on-task-error    (.-on-task-error pipeline)]
-      (swap! tasks update task-name assoc :status :running)
-      (swap! running-count inc)
-
-      (when (fn? on-task-start)
-        (on-task-start (get @tasks task-name)))
-      ;; start the task
-      (.submit executor
-               ^Runnable
-               (fn []
-                 (ml/with-context log-ctx
-                   (let [{:keys [task-fn inputs keep-state state-format]} task
-                         inputs-map (reduce
-                                     (fn [is i]
-                                       (let [input-data (get-in @tasks [i :result])
-                                             input-data (if (arrow-task-result? input-data)
-                                                          (arrow->dataset input-data)
-                                                          input-data)]
-                                         (assoc is i input-data)))
-                                     {} inputs)
-                         context    (-> (->context config)
-                                        (assoc :inputs inputs-map))]
-                     (try
-                       (let [task-result-raw       (task-fn context)
-                             task-result-raw       (if (-> task-result-raw meta :iteration)
-                                                     (seq task-result-raw)
-                                                     task-result-raw)
-                             result-sequential?    (sequential? task-result-raw)
-                             formatted-task-result (cond
-                                                     (and result-sequential?
-                                                          (= state-format :latest))
-                                                     (last task-result-raw)
-
-                                                     (and result-sequential?
-                                                          (= state-format :flatten))
-                                                     (flatten task-result-raw)
-
-                                                     :otherwise task-result-raw)
-                             has-dependents?       (has-dependants? task-name tasks-graph)
-                             keep-result           (or keep-state has-dependents?)
-                             task-result           (handle-task-result
-                                                    task-name
-                                                    formatted-task-result
-                                                    {:use-arrow   use-arrow
-                                                     :keep-result keep-result})]
-                         (tap> {:task      task-name
-                                :task-spec task-spec
-                                :context   context
-                                :result    task-result})
-                         (swap! tasks update task-name assoc
-                                :status :completed
-                                :result (when keep-result task-result)))
-
-                       (when (fn? on-task-complete)
-                         (on-task-complete (get @tasks task-name)))
-
-                       (catch Throwable t
-                         (let [root-cause (->> (iterate ex-cause t)
-                                               (take-while identity)
-                                               (last))]
-                           (if (instance? InterruptedException root-cause)
-                             ;; if the exception is an InterruptedException
-                             ;; it means the pipeline was stopped externally
-                             ;; no need to log it and propagate this error
-                             (swap! tasks update task-name assoc :status :interrupted)
-
-                             (let [{:keys [task action]} (ex-data t)
-                                   original-error (ex-message root-cause)
-                                   msg            (format "Pipeline error: %s Stopped on task: %s action: %s"
-                                                          original-error task action)]
-                               (tap> {:message   msg
-                                      :task      task
-                                      :action    action
-                                      :context   (utils/samplify context)
-                                      :exception t})
-                               (swap! tasks update task-name assoc
-                                      :status :failed
-                                      :error-cause t)
-                               (when (fn? on-task-error)
-                                 (on-task-error (get @tasks task-name)))
-
-                               (if skip-on-error
-                                 (do
-                                   (ml/log :collet/skipping-task-failure
-                                           :task name
-                                           :reason (ex-data t)
-                                           :message (ex-message t))
-                                   (skip-downstream-tasks task-name tasks-graph tasks))
-
-                                 (do
-                                   (ml/log :collet/pipeline-execution-failed
-                                           :message msg :task task :action action :exception t)
-                                   (reset! status :failed)
-                                   (reset! error {:message msg :task task :action action :exception t})))))))
-
-                       (finally
-                         (swap! running-count dec))))))))))
+(defn- run-context
+  [^Run run]
+  (.-ctx run))
 
 
-(def pipeline?
-  (m/-simple-schema
-   {:type :pipeline?
-    :pred #(instance? Pipeline %)
-    :type-properties
-    {:error/message "should be an instance of Pipeline"}}))
+(defn- run-id
+  [^Run run]
+  (.-id run))
+
+
+(defn- run-runtime
+  [^Run run]
+  (get @(:runs (run-context run)) (run-id run)))
+
+
+(defn- completion-outcome
+  [run]
+  (when-let [runtime (run-runtime run)]
+    (when (realized? (:completion runtime))
+      @(:completion runtime))))
+
+
+(defn deref-run
+  [run]
+  (let [runtime (or (run-runtime run)
+                    (throw
+                     (ex-info "Unknown pipeline run."
+                              {:run-id (run-id run)})))
+        outcome @(:completion runtime)]
+    (if-let [error (:error outcome)]
+      (throw error)
+      (:run outcome))))
+
+
+(defn context
+  "Creates a process-lifetime runtime context."
+  ([]
+   (context {}))
+  ([{:keys [store on-task-start on-task-complete on-task-error on-task-skipped]}]
+   (->Context (or store (datalevin/store))
+              (Executors/newVirtualThreadPerTaskExecutor)
+              (atom {})
+              (atom false)
+              on-task-start
+              on-task-complete
+              on-task-error
+              on-task-skipped)))
+
+
+(defn- ensure-open-context!
+  [ctx]
+  (when @(:closed? ctx)
+    (throw
+     (ex-info "Context is closed."
+              {:collet.error/type :collet.error/context-closed})))
+  ctx)
+
+
+(defn load-pipeline
+  "Loads the latest or an exact persisted pipeline revision."
+  ([ctx name]
+   (ensure-open-context! ctx)
+   (store/load-pipeline (:store ctx) name))
+  ([ctx name version]
+   (ensure-open-context! ctx)
+   (store/load-pipeline (:store ctx) name version)))
+
+
+(defn- root-cause
+  [error]
+  (->> (iterate ex-cause error)
+       (take-while identity)
+       last))
+
+
+(defn- sanitized-error
+  [error task-name]
+  (let [root (root-cause error)
+        data (ex-data error)]
+    (cond-> {:message (or (ex-message root) (str root))
+             :task    (or (:task data) task-name)
+             :type    (some-> root
+                              class
+                              .getName)}
+      (:action data) (assoc :action (:action data)))))
+
+
+(defn- safe-callback
+  [callback task]
+  (when (fn? callback)
+    (try
+      (callback task)
+      (catch Throwable error
+        (ml/log :collet/task-callback-failed
+                :task (:task/name task)
+                :message (ex-message error))))))
+
+
+(def ^:private completed-runtime-keys
+  [:completion :results])
+
+
+(defn- deliver-run!
+  [ctx run-id run]
+  (when-let [runtime (get @(:runs ctx) run-id)]
+    (swap! (:runs ctx)
+      update
+      run-id
+      #(select-keys % completed-runtime-keys))
+    (deliver (:completion runtime) {:run run})))
+
+
+(defn- infrastructure-failure!
+  [ctx run-id error]
+  (when-let [runtime (get @(:runs ctx) run-id)]
+    (when-some [halted-atom (:halted? runtime)]
+      (reset! halted-atom true))
+    (let [failure {:message "Pipeline persistence failed."
+                   :type    (some-> error
+                                    class
+                                    .getName)}]
+      (try
+        (let [run (store/update-run! (:store ctx)
+                                     run-id
+                                     {:run/status :failed
+                                      :run/finished-at
+                                      (System/currentTimeMillis)
+                                      :run/error failure})]
+          (deliver-run! ctx run-id run))
+        (catch Throwable _
+          (deliver (:completion runtime) {:error error}))))))
+
+
+(defn- durable-tasks-by-name
+  [ctx run-id]
+  (into {}
+        (map (juxt :task/name identity))
+        (store/get-task-runs (:store ctx) run-id)))
+
+
+(defn- skip-downstream-tasks!
+  [ctx run-id task-name]
+  (let [runtime    (get @(:runs ctx) run-id)
+        dependants (dep/transitive-dependents (:graph runtime) task-name)
+        tasks      (durable-tasks-by-name ctx run-id)
+        now        (System/currentTimeMillis)]
+    (doseq [dependent dependants
+            :let      [task (get tasks dependent)]
+            :when     (= :waiting (:task/status task))]
+      (let [task' (store/update-task! (:store ctx)
+                                      (:task/id task)
+                                      {:task/status      :skipped
+                                       :task/finished-at now})]
+        (safe-callback (:on-task-skipped ctx) task')))))
+
+
+(defn- task-inputs
+  [runtime task]
+  (reduce
+   (fn [inputs input]
+     (let [value (get @(:results runtime) input)
+           value (if (arrow-task-result? value)
+                   (arrow->dataset value)
+                   value)]
+       (assoc inputs input value)))
+   {}
+   (:inputs task)))
+
+
+(defn- format-task-result
+  [runtime task result]
+  (let [result       (if (-> result
+                             meta
+                             :iteration)
+                       (seq result)
+                       result)
+        sequential?  (sequential? result)
+        state-format (:state-format task)
+        formatted    (cond
+                       (and sequential? (= state-format :latest))
+                       (last result)
+
+                       (and sequential? (= state-format :flatten))
+                       (flatten result)
+
+                       :else
+                       result)
+        keep-result  (or (:keep-state task)
+                         (has-dependants? (:name task) (:graph runtime)))]
+    (handle-task-result (:name task)
+                        formatted
+                        {:use-arrow   (get-in runtime [:pipeline :use-arrow])
+                         :keep-result keep-result})))
+
+
+(defn- handle-task-error!
+  [ctx run-id task error]
+  (let [task-name (:name task)
+        root      (root-cause error)
+        now       (System/currentTimeMillis)]
+    (if (instance? InterruptedException root)
+      (let [durable-task (some->> (store/get-task-runs (:store ctx) run-id)
+                                  (utils/find-first #(= task-name
+                                                        (:task/name %))))]
+        (when-not (contains? terminal-task-statuses (:task/status durable-task))
+          (store/update-task! (:store ctx)
+                              (:task/id durable-task)
+                              {:task/status      :interrupted
+                               :task/finished-at now})))
+      (let [failure (sanitized-error error task-name)
+            task'   (store/update-task! (:store ctx)
+                                        (:task/id task)
+                                        {:task/status      :failed
+                                         :task/finished-at now
+                                         :task/error       failure})]
+        (if (:skip-on-error task)
+          (do
+            (skip-downstream-tasks! ctx run-id task-name)
+            (safe-callback (:on-task-error ctx) task'))
+          (do
+            (store/update-run! (:store ctx)
+                               run-id
+                               {:run/status      :failed
+                                :run/finished-at now
+                                :run/error       failure})
+            (safe-callback (:on-task-error ctx) task')))))))
+
+
+(defn- execute-run-task!
+  [ctx run-id task]
+  (let [runtime   (get @(:runs ctx) run-id)
+        task-name (:name task)
+        config    (:config runtime)
+        task-ctx  (-> (->context config)
+                      (assoc :inputs (task-inputs runtime task)
+                             :store (:store ctx)))
+        outcome   (try
+                    {:result (->> ((:task-fn task) task-ctx)
+                                  (format-task-result runtime task))}
+                    (catch Throwable error
+                      {:error error}))]
+    (try
+      (if-let [error (:error outcome)]
+        (handle-task-error! ctx run-id task error)
+        (let [result (:result outcome)]
+          ;; Results become available to dependent tasks before the durable
+          ;; transition.
+          (swap! (:results runtime) assoc task-name result)
+          (if (= :stopped (:run/status (store/get-run (:store ctx) run-id)))
+            (store/update-task! (:store ctx)
+                                (:task/id task)
+                                {:task/status      :interrupted
+                                 :task/finished-at (System/currentTimeMillis)})
+            (let [task' (store/update-task! (:store ctx)
+                                            (:task/id task)
+                                            {:task/status :completed
+                                             :task/finished-at
+                                             (System/currentTimeMillis)})]
+              (safe-callback (:on-task-complete ctx) task')))))
+      (catch Throwable error
+        (infrastructure-failure! ctx run-id error))
+      (finally
+       (swap! (:task-futures runtime) dissoc task-name)))))
+
+
+(defn- start-ready-task!
+  [ctx run-id task]
+  (let [runtime (get @(:runs ctx) run-id)
+        task'   (store/update-task! (:store ctx)
+                                    (:task/id task)
+                                    {:task/status :running
+                                     :task/started-at
+                                     (System/currentTimeMillis)})]
+    (safe-callback (:on-task-start ctx) task')
+    (let [future (.submit ^ExecutorService (:executor ctx)
+                          ^Runnable
+                          #(execute-run-task! ctx
+                                              run-id
+                                              (assoc (get (:tasks runtime) (:task/name task))
+                                                :task/id (:task/id task))))]
+      (swap! (:task-futures runtime) assoc (:task/name task) future))))
+
+
+(defn- aborting-task-failure?
+  [runtime tasks]
+  (some (fn [task]
+          (and (= :failed (:task/status task))
+               (not (:skip-on-error
+                     (get (:tasks runtime) (:task/name task))))))
+        tasks))
+
+
+(defn- schedule-ready-tasks!
+  [ctx run-id]
+  (let [runtime     (get @(:runs ctx) run-id)
+        tasks       (store/get-task-runs (:store ctx) run-id)
+        tasks-by-id (into {} (map (juxt :task/id identity)) tasks)
+        running     (count (filter #(= :running (:task/status %)) tasks))
+        available   (max 0
+                         (- (get-in runtime [:pipeline :max-parallelism])
+                            running))
+        ready       (when-not (aborting-task-failure? runtime tasks)
+                      (->> tasks
+                           (filter #(and (= :waiting (:task/status %))
+                                         (dependencies-met? % tasks-by-id)))
+                           (take available)))]
+    (run! #(start-ready-task! ctx run-id %) ready)
+    tasks))
+
+
+(defn- run-scheduler!
+  [ctx run-id]
+  (let [runtime (get @(:runs ctx) run-id)]
+    (try
+      (loop []
+        (when-not @(:halted? runtime)
+          (let [run (store/get-run (:store ctx) run-id)]
+            (cond
+              (contains? terminal-run-statuses (:run/status run))
+              (deliver-run! ctx run-id run)
+
+              (= :paused (:run/status run))
+              (do
+                (Thread/sleep 50)
+                (recur))
+
+              :else
+              (let [tasks (schedule-ready-tasks! ctx run-id)]
+                (cond
+                  (aborting-task-failure? runtime tasks)
+                  (do
+                    (Thread/sleep 50)
+                    (recur))
+
+                  (all-completed? tasks)
+                  (let [run' (store/update-run!
+                              (:store ctx)
+                              run-id
+                              {:run/status      :done
+                               :run/finished-at (System/currentTimeMillis)})]
+                    (deliver-run! ctx run-id run'))
+
+                  :else
+                  (do
+                    (Thread/sleep 50)
+                    (recur))))))))
+      (catch InterruptedException _)
+      (catch Throwable error
+        (infrastructure-failure! ctx run-id error)))))
+
+
+(declare check-dependencies)
+
+
+(defn- runtime-tasks
+  [pipeline]
+  (let [pipeline             (rehydrate-value pipeline)
+        {:keys [tasks deps]} pipeline]
+    (check-dependencies deps tasks)
+    (let [eval-context (utils/eval-ctx (:requires deps) (:imports deps))
+          tasks-map    (->> tasks
+                            (map #(compile-prepared-task eval-context %))
+                            (index-by :name))]
+      {:pipeline pipeline
+       :tasks    tasks-map
+       :graph    (->pipeline-graph tasks-map)})))
+
+
+(defn start
+  "Persists and starts a new run of an immutable compiled pipeline."
+  [ctx pipeline config]
+  (ensure-open-context! ctx)
+  (store/save-pipeline! (:store ctx) pipeline)
+  (let [run-id     (random-uuid)
+        now        (System/currentTimeMillis)
+        task-ids   (into {}
+                         (map (fn [{:keys [name]}]
+                                [name (random-uuid)]))
+                         (:tasks pipeline))
+        run        {:run/id         run-id
+                    :run/pipeline   {:pipeline/name    (:name pipeline)
+                                     :pipeline/version (:version pipeline)}
+                    :run/status     :running
+                    :run/created-at now
+                    :run/started-at now}
+        task-runs  (mapv (fn [{:keys [name inputs]}]
+                           {:task/id         (get task-ids name)
+                            :task/run        run-id
+                            :task/name       name
+                            :task/status     :waiting
+                            :task/inputs     (mapv task-ids (or inputs []))
+                            :task/created-at now})
+                         (:tasks pipeline))
+        runtime    (merge (runtime-tasks pipeline)
+                          {:config       config
+                           :results      (atom {})
+                           :task-futures (atom {})
+                           :scheduler    (atom nil)
+                           :completion   (promise)
+                           :halted?      (atom false)})
+        run-handle (Run. ctx run-id)]
+    (store/create-run! (:store ctx) run task-runs)
+    (swap! (:runs ctx) assoc run-id runtime)
+    (try
+      (reset! (:scheduler runtime)
+        (.submit ^ExecutorService (:executor ctx)
+                 ^Runnable
+                 #(run-scheduler! ctx run-id)))
+      (catch Throwable error
+        (infrastructure-failure! ctx run-id error)))
+    run-handle))
+
+
+(defn pipe-status
+  [run]
+  (if-let [outcome (completion-outcome run)]
+    (some-> outcome
+            :run
+            :run/status)
+    (:run/status (store/get-run (:store (run-context run)) (run-id run)))))
+
+
+(defn pipe-error
+  [run]
+  (if-let [outcome (completion-outcome run)]
+    (some-> outcome
+            :run
+            :run/error)
+    (:run/error (store/get-run (:store (run-context run)) (run-id run)))))
+
+
+(defn pause
+  [run]
+  (let [ctx (run-context run)
+        id  (run-id run)]
+    (when (= :running (:run/status (store/get-run (:store ctx) id)))
+      (store/update-run! (:store ctx) id {:run/status :paused}))
+    run))
+
+
+(defn resume
+  [run]
+  (let [ctx (run-context run)
+        id  (run-id run)]
+    (when (= :paused (:run/status (store/get-run (:store ctx) id)))
+      (store/update-run! (:store ctx) id {:run/status :running}))
+    run))
+
+
+(defn stop
+  [run]
+  (let [ctx     (run-context run)
+        id      (run-id run)
+        runtime (run-runtime run)
+        current (store/get-run (:store ctx) id)]
+    (when (and runtime
+               (not (contains? terminal-run-statuses (:run/status current))))
+      (try
+        (let [now  (System/currentTimeMillis)
+              run' (store/update-run! (:store ctx)
+                                      id
+                                      {:run/status      :stopped
+                                       :run/finished-at now})]
+          (reset! (:halted? runtime) true)
+          (when-let [^Future scheduler @(:scheduler runtime)]
+            (.cancel scheduler true))
+          (doseq [[_ ^Future future] @(:task-futures runtime)]
+            (.cancel future true))
+          (doseq [task (store/get-task-runs (:store ctx) id)]
+            (case (:task/status task)
+              :running
+              (store/update-task! (:store ctx)
+                                  (:task/id task)
+                                  {:task/status      :interrupted
+                                   :task/finished-at now})
+
+              :waiting
+              (let [task' (store/update-task! (:store ctx)
+                                              (:task/id task)
+                                              {:task/status      :skipped
+                                               :task/finished-at now})]
+                (safe-callback (:on-task-skipped ctx) task'))
+
+              nil))
+          (deliver-run! ctx id run'))
+        (catch Throwable error
+          (infrastructure-failure! ctx id error))))
+    run))
+
+
+(defn close
+  "Stops active runs, closes the executor, and always closes the Store."
+  [ctx]
+  (when (compare-and-set! (:closed? ctx) false true)
+    (try
+      (try
+        (doseq [[run-id _] @(:runs ctx)
+                :let       [run (Run. ctx run-id)]
+                :when      (not (contains? terminal-run-statuses (pipe-status run)))]
+          (stop run))
+        (finally
+         (.shutdownNow ^ExecutorService (:executor ctx))
+         (.awaitTermination ^ExecutorService (:executor ctx)
+                            5
+                            TimeUnit/SECONDS)))
+      (finally
+       (store/close! (:store ctx)))))
+  nil)
 
 
 (defn extract-actions-types
@@ -896,9 +1330,11 @@
   [{:keys [actions]}]
   (->> actions
        (map (fn [{:keys [type] :as action}]
-              ;; enrich is a special case, actual action type specified under the :action key
+              ;; enrich is a special case, actual action type specified
+              ;; under the :action key
               (cond (= type :enrich) (:action action)
-                    (= type :switch) (->> (:case action) (map extract-actions-types))
+                    (= type :switch) (->> (:case action)
+                                          (map extract-actions-types))
                     :otherwise type)))
        (flatten)))
 
@@ -908,10 +1344,13 @@
         (filter (fn [action-type]
                   (let [action-ns (namespace action-type)]
                     (and (some? action-ns)
-                         ;; clj namespace is reserved for clojure core functions
+                         ;; clj namespace is reserved for clojure core
+                         ;; functions
                          (not= action-ns "clj")
                          (not (string/ends-with? (name action-type) ".edn"))))))
-        (map #(-> % namespace symbol))
+        (map #(-> %
+                  namespace
+                  symbol))
         (distinct)
         (map vector)))
 
@@ -932,21 +1371,137 @@
       (collet.deps/add-dependencies {:requires actions-deps}))))
 
 
-(defn compile-pipeline
-  "Compiles a pipeline spec into a function.
-   Resulting function can be executed with a configuration map
-   Flat list of tasks is compiled into a graph according to the dependencies.
-   Tasks are then executed in the topological order."
-  {:malli/schema [:=> [:cat pipeline-spec]
-                  pipeline?]}
-  ^Pipeline
-  [{:keys [name tasks deps use-arrow max-parallelism
-           on-task-start on-task-complete on-task-error on-task-skipped]
-    :or   {use-arrow       true
-           max-parallelism 10}
-    :as   pipeline}]
+(defn- non-durable-value!
+  [path value]
+  (throw
+   (ex-info
+    "Pipeline contains a value that cannot be stored durably."
+    {:collet.error/type :collet.error/non-durable-value
+     :path              path
+     :value-type        (some-> value
+                                class
+                                .getName)})))
 
-  ;; validate pipeline spec first
+
+(defn- durable-value
+  ([value]
+   (durable-value [] value))
+
+  ([path value]
+   (cond
+     (var? value)
+     (let [{:keys [ns name]} (meta value)]
+       (symbol (str (ns-name ns)) (str name)))
+
+     (instance? Pattern value)
+     {:collet.runtime/type :regex
+      :pattern             (.pattern ^Pattern value)
+      :flags               (.flags ^Pattern value)}
+
+     (or (nil? value)
+         (boolean? value)
+         (char? value)
+         (string? value)
+         (keyword? value)
+         (symbol? value)
+         (number? value))
+     value
+
+     (record? value)
+     (non-durable-value! path value)
+
+     (map? value)
+     (reduce-kv
+      (fn [result key item]
+        (assoc result
+          (durable-value (conj path :key) key)
+          (durable-value (conj path key) item)))
+      {}
+      value)
+
+     (vector? value)
+     (mapv (fn [index item]
+             (durable-value (conj path index) item))
+           (range)
+           value)
+
+     (list? value)
+     (->> value
+          (map-indexed
+           (fn [index item]
+             (durable-value (conj path index) item)))
+          (apply list))
+
+     (set? value)
+     (into #{} (map #(durable-value (conj path :member) %)) value)
+
+     :else
+     (non-durable-value! path value))))
+
+
+(defn- validate-code-value!
+  [path value]
+  (when-not (or (list? value)
+                (and (symbol? value) (qualified-symbol? value)))
+    (throw
+     (ex-info
+      "Durable custom code must be a quoted function form, a fully-qualified symbol, or a Var."
+      {:collet.error/type :collet.error/non-durable-value
+       :path              path
+       :value-type        (some-> value
+                                  class
+                                  .getName)}))))
+
+
+(defn- validate-action-code!
+  [path action]
+  (when (contains? action :fn)
+    (validate-code-value! (conj path :fn) (:fn action)))
+  (when (= :switch (:type action))
+    (doseq [[case-index switch-case]     (map-indexed vector (:case action))
+            [action-index nested-action] (map-indexed vector (:actions switch-case))]
+      (validate-action-code!
+       (conj path :case case-index :actions action-index)
+       nested-action))))
+
+
+(defn- invalid-task-graph!
+  [problem data]
+  (throw
+   (ex-info
+    "Invalid pipeline task dependencies."
+    (assoc data
+      :collet.error/type :collet.error/invalid-task-graph
+      :problem problem))))
+
+
+(defn- validate-task-dependencies!
+  [tasks]
+  (let [task-names  (mapv :name tasks)
+        known-names (set task-names)]
+    (when-let [duplicate (->> task-names
+                              frequencies
+                              (some (fn [[task-name count]]
+                                      (when (< 1 count)
+                                        task-name))))]
+      (invalid-task-graph! :duplicate-task-name {:task duplicate}))
+
+    (doseq [{:keys [name inputs]} tasks
+            input inputs]
+      (when-not (contains? known-names input)
+        (invalid-task-graph! :missing-input {:task name :input input})))
+
+    (try
+      (->pipeline-graph (index-by :name tasks))
+      (catch Throwable error
+        (invalid-task-graph! :cycle {:cause (ex-message error)})))))
+
+
+(defn compile-pipeline
+  "Validates and expands a pipeline into immutable data suitable for durable storage."
+  {:malli/schema [:=> [:cat pipeline-spec] map?]}
+  [{:keys [tasks deps] :as pipeline}]
+
   (when-not (m/validate pipeline-spec pipeline)
     (pretty/explain pipeline-spec pipeline)
     (->> (m/explain pipeline-spec pipeline)
@@ -955,24 +1510,20 @@
          (throw)))
 
   (check-dependencies deps tasks)
-
-  (let [pipeline-id  (random-uuid)
-        eval-context (utils/eval-ctx (:requires deps) (:imports deps))
-        tasks-map    (->> tasks
-                          (map #(compile-task eval-context %))
-                          (index-by :name))]
-    (->Pipeline
-     pipeline-id
-     name
-     (atom :pending)
-     (atom nil)
-     (atom tasks-map)
-     (->pipeline-graph tasks-map)
-     (atom 0)
-     max-parallelism
-     use-arrow
-     (Executors/newVirtualThreadPerTaskExecutor)
-     on-task-start
-     on-task-complete
-     on-task-error
-     on-task-skipped)))
+  (let [tasks    (mapv prepare-task-plan tasks)
+        pipeline (-> pipeline
+                     (assoc :version (or (:version pipeline) 1)
+                            :use-arrow (get pipeline :use-arrow true)
+                            :max-parallelism (get pipeline :max-parallelism 10)
+                            :tasks tasks)
+                     (durable-value))]
+    (doseq [[task-index task]     (map-indexed vector (:tasks pipeline))
+            section               [:setup :actions]
+            [action-index action] (map-indexed vector (get task section))]
+      (validate-action-code! [:tasks task-index section action-index] action))
+    (doseq [[task-index task] (map-indexed vector (:tasks pipeline))]
+      (when (and (symbol? (:return task))
+                 (not (qualified-symbol? (:return task))))
+        (validate-code-value! [:tasks task-index :return] (:return task))))
+    (validate-task-dependencies! (:tasks pipeline))
+    pipeline))

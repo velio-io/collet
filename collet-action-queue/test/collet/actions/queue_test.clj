@@ -61,7 +61,7 @@
                                          :params {:input      [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
                                                   :queue-name :pipeline-queue-test}}]}]})]
 
-      @(pipeline {})
+      (tf/run-pipeline! pipeline {})
 
       (let [queue  (q/queue :pipeline-queue-test {:queue-path "tmp/queues" :roll-cycle :fast-daily})
             tailer (q/tailer queue)]
@@ -82,7 +82,7 @@
                                          :params {:input      {:a 1 :b 2}
                                                   :queue-name :pipeline-queue-test}}]}]})]
 
-      @(pipeline {})
+      (tf/run-pipeline! pipeline {})
 
       (let [queue  (q/queue :pipeline-queue-test {:queue-path "tmp/queues" :roll-cycle :fast-daily})
             tailer (q/tailer queue)]

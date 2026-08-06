@@ -841,9 +841,10 @@
                                                 :params    {:index 'idx-path
                                                             :query [:city "London"]}}]}]})]
 
-          @(pipeline {:index-path index-path :csv-path csv-path})
-
-          (let [results (:search-london pipeline)]
+          (let [run     (tf/run-pipeline! pipeline
+                                          {:index-path index-path
+                                           :csv-path   csv-path})
+                results (:search-london run)]
             (is (= 2 (ds/row-count results)))
             (is (every? #(= "London" (:city %))
                         (ds/mapseq-reader results)))))
@@ -872,11 +873,11 @@
                                                 :params    {:index 'idx-path
                                                             :query [:and
                                                                     [:title "Laptop"]
-                                                                    [:category "electronics"]]}}]}]})]
-          @(pipeline {:index-path index-path})
-          (let [results (:search pipeline)]
+                                                                    [:category "electronics"]]}}]}]})
+              run      (tf/run-pipeline! pipeline {:index-path index-path})
+              results  (:search run)]
             (is (= 1 (ds/row-count results)))
-            (is (= "Laptop" (-> results ds/mapseq-reader first :title)))))
+            (is (= "Laptop" (-> results ds/mapseq-reader first :title))))
         (finally
           (cleanup-dir index-path)
           (io/delete-file csv-path))))))
@@ -907,10 +908,12 @@
                                                 :params    {:index 'idx-path
                                                             :query [:or
                                                                     [:brand "Apple"]
-                                                                    [:brand "Nike"]]}}]}]})]
-          @(pipeline {:index-path index-path :csv-path csv-path})
-          (let [results (:search pipeline)]
-            (is (= 2 (ds/row-count results)))))
+                                                                    [:brand "Nike"]]}}]}]})
+              run      (tf/run-pipeline! pipeline
+                                         {:index-path index-path
+                                          :csv-path   csv-path})
+              results  (:search run)]
+          (is (= 2 (ds/row-count results))))
         (finally
           (cleanup-dir index-path)
           (io/delete-file csv-path))))))
@@ -941,11 +944,13 @@
                                                 :params    {:index 'idx-path
                                                             :query [:and
                                                                     [:category "electronics"]
-                                                                    [:- [:brand "Apple"]]]}}]}]})]
-          @(pipeline {:index-path index-path :csv-path csv-path})
-          (let [results (:search pipeline)]
+                                                                    [:- [:brand "Apple"]]]}}]}]})
+              run      (tf/run-pipeline! pipeline
+                                         {:index-path index-path
+                                          :csv-path   csv-path})
+              results  (:search run)]
             (is (= 1 (ds/row-count results)))
-            (is (= "Samsung" (-> results ds/mapseq-reader first :brand)))))
+            (is (= "Samsung" (-> results ds/mapseq-reader first :brand))))
         (finally
           (cleanup-dir index-path)
           (io/delete-file csv-path))))))

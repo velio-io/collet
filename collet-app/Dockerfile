@@ -32,6 +32,7 @@ LABEL org.opencontainers.image.version="${COLLET_VERSION}" \
 ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
 ENV PIPELINE_CONFIG="{}"
+ENV COLLET_DATA_DIR="./.collet/db"
 ENV TINI_VERSION=v0.19.0
 
 # for local builds
@@ -81,6 +82,7 @@ CMD java \
 --add-opens=java.base/java.io=ALL-UNNAMED \
 --add-opens=java.base/java.util=ALL-UNNAMED \
 --add-opens=java.base/java.nio=ALL-UNNAMED \
+--add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
 --enable-native-access=ALL-UNNAMED \
 -javaagent:/app/jmx/jmx_prometheus_javaagent-0.20.0.jar=$JMX_PORT:/app/jmx/jmx.yaml \
 -jar collet.jar -s "${PIPELINE_SPEC}" -c "${PIPELINE_CONFIG}"

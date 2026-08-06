@@ -1,12 +1,15 @@
 {:collet/artifact
  {:description "Collet workflow engine core"
-  :public-namespaces [collet.core]
+  :public-namespaces [collet.core
+                      collet.store
+                      collet.store.datalevin]
   :publish? true
   :kind :library}
 
  :paths ["src" "resources"]
  :deps
  {org.clojure/clojure                  {:mvn/version "1.12.5"}
+  org.datalevin/datalevin-embedded     {:mvn/version "1.0.0"}
   weavejester/dependency               {:mvn/version "1.0.1"}
   metosin/malli                        {:mvn/version "0.20.1"}
   diehard/diehard                      {:mvn/version "0.12.1"}
@@ -39,10 +42,14 @@
                  "--add-opens=java.base/java.io=ALL-UNNAMED"
                  "--add-opens=java.base/java.util=ALL-UNNAMED"
                  "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                  "--enable-native-access=ALL-UNNAMED"]
    :main-opts   ["-m" "cognitect.test-runner"]}
   :dev
   {:extra-paths ["dev/src"]
+   :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                 "--enable-native-access=ALL-UNNAMED"]
    :extra-deps  {eftest/eftest                 {:mvn/version "0.6.0"}
                  vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
                  djblue/portal                 {:mvn/version "0.67.0"}}}}}

@@ -177,23 +177,29 @@ The basic structure of pipeline spec can be represented as follows:
 
 ```clojure
 {:name  :my-pipeline
+ :version 1
  :deps  {...}
+ :max-parallelism 10
  :tasks [...]}
 ```
 
 - `:name` (required): A keyword representing the pipeline name (something meaningful to distinct logs and results from
   other ones).
+- `:version` (optional): A positive integer identifying an immutable pipeline revision. It defaults to `1`.
 - `:tasks` (required): A vector of task.
 - `:deps` (optional): A map with the coordinates of the pipeline dependencies (from maven or clojars). Check the deps
   format [here](./docs/deps.md).
+- `:max-parallelism` (optional): The maximum number of tasks from one run that may execute concurrently. It defaults
+  to `10`.
 
-One way to think of a pipeline is as a data structure that evolves over time.
-When you initialize a pipeline, it has an internal state shaped like `{:state {} :config {}}`.
-The `state` key is an empty map, and the `config` key is a map with the configuration values provided at startup.
-When the pipeline is running, every task will contribute to the `state` map. The `state` map will contain data returned
-from tasks. If a task is executed multiple times, the `state` map will contain all the iteration data as a sequence of
-discrete results (can be changed with the `:state-format` option).
+The compiled pipeline is immutable data. Starting it creates a separate run whose task results and configuration are
+kept in its runtime context. Every completed task contributes to that run's process-local result state. If a task is
+executed multiple times, its result contains the iteration data as a sequence of discrete results (this can be changed
+with the `:state-format` option).
 Tasks can also refer to each other's data using the `:inputs` key (fulfilled for each task individually).
+
+Collet stores compiled pipeline revisions and run/task lifecycle state in Datalevin. It deliberately does not persist
+runtime configuration, secrets, task results, Arrow datasets, callbacks, futures, or exceptions.
 
 Collet is designed to work with large datasets, so keeping all task data in memory is not a good idea.
 By default, data returned from tasks will be offloaded to Arrow files. These files will be memory-mapped (not loaded
@@ -453,6 +459,8 @@ These can be provided as environment variables in three ways:
 ```shell
 docker run \
   -p 8080:8080 \
+  -v collet-data:/data/collet \
+  -e COLLET_DATA_DIR="/data/collet" \
   -e PIPELINE_SPEC="{:name :my-pipeline ...}" \
   -e PIPELINE_CONFIG="{:my-secret #env SECRET_VALUE}" \
   velioio/collet
@@ -464,6 +472,8 @@ docker run \
 docker run \
   -p 8080:8080 \
   -v ./test/collet:/app/data \
+  -v collet-data:/data/collet \
+  -e COLLET_DATA_DIR="/data/collet" \
   -e PIPELINE_SPEC="/app/data/sample-pipeline.edn" \
   -e PIPELINE_CONFIG="/app/data/sample-config.edn" \
   velioio/collet
@@ -474,12 +484,18 @@ docker run \
 ```shell
 docker run \
   -p 8080:8080  \
+  -v collet-data:/data/collet \
+  -e COLLET_DATA_DIR="/data/collet" \
   -e PIPELINE_SPEC="s3://test-user:test-pass@test-bucket/test-pipeline-spec.edn?region=eu-west-1" \
   -e PIPELINE_CONFIG="s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1" \
   velioio/collet
 ```
 
 ### Options for Docker container
+
+Pipeline revisions and run/task lifecycle state are stored under `COLLET_DATA_DIR`, which defaults to
+`./.collet/db`. Mount that directory to retain the data when a container is replaced. Pipeline configuration, secrets,
+and task results are never written to this store.
 
 Collet uses the mulog library for logging and tracing. When running as a Docker container,
 you can configure various publishers using environment variables:
@@ -514,40 +530,49 @@ After adding Collet to your project dependencies, you can use it as follows:
 
 ```clojure
 (ns my-namespace
-  ;; require the collet namespace
-  (:require [collet.core :as collet]))
+  (:require [collet.core :as collet]
+            [collet.store.datalevin :as datalevin]))
 
-;; define your pipeline
+;; stateful resources belong to one process-lifetime context
+(def ctx
+  (collet/context
+   {:store (datalevin/store {:dir "./.collet/db"})}))
+
+;; pipeline specifications compile to immutable, persistable data
 (def my-pipeline-spec
-  {:name  :my-pipeline
+  {:name    :my-pipeline
+   :version 1
    :tasks [...]})
 
-;; precompile your pipeline
 (def my-pipeline
   (collet/compile-pipeline my-pipeline-spec))
 
-;; now you can run it as a regular Clojure function
-;; also, you can provide a configuration map as an argument
-;; pipeline will run in the separate thread and wouldn't block the calling thread 
-(my-pipeline {:some-key "some-value"})
+;; start creates and returns a durable run handle without blocking
+(def run
+  (collet/start ctx my-pipeline {:some-key "some-value"}))
 
-;; if you to wait for the pipeline to finish you can dereference returned future
-@(my-pipeline {:some-key "some-value"})
+;; dereferencing waits for the terminal persisted run map
+@run
+;; => {:run/id ... :run/status :done ...}
 
-;; another way to run the pipeline is to use the pipeline protocol
-(collet/start my-pipeline {:some-key "some-value"})
+(collet/pipe-status run)
+(collet/pipe-error run)
+(collet/pause run)
+(collet/resume run)
+(collet/stop run)
 
-;; pipeline is a stateful object, so you can stop, pause and resume it at any time
-(collet/pause my-pipeline)
-(collet/resume my-pipeline {:another-key "another-value"})
+;; retrieve the latest or an exact saved revision
+(collet/load-pipeline ctx :my-pipeline)
+(collet/load-pipeline ctx :my-pipeline 1)
 
-;; after stopping the pipeline you can't resume it
-(collet/stop my-pipeline)
-
-;; to get the current status of the pipeline or the pipeline error
-(collet/pipe-status my-pipeline)
-(collet/pipe-error my-pipeline)
+;; closes active runs, the shared executor, and the database
+(collet/close ctx)
 ```
+
+Saving an equal pipeline under the same `[name version]` is idempotent. Saving a different plan with that revision
+fails; increment `:version` for any modification. Durable custom code may be supplied as a quoted function form,
+fully-qualified symbol, or Var. Vars normalize to symbols, while anonymous function objects and other unsupported
+runtime values fail compilation.
 
 ### Modules and development
 
@@ -569,6 +594,7 @@ from their respective package tags.
 ```shell
 clojure -M:dev:nrepl
 bb kmono query
+bb fmt:check
 bb test:unit
 bb test:integration
 bb test

@@ -1,4 +1,7 @@
-{:tasks
+{:paths
+ ["scripts"]
+
+ :tasks
  {:requires ([babashka.process :refer [shell]])
 
   :init
@@ -29,6 +32,18 @@
   kmono
   {:doc "Run the pinned Kmono CLI"
    :task (apply shell (into ["clojure" "-M:kmono"] *command-line-args*))}
+
+  fmt:check
+  {:doc        "Check formatting of Clojure code and EDN files"
+   :extra-deps {zprint/zprint {:mvn/version "1.2.9"}}
+   :requires   ([tasks.format :as fmt])
+   :task       (fmt/check! *command-line-args*)}
+
+  fmt:fix
+  {:doc        "Fix formatting of Clojure and EDN files"
+   :extra-deps {zprint/zprint {:mvn/version "1.2.9"}}
+   :requires   ([tasks.format :as fmt])
+   :task       (fmt/fix! *command-line-args*)}
 
   test
   {:doc "Run every unit and Docker integration test in separate JVMs"

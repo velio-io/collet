@@ -3,7 +3,8 @@
    [clojure.test :refer :all]
    [collet.core :as collet]
    [collet.action :as action]
-   [collet.actions.jslt :as sut]))
+   [collet.actions.jslt :as sut]
+   [collet.test-fixtures :as tf]))
 
 
 (deftest jslt-action-test
@@ -181,8 +182,8 @@
                                           :params    {:template template
                                                       :input    'json}}]
                             :iterator   {:next [:true? [:$mapper/has-next-item]]}}]}
-        pipeline  (collet/compile-pipeline pipe-spec)]
-    @(pipeline {:records records})
+        pipeline  (collet/compile-pipeline pipe-spec)
+        run       (tf/run-pipeline! pipeline {:records records})]
 
     (is (= [{:order_summary {:customer_name "Alice"
                              :order_date    "2023-10-01"
@@ -202,7 +203,6 @@
                              :status        "Processing"
                              :total_cost    330.0
                              :total_items   2}}]
-           (:json-transform pipeline)))))
-
+           (:json-transform run)))))
 
 
