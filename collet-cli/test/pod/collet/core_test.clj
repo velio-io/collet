@@ -2,7 +2,10 @@
   (:require
    [bencode.core :as bencode]
    [clojure.test :refer [deftest is]]
-   [clojure.walk :as walk])
+   [clojure.walk :as walk]
+   [collet.core :as collet]
+   [collet.main :as main]
+   [pod.collet.core :as sut])
   (:import
    (java.io PushbackInputStream)
    (java.util.concurrent TimeUnit)))
@@ -18,6 +21,7 @@
    "--add-opens=java.base/java.io=ALL-UNNAMED"
    "--add-opens=java.base/java.util=ALL-UNNAMED"
    "--add-opens=java.base/java.nio=ALL-UNNAMED"
+   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
    "--enable-native-access=ALL-UNNAMED"])
 
 (defn- bytes->strings [value]
@@ -28,10 +32,25 @@
        item))
    value))
 
+
+(deftest runtime-context-uses-the-configured-data-directory
+  (binding [main/*env* {"COLLET_DATA_DIR" "/tmp/collet-pod-data"}]
+    (let [ctx (sut/create-runtime-context)]
+      (try
+        (is (= "/tmp/collet-pod-data" (get-in ctx [:store :dir])))
+        (finally
+          (collet/close ctx))))))
+
+
 (deftest ^:integration pod-artifact-startup-test
-  (let [command (into ["java"]
-                      (concat jvm-options ["-jar" "target/collet.pod.jar"]))
-        process (.start (ProcessBuilder. ^java.util.List command))]
+  (let [command  (into ["java"]
+                       (concat jvm-options ["-jar" "target/collet.pod.jar"]))
+        data-dir (str (java.nio.file.Files/createTempDirectory
+                       "collet-pod-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        builder  (ProcessBuilder. ^java.util.List command)
+        _        (.put (.environment builder) "COLLET_DATA_DIR" data-dir)
+        process  (.start builder)]
     (try
       (let [stdin  (.getOutputStream process)
             stdout (PushbackInputStream. (.getInputStream process))]

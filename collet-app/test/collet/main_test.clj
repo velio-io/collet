@@ -8,6 +8,7 @@
    [clj-test-containers.core :as tc]
    [collet.test-containers :as containers]
    [collet.aws :as aws]
+   [collet.core :as collet]
    [collet.main :as sut])
   (:import
    [java.util.regex Pattern]))
@@ -113,13 +114,37 @@
       (is (string/includes? (:pwd config) "collet")))))
 
 
+(deftest runtime-context-uses-the-configured-data-directory
+  (testing "the default is relative to the process working directory"
+    (binding [sut/*env* {}]
+      (let [ctx (sut/create-runtime-context)]
+        (try
+          (is (= "./.collet/db" (get-in ctx [:store :dir])))
+          (finally
+            (collet/close ctx))))))
+
+  (testing "COLLET_DATA_DIR overrides the default"
+    (binding [sut/*env* {"COLLET_DATA_DIR" "/tmp/collet-app-data"}]
+      (let [ctx (sut/create-runtime-context)]
+        (try
+          (is (= "/tmp/collet-app-data" (get-in ctx [:store :dir])))
+          (finally
+            (collet/close ctx)))))))
+
+
 (deftest ^:integration pipeline-execution-test
-  (let [{:keys [exit out]}
+  (let [data-dir (str (java.nio.file.Files/createTempDirectory
+                       "collet-app-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        {:keys [exit out]}
         (sh "java"
             "--add-opens=java.base/java.nio=ALL-UNNAMED"
+            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
             "--enable-native-access=ALL-UNNAMED"
             "-jar" "target/collet.jar"
             "-s" "configs/sample-pipeline.edn"
-            "-c" "{}")]
+            "-c" "{}"
+            :env (assoc (into {} (System/getenv))
+                        "COLLET_DATA_DIR" data-dir))]
     (is (zero? exit))
     (is (string/includes? out "Pipeline completed."))))

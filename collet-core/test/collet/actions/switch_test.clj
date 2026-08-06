@@ -4,10 +4,24 @@
    [collet.test-fixtures :as tf]
    [collet.actions.switch :as sut]
    [collet.core :as collet]
-   [collet.utils :as utils]))
+   [collet.utils :as utils]
+   [collet.store.datalevin :as datalevin]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.switch))
+
+
+(defn- run-durable-pipeline
+  [pipeline config]
+  (let [ctx (collet/context
+             {:store (datalevin/store
+                      {:dir (str "tmp/" (random-uuid))})})
+        run (collet/start ctx (collet/compile-pipeline pipeline) config)]
+    (try
+      @run
+      run
+      (finally
+        (collet/close ctx)))))
 
 
 (deftest switch-functionality-test
@@ -122,7 +136,6 @@
                                                                    :params    ['value]}]}]}]
                                 :iterator   {:next [:< [:state :value] 15]}
                                 :return     [:state :value]}]}
-        pipeline      (collet/compile-pipeline pipeline-spec)]
-    @(pipeline {})
+        pipeline      (run-durable-pipeline pipeline-spec {})]
     (is (= [2 4 6 8 10 11 12 13 14 15]
            (:task-1 pipeline)))))

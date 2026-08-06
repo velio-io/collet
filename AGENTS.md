@@ -44,6 +44,8 @@ Run repository-level commands from the repository root.
 | Discover ports with the fallback client | `bb scripts/agent/nrepl-eval.bb --discover` |
 | Reload changed project code | `clj-nrepl-eval -p <port> "(user/reload)"` |
 | Repair Clojure delimiters | `clj-paren-repair path/to/file.clj` |
+| Check Clojure formatting | `bb fmt:check --file path/to/file.clj` |
+| Format Clojure files | `bb fmt:fix --file path/to/file.clj` |
 | Inspect the package graph | `bb kmono query` |
 | Test one package | `bb test:module <module>` |
 | Run non-integration tests | `bb test:unit` |
@@ -66,6 +68,9 @@ Package selectors are directory names such as `collet-core`,
   every command so REPL state, source paths, and Git state agree.
 - Keep runtime changes and package-specific tests/resources in the owning
   package. Put reusable unpublished test helpers in `test-fixtures`.
+- For Datalevin reads of related entities, use one Datalog query with an inline
+  `pull` (or another set-based read); do not query IDs and then pull each
+  entity individually.
 - Internal source dependencies stay as top-level `:local/root` entries. Do not
   replace them with Maven versions or edit generated POMs.
 - Root build, CI, documentation, agent, and development files do not select a
@@ -126,6 +131,20 @@ available on the development classpath.
 Repository source files may be read normally. Use `:reload` for manual
 namespace investigation so an earlier require does not hide recent edits.
 
+## Formatting
+
+Use the repository-pinned formatting tasks for Clojure and EDN files:
+
+```shell
+bb fmt:check --file path/to/file.clj
+bb fmt:fix --file path/to/file.clj
+```
+
+With no scope option, the tasks process the repository. Use `--file` for one
+file or `--root` for a subtree. They read `.zprint.edn`; do not invoke a system
+command named `zprint`, because macOS ships an unrelated executable by that
+name.
+
 ## Parenthesis Repair
 
 Do not manually repair unbalanced Clojure delimiters.
@@ -134,14 +153,15 @@ Do not manually repair unbalanced Clojure delimiters.
 clj-paren-repair path/to/file.clj
 ```
 
-Run the command from the repository root. File mode repairs delimiters and
-formats with cljfmt using this repository's `.cljfmt.edn`. It accepts multiple
-files when one edit broke more than one form.
+Run the command from the repository root. It accepts multiple files when one
+edit broke more than one form. Treat its formatting as incidental and run
+`bb fmt:fix --file <path>` on every repaired file before reload and validation.
 
 Use the tool only after a reader or delimiter failure, not as the routine
-formatter. Inspect the resulting diff, confirm the intended form structure,
-then rerun `(user/reload)` and the affected tests. If the command is missing or
-cannot repair the file, report the blocker rather than guessing.
+formatter. Inspect the resulting diff after `fmt:fix`, confirm the intended
+form structure, then rerun `(user/reload)` and the affected tests. If the
+command is missing or cannot repair the file, report the blocker rather than
+guessing.
 
 ## Module Boundaries
 

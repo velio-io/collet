@@ -23,6 +23,7 @@
              "--add-opens=java.base/java.io=ALL-UNNAMED"
              "--add-opens=java.base/java.util=ALL-UNNAMED"
              "--add-opens=java.base/java.nio=ALL-UNNAMED"
+             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
              "--enable-native-access=ALL-UNNAMED"]}
 
  :paths []
@@ -46,11 +47,17 @@
  :aliases
  {:dev
   {:extra-paths ["dev"]
+   :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                 "--enable-native-access=ALL-UNNAMED"]
    :extra-deps  {io.velio/collet-test-fixtures {:local/root "test-fixtures"}
                  io.github.tonsky/clj-reload   {:mvn/version "1.0.0"}}}
 
   :nrepl
   {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}}
+   :jvm-opts   ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                "--enable-native-access=ALL-UNNAMED"]
    :main-opts  ["-m" "nrepl.cmdline"
                 "--interactive" "--color" "--bind" "127.0.0.1"]}
 

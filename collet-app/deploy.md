@@ -6,7 +6,24 @@ uberjar filename from the repository root:
 
 ```shell
 bb build collet-app
-java -jar collet-app/target/collet.jar \
+java \
+  --add-opens=java.base/java.nio=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+  --enable-native-access=ALL-UNNAMED \
+  -jar collet-app/target/collet.jar \
+  -s collet-app/configs/sample-pipeline.edn \
+  -c '{}'
+```
+
+`COLLET_DATA_DIR` is an environment variable, not a JVM system property. Its default is
+`./.collet/db`; set it in the environment when another location is required:
+
+```shell
+COLLET_DATA_DIR=/var/lib/collet java \
+  --add-opens=java.base/java.nio=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+  --enable-native-access=ALL-UNNAMED \
+  -jar collet-app/target/collet.jar \
   -s collet-app/configs/sample-pipeline.edn \
   -c '{}'
 ```
@@ -24,6 +41,8 @@ the Kmono workspace, root build implementation, core, and application packages:
 docker build -f collet-app/Dockerfile -t collet .
 
 docker run --rm \
+  -v collet-data:/data/collet \
+  -e COLLET_DATA_DIR=/data/collet \
   -e PIPELINE_SPEC='{:name :example :tasks []}' \
   -e PIPELINE_CONFIG='{}' \
   -p 8080:8080 \
@@ -34,6 +53,11 @@ docker run --rm \
 The builder uses Clojure CLI with JDK 25 and the runtime image uses Java 25. The
 runtime image preserves the existing JVM options, JMX agent on port 8080, `/tini`
 entrypoint, environment variables, and startup command.
+
+The application persists compiled pipeline revisions and run/task lifecycle state under
+`COLLET_DATA_DIR`. The default is `./.collet/db`; mount the directory as shown above
+to retain it across container replacement. Runtime configuration, secrets, task
+results, and Arrow datasets are not persisted.
 
 Docker is required for this workflow. The repository release command creates the app
 package tag but never builds or pushes a registry image; image publication is a

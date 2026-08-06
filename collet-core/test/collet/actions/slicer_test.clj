@@ -7,13 +7,27 @@
    [collet.test-fixtures :as tf]
    [collet.core :as collet]
    [collet.arrow :as collet.arrow]
-   [collet.actions.slicer :as sut])
+   [collet.actions.slicer :as sut]
+   [collet.store.datalevin :as datalevin])
   (:import
    [java.time LocalDate]
    [java.time.format DateTimeFormatter]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.slicer))
+
+
+(defn- run-durable-pipeline
+  [pipeline config]
+  (let [ctx (collet/context
+             {:store (datalevin/store
+                      {:dir (str "tmp/" (random-uuid))})})
+        run (collet/start ctx (collet/compile-pipeline pipeline) config)]
+    (try
+      @run
+      run
+      (finally
+        (collet/close ctx)))))
 
 
 (defn data->dataset-seq
@@ -463,8 +477,8 @@
                                                             :apply    [[:flatten {:by {:artist [:relations
                                                                                                 [:$/cat [:$/cond [:not-nil? :artist]]
                                                                                                  :artist]]}}]]}}]}]}
-          pipeline      (collet/compile-pipeline pipeline-spec)]
-      @(pipeline {:area-events test-events-data})
+          pipeline      (run-durable-pipeline pipeline-spec
+                                              {:area-events test-events-data})]
       (let [events-with-artists (:events-with-artists pipeline)]
         (is (= (map :id test-events-data)
                (distinct (ds/column events-with-artists :id)))
@@ -495,8 +509,7 @@
                                                                           :columns {:title     :distinct
                                                                                     :date      :values
                                                                                     :prs-count :row-count}}]]}}]}]}
-        pipeline      (collet/compile-pipeline pipeline-spec)]
-    @(pipeline {})
+        pipeline      (run-durable-pipeline pipeline-spec {})]
     (let [prs-by-member (:prs-count-by-member pipeline)]
       (is (= 3 (ds/row-count prs-by-member)))
       (is (= #{1 2 3}
@@ -533,8 +546,7 @@
                                                                   [:fold {:by      [:user-id :year-month]
                                                                           :columns {:pulls-count [:count-distinct :id]}}]
                                                                   [:select {:columns [:user-id :pulls-count :year-month]}]]}}]}]}
-        pipeline      (collet/compile-pipeline pipeline-spec)]
-    @(pipeline {})
+        pipeline      (run-durable-pipeline pipeline-spec {})]
     (is (= 5 (ds/row-count (:monthly-prs-by-member pipeline))))
     (is (= #{{:user-id 2, :pulls-count 2, :year-month "2025-2"}
              {:user-id 1, :pulls-count 1, :year-month "2025-1"}

@@ -1,0 +1,38 @@
+{:width   220
+ :style   [:community
+           :multi-lhs-hang
+           :respect-nl
+           :require-pair
+           :sort-require
+           :extend-nl
+           :rod-no-ma-nl]
+
+ :fn-map
+ {":require"         [:force-nl-body
+                      {:list               {:indent 1}
+                       :next-inner-restore [[:list :indent]]}]
+  "assoc"            :arg1-pair-body
+  "assoc-some"       :arg1-pair
+  "invoke!"          :arg1
+  "transact!"        :arg1-body
+  "ml/trace"         :arg1-body
+  "with-transaction" :binding}
+
+ :remove  {:fn-force-nl #{:noarg1-body}}
+ :list    {:wrap-after-multi? false
+           :no-wrap-after     #{"&"}
+           :indent-only-style :input-hang}
+ :vector  {:wrap-after-multi? false
+           :no-wrap-after     #{"&"}}
+ :set     {:wrap-after-multi? false}
+ :map     {:indent   0
+           :justify? true
+           :justify  {:max-variance 60}
+           :comma?   false}
+ :binding {:indent   0
+           :justify? true
+           :justify  {:max-variance 60}}
+ :pair    {:indent  0
+           :justify {:max-variance 60}}
+ :comment {:wrap? false}
+ :parse   {:interpose "\n\n\n"}}

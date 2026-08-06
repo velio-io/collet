@@ -13,7 +13,8 @@
    [collet.actions.odata]
    [collet.actions.queue]
    [collet.actions.s3]
-   [collet.actions.vega]))
+   [collet.actions.vega]
+   [collet.test-fixtures :as tf]))
 
 (def legacy-action-types
   [:collet.actions.http/request
@@ -44,6 +45,6 @@
                                          :type   :collet.actions.jslt/apply
                                          :params {:input    "{\"answer\": 42}"
                                                   :template "{\"value\": .answer}"}}]}]}
-        pipeline (collet/compile-pipeline spec)]
-    @(pipeline {})
-    (is (= {:value 42} (:transform pipeline)))))
+        pipeline (collet/compile-pipeline spec)
+        run      (tf/run-pipeline! pipeline {})]
+    (is (= {:value 42} (:transform run)))))

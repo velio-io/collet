@@ -213,8 +213,8 @@
                                               :params    {:connection 'connection
                                                           :query      {:select [:*]
                                                                        :from   :data-types}}}]}]})
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (is (= (list #:data_types{:bool_col      true
                                   :date_col      (LocalDate/parse "2024-04-22")
                                   :float_col     3.14
@@ -256,9 +256,9 @@
                                                            :query      {:select [:*]
                                                                         :from   :data-types
                                                                         :where  [:= :mood_col (types/as-other mood)]}}}]}]})
-            _        @(pipeline {:connection connection-map
-                                 :mood       "sad"})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map
+                                                 :mood       "sad"})
+            result   (:query run)]
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
 
@@ -276,8 +276,8 @@
                                                           :prefix-table? false
                                                           :query         {:select [:*]
                                                                           :from   :data-types}}}]}]})
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (are [key expected] (= expected (-> result first key))
           :bool_col true
           :mood_col "happy"
@@ -319,8 +319,8 @@
                                                                                     :mood_col :interval_col
                                                                                     :date_col :time_col :timestamp_col]
                                                                            :from   :data-types}}}]}]})
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)
             columns  (-> result meta :arrow-columns)]
         (is (= 3 (count result)))
         (is (utils/ds-seq? result))
@@ -355,8 +355,8 @@
                                                                                     :mood_col :interval_col
                                                                                     :date_col :time_col :timestamp_col]
                                                                            :from   :data-types}}}]}]})
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (is (instance? LazySeq result))
         (is (= 22 (count result)))
         (is (= {:id            1
@@ -390,8 +390,8 @@
                                                                                       :mood_col :interval_col
                                                                                       :date_col :time_col :timestamp_col]
                                                                              :from   :data-types}}}]}]})
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (is (instance? LazySeq result))
         (is (= 22 (count result)))
         (is (= {:id            1
@@ -434,8 +434,8 @@
                                               :return    [[:$/cat :employees/user_name]]}]}]})
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (containers/populate-employees! conn))
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (is (= 5 (count result)))
         (is (= '("Alice" "Bob" "Charlie" "David" "Eve") result))))
 
@@ -522,8 +522,8 @@
             _        (with-open [conn (jdbc/get-connection connection-map)]
                        (create-tables conn)
                        (populate-orders-data conn))
-            _        @(pipeline {:connection connection-map})
-            result   (:query pipeline)]
+            run      (tf/run-pipeline! pipeline {:connection connection-map})
+            result   (:query run)]
         (is (instance? LazySeq result))
         (is (= 4 (count result)))
         (is (= '({:users/username "Alice" :products/product_name "Keyboard" :total_quantity 1M :total_amount 30.00M}

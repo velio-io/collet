@@ -309,8 +309,8 @@
                                     :iterator   {:next [:not-nil? [:state :airports-request :body "@odata.nextLink"]]}
                                     :return     [:state :airports-request :body "value"]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {})
-            {:keys [airports]} pipeline]
+            run           (tf/run-pipeline! pipeline {})
+            {:keys [airports]} run]
         (is (= (-> (/ total-count 8) (Math/ceil) int)
                (count airports)))
         (is (= 8 (count (first airports))))
@@ -337,8 +337,8 @@
                                                   :return    [:body "value"]}]
                                     :iterator   {:next [:not-empty? [:state :airports-request]]}}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {:batch-size 4})
-            {:keys [airports]} pipeline]
+            run           (tf/run-pipeline! pipeline {:batch-size 4})
+            {:keys [airports]} run]
         ;; will make one additional request to get to the state when (not (empty? [])) will return true
         (is (= (-> (/ total-count 4) (Math/ceil) int inc)
                (count airports)))
@@ -376,13 +376,13 @@
                                                               'skip                 [:state :skip]
                                                               'total-airports-count [:state :total-airports-count]}
                                                   :params    ['batch-size 'skip 'total-airports-count]
-                                                  :fn        (fn [batch-size skip total-airports-count]
-                                                               (< (+ skip batch-size) total-airports-count))}]
+                                                  :fn        '(fn [batch-size skip total-airports-count]
+                                                                (< (+ skip batch-size) total-airports-count))}]
                                     :iterator   {:next [:true? [:state :continue?]]}
                                     :return     [:state :airports-request]}]}
             pipeline      (collet/compile-pipeline pipeline-spec)
-            _             @(pipeline {:batch-size 4})
-            {:keys [airports]} pipeline]
+            run           (tf/run-pipeline! pipeline {:batch-size 4})
+            {:keys [airports]} run]
         (is (= (-> (/ total-count 4) (Math/ceil) int)
                (count airports)))
         (is (= 4 (count (first airports))))

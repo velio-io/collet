@@ -5,12 +5,26 @@
    [collet.actions.enrich :as sut]
    [collet.test-http-server :as http]
    [collet.test-fixtures :as tf]
-   [collet.utils :as utils]))
+   [collet.utils :as utils]
+   [collet.store.datalevin :as datalevin]))
 
 
 (use-fixtures :once
   http/with-server
   (tf/instrument! 'collet.actions.enrich))
+
+
+(defn- run-durable-pipeline
+  [pipeline config]
+  (let [ctx (collet/context
+             {:store (datalevin/store
+                      {:dir (str "tmp/" (random-uuid))})})
+        run (collet/start ctx (collet/compile-pipeline pipeline) config)]
+    (try
+      @run
+      run
+      (finally
+        (collet/close ctx)))))
 
 
 (def test-events-data
@@ -90,8 +104,8 @@
                                                 :return    [:body]
                                                 :fold-in   [:artist]}]
                                   :iterator   {:next [:true? [:$enrich/has-next-item]]}}]}
-          pipeline      (collet/compile-pipeline pipeline-spec)]
-      @(pipeline {:area-events test-events-data})
+          pipeline      (run-durable-pipeline pipeline-spec
+                                              {:area-events test-events-data})]
 
       (let [events  (:events-with-artists pipeline)
             artists (filter #(some? (get-in % [:artist :rating])) events)]

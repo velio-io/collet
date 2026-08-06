@@ -1,0 +1,281 @@
+(ns collet.store.datalevin-test
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [collet.store :as store]
+   [collet.store.datalevin :as datalevin]
+   [datalevin.core :as d])
+  (:import
+    [java.nio.file FileVisitOption Files Path]
+    [java.nio.file.attribute FileAttribute]))
+
+
+(defn- temporary-store-path
+  ^Path
+  []
+  (Files/createTempDirectory
+   "collet-store-"
+   (make-array FileAttribute 0)))
+
+
+(defn- delete-store!
+  [^Path path]
+  (when (Files/exists path (make-array java.nio.file.LinkOption 0))
+    (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
+      (doseq [entry (sort-by str
+                             #(compare %2 %1)
+                             (iterator-seq (.iterator paths)))]
+        (Files/deleteIfExists ^Path entry)))))
+
+
+(defmacro with-store
+  [[binding] & body]
+  `(let [path#    (temporary-store-path)
+         ~binding (datalevin/store {:dir (str path#)})]
+     (try
+       ~@body
+       (finally
+        (store/close! ~binding)
+        (delete-store! path#)))))
+
+
+(def pipeline-v1
+  {:name            :orders
+   :version         1
+   :use-arrow       true
+   :max-parallelism 10
+   :tasks           [{:name    :fetch
+                      :actions [{:name :fetch
+                                 :type :custom
+                                 :fn   'clojure.core/identity}]}
+                     {:name    :load
+                      :inputs  [:fetch]
+                      :actions [{:name :load
+                                 :type :custom
+                                 :fn   'clojure.core/identity}]}]})
+
+
+(def pipeline-with-edn-values
+  (-> pipeline-v1
+      (assoc-in [:tasks 0 :actions 0 :fn]
+                '(fn [value] (identity value)))
+      (assoc-in [:tasks 0 :actions 0 :selectors]
+                {'value [:config :value]})
+      (assoc-in [:tasks 0 :actions 0 :params]
+                {:missing nil
+                 :list-marker
+                 {:collet.store.datalevin/list [:a :b]}
+                 :entries-marker
+                 {:collet.store.datalevin/entries [[:a 1]]}
+                 :nested-marker
+                 [{:collet.store.datalevin/list [:nested]}]})))
+
+
+(deftest store-owns-one-process-lifetime-connection
+  (let [path (temporary-store-path)
+        db   (datalevin/store {:dir (str path)})]
+    (try
+      (is (d/conn? (:conn db)))
+      (is (not (d/closed? (:conn db))))
+      (is (nil? (store/close! db)))
+      (is (nil? (store/close! db)))
+      (is (d/closed? (:conn db)))
+      (finally
+       (store/close! db)
+       (delete-store! path)))))
+
+
+(deftest store-schema-only-declares-required-database-behavior
+  (with-store [db]
+              (is (= #{:pipeline/name
+                       :pipeline/version
+                       :pipeline/key
+                       :pipeline/plan
+                       :run/id
+                       :run/pipeline
+                       :task/id
+                       :task/run
+                       :task/name
+                       :task/key
+                       :task/inputs}
+                     (->> (d/schema (:conn db))
+                          keys
+                          (remove #(= "db" (namespace %)))
+                          set)))
+              (is (= {:db/valueType         :db.type/idoc
+                      :db/domain            "pipeline_plans"
+                      :db.idoc/indexedPaths [:name
+                                             :version
+                                             [:tasks :name]
+                                             [:tasks :inputs]]}
+                     (select-keys
+                      (get (d/schema (:conn db)) :pipeline/plan)
+                      [:db/valueType :db/domain :db.idoc/indexedPaths])))))
+
+
+(deftest pipeline-plan-is-a-round-trippable-idoc
+  (with-store
+   [db]
+   (store/save-pipeline! db pipeline-with-edn-values)
+   (let [loaded (store/load-pipeline db :orders 1)]
+     (is (= pipeline-with-edn-values loaded))
+     (is (= {:collet.store.datalevin/list [:a :b]}
+            (get-in loaded [:tasks 0 :actions 0 :params :list-marker])))
+     (is (= {:collet.store.datalevin/entries [[:a 1]]}
+            (get-in loaded [:tasks 0 :actions 0 :params :entries-marker])))
+     (is (= [{:collet.store.datalevin/list [:nested]}]
+            (get-in loaded [:tasks 0 :actions 0 :params :nested-marker]))))
+   (is (= 1
+          (d/q '[:find (count ?pipeline) .
+                 :where
+                 [(idoc-match $ :pipeline/plan {:tasks {:name :fetch}})
+                  [[?pipeline]]]]
+               (d/db (:conn db)))))
+   (is
+    (nil?
+     (d/q '[:find (count ?pipeline) .
+            :where
+            [(idoc-match
+              $
+              :pipeline/plan
+              {:tasks {:actions {:params {:missing (nil?)}}}})
+             [[?pipeline]]]]
+          (d/db (:conn db)))))))
+
+
+(deftest literal-json-null-is-not-supported
+  (with-store [db]
+              (is (thrown?
+                   clojure.lang.ExceptionInfo
+                   (store/save-pipeline!
+                    db
+                    (assoc-in pipeline-v1
+                     [:tasks 0 :actions 0 :params]
+                     {:value :json/null}))))))
+
+
+(deftest pipeline-revisions-are-immutable
+  (with-store [db]
+              (testing "an equal revision is idempotent"
+                (is (= pipeline-v1 (store/save-pipeline! db pipeline-v1)))
+                (is (= pipeline-v1 (store/save-pipeline! db pipeline-v1))))
+
+              (testing "a conflicting plan requires a version bump"
+                (let [error (try
+                              (store/save-pipeline!
+                               db
+                               (assoc pipeline-v1 :max-parallelism 2))
+                              nil
+                              (catch clojure.lang.ExceptionInfo error
+                                error))]
+                  (is (= :collet.error/pipeline-revision-conflict
+                         (:collet.error/type (ex-data error))))))
+
+              (testing "versions coexist and latest/exact loading works"
+                (let [pipeline-v2 (assoc pipeline-v1
+                                    :version 2
+                                    :max-parallelism 2)]
+                  (store/save-pipeline! db pipeline-v2)
+                  (is (= pipeline-v1 (store/load-pipeline db :orders 1)))
+                  (is (= pipeline-v2 (store/load-pipeline db :orders 2)))
+                  (is (= pipeline-v2 (store/load-pipeline db :orders)))
+                  (is (nil? (store/load-pipeline db :missing)))))))
+
+
+(deftest pipeline-runs-and-task-references-survive-reopen
+  (let [path       (temporary-store-path)
+        run-id     (random-uuid)
+        fetch-id   (random-uuid)
+        load-id    (random-uuid)
+        created-at (System/currentTimeMillis)
+        run        {:run/id         run-id
+                    :run/pipeline   {:pipeline/name    :orders
+                                     :pipeline/version 1}
+                    :run/status     :running
+                    :run/created-at created-at
+                    :run/started-at created-at}
+        task-runs  [{:task/id         fetch-id
+                     :task/run        run-id
+                     :task/name       :fetch
+                     :task/status     :waiting
+                     :task/inputs     []
+                     :task/created-at created-at}
+                    {:task/id         load-id
+                     :task/run        run-id
+                     :task/name       :load
+                     :task/status     :waiting
+                     :task/inputs     [fetch-id]
+                     :task/created-at created-at}]
+        db         (datalevin/store {:dir (str path)})]
+    (try
+      (store/save-pipeline! db pipeline-v1)
+      (is (= run (store/create-run! db run task-runs)))
+      (store/update-run! db run-id {:run/status :paused})
+      (store/update-task! db
+                          fetch-id
+                          {:task/status      :completed
+                           :task/started-at  created-at
+                           :task/finished-at created-at})
+      (store/close! db)
+
+      (let [reopened (datalevin/store {:dir (str path)})
+            tasks    (store/get-task-runs reopened run-id)
+            by-name  (into {} (map (juxt :task/name identity)) tasks)]
+        (try
+          (is (= pipeline-v1 (store/load-pipeline reopened :orders 1)))
+          (is (= (assoc run :run/status :paused)
+                 (store/get-run reopened run-id)))
+          (is (= (set [(assoc (first task-runs)
+                         :task/status :completed
+                         :task/started-at created-at
+                         :task/finished-at created-at)
+                       (second task-runs)])
+                 (set tasks)))
+          (is (= :completed (get-in by-name [:fetch :task/status])))
+          (is (= [fetch-id] (get-in by-name [:load :task/inputs])))
+          (is (= run-id (get-in by-name [:load :task/run])))
+          (finally
+           (store/close! reopened))))
+      (finally
+       (store/close! db)
+       (delete-store! path)))))
+
+
+(deftest task-runs-use-one-query-with-an-inline-pull
+  (with-store [db]
+              (let [run-id    (random-uuid)
+                    fetch-id  (random-uuid)
+                    load-id   (random-uuid)
+                    run       {:run/id         run-id
+                               :run/pipeline   {:pipeline/name    :orders
+                                                :pipeline/version 1}
+                               :run/status     :running
+                               :run/created-at 1
+                               :run/started-at 1}
+                    task-runs [{:task/id         fetch-id
+                                :task/run        run-id
+                                :task/name       :fetch
+                                :task/status     :waiting
+                                :task/inputs     []
+                                :task/created-at 1}
+                               {:task/id         load-id
+                                :task/run        run-id
+                                :task/name       :load
+                                :task/status     :waiting
+                                :task/inputs     [fetch-id]
+                                :task/created-at 1}]
+                    query     d/q
+                    pull      d/pull
+                    queries   (atom 0)
+                    pulls     (atom 0)]
+                (store/save-pipeline! db pipeline-v1)
+                (store/create-run! db run task-runs)
+                (let [tasks (with-redefs [d/q    (fn [& args]
+                                                   (swap! queries inc)
+                                                   (apply query args))
+                                          d/pull (fn [& args]
+                                                   (swap! pulls inc)
+                                                   (apply pull args))]
+                              (store/get-task-runs db run-id))]
+                  (is (= #{fetch-id load-id} (set (map :task/id tasks))))
+                  (is (= 1 @queries))
+                  (is (zero? @pulls))))))

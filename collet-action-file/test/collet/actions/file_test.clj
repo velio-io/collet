@@ -142,7 +142,7 @@
                                                      :file-name   "./tmp/file-sink-test.csv"
                                                      :csv-header? true}}]}]})]
 
-      @(pipeline {:connection connection-map})
+      (tf/run-pipeline! pipeline {:connection connection-map})
 
       (with-open [rdr (io/reader "./tmp/file-sink-test.csv")]
         (is (= [["id" "user_name" "age"]

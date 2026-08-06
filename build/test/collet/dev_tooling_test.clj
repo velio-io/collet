@@ -6,13 +6,14 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
-   [java.net InetAddress ServerSocket]
-   [java.nio.file Files]
-   [java.util.concurrent TimeUnit]))
+    [java.net InetAddress ServerSocket]
+    [java.nio.file Files]
+    [java.util.concurrent TimeUnit]))
 
 
 (def ^:private nrepl-client-script
   (.getAbsolutePath (io/file "scripts/agent/nrepl-eval.bb")))
+
 
 (defn- root-deps []
   (-> "deps.edn"
@@ -43,6 +44,11 @@
          (concat ["bb" nrepl-client-script]
                  args
                  [:dir dir])))
+
+
+(defn- run-formatter
+  [& args]
+  (apply shell/sh "bb" "fmt:check" args))
 
 
 (defn- delete-tree
@@ -95,16 +101,17 @@
     (try
       (f {:dir dir :port (await-nrepl-port process dir)})
       (finally
-        (.destroy process)
-        (when-not (.waitFor process 5 TimeUnit/SECONDS)
-          (.destroyForcibly process)
-          (.waitFor process 5 TimeUnit/SECONDS))
-        (delete-tree dir)))))
+       (.destroy process)
+       (when-not (.waitFor process 5 TimeUnit/SECONDS)
+         (.destroyForcibly process)
+         (.waitFor process 5 TimeUnit/SECONDS))
+       (delete-tree dir)))))
 
 
 (defn- unused-loopback-port
   []
-  (with-open [socket (ServerSocket. 0 1
+  (with-open [socket (ServerSocket. 0
+                                    1
                                     (InetAddress/getByName "127.0.0.1"))]
     (.getLocalPort socket)))
 
@@ -118,16 +125,16 @@
                        ^java.util.List ["sh" "-c" "sleep 5"])
                       (.start))
         writer    (future
-                    (Thread/sleep 100)
-                    (spit port-file "54321"))]
+                   (Thread/sleep 100)
+                   (spit port-file "54321"))]
     (try
       (spit port-file "")
       (is (= 54321 (await-nrepl-port process dir)))
       (finally
-        (deref writer 1000 nil)
-        (.destroyForcibly process)
-        (.waitFor process 5 TimeUnit/SECONDS)
-        (delete-tree dir)))))
+       (deref writer 1000 nil)
+       (.destroyForcibly process)
+       (.waitFor process 5 TimeUnit/SECONDS)
+       (delete-tree dir)))))
 
 
 (deftest root-repl-aliases-are-reproducible
@@ -153,16 +160,40 @@
 
 
 (deftest root-dev-namespace-exposes-project-scoped-reload
-  (let [expected    (reload-dirs)
-        user-source (slurp "dev/user.clj")
-        code        (str "(assert (= " (pr-str expected) " user/reload-dirs)) "
-                      "(assert (= '([]) (:arglists (meta #'user/reload)))) "
-                      "(println \"dev-repl-contract-ok\")")
+  (let [expected               (reload-dirs)
+        user-source            (slurp "dev/user.clj")
+        code                   (str "(assert (= "
+                                    (pr-str expected)
+                                    " user/reload-dirs)) "
+                                    "(assert (= '([]) (:arglists (meta #'user/reload)))) "
+                                    "(println \"dev-repl-contract-ok\")")
         {:keys [exit out err]} (shell/sh "clojure" "-M:dev" "-e" code)]
     (is (zero? exit) (str out err))
     (is (str/includes? out "dev-repl-contract-ok") out)
     (is (str/includes? user-source ":no-reload '#{user}") user-source)
     (is (not (re-find #"\[collet\." user-source)) user-source)))
+
+
+(deftest repository-formatter-ignores-generated-target-files
+  (let [root      (-> (io/file "build")
+                      .toPath
+                      (Files/createTempDirectory
+                       "format-test-"
+                       (make-array java.nio.file.attribute.FileAttribute 0))
+                      .toFile)
+        source    (io/file root "source.clj")
+        generated (io/file root "target" "generated.clj")]
+    (try
+      (io/copy (io/file "scripts/tasks/format.clj") source)
+      (io/make-parents generated)
+      (spit generated "(ns generated)(def   answer 42)")
+      (let [{:keys [exit out err]} (run-formatter "--root" (str root))
+            output (str out err)]
+        (is (zero? exit) output)
+        (is (str/includes? output "source.clj") output)
+        (is (not (str/includes? output "target/generated.clj")) output))
+      (finally
+       (delete-tree root)))))
 
 
 (deftest fallback-nrepl-client-has-a-stable-cli
@@ -177,45 +208,47 @@
       (is (str/includes? out "java TCP listeners:") out)))
   (testing "evaluation and port-file discovery"
     (with-ephemeral-nrepl
-      (fn [{:keys [dir port]}]
-        (let [{:keys [exit out err]}
-              (run-nrepl-client "--port" (str port) "--code" "(+ 1 2)")]
-          (is (zero? exit) err)
-          (is (= "3" (str/trim out)) out))
-        (let [{:keys [exit out err]}
-              (run-nrepl-client-in dir "--code" "(* 6 7)")]
-          (is (zero? exit) err)
-          (is (= "42" (str/trim out)) out))
-        (let [{:keys [exit err]} (shell/sh "git" "init" :dir dir)
-              nested-dir         (io/file dir "nested")]
-          (is (zero? exit) err)
-          (is (.mkdir nested-dir))
-          (let [{:keys [exit out err]}
-                (run-nrepl-client-in
-                 (str nested-dir)
-                 "--code" "(+ 20 22)")]
-            (is (zero? exit) err)
-            (is (= "42" (str/trim out)) out)))
-        (let [{:keys [exit err]}
-              (run-nrepl-client
-               "--port" (str port)
-               "--code" "(throw (ex-info \"expected\" {}))")]
-          (is (= 1 exit) err)
-          (is (str/includes? err "ex:") err))
-        (let [started-at (System/nanoTime)
-              {:keys [exit err]}
-              (run-nrepl-client
-               "--port" (str port)
-               "--timeout" "1"
-               "--code"
-               (str "(do (Thread/sleep 800) (println \"progress\") "
-                    "(Thread/sleep 800) :done)"))
-              elapsed-ms (/ (- (System/nanoTime) started-at) 1000000.0)]
-          (is (= 4 exit) err)
-          (is (str/includes? err "timed out") err)
-          (is (< elapsed-ms 1500)
-              (str "client exceeded its overall deadline: "
-                   elapsed-ms "ms"))))))
+     (fn [{:keys [dir port]}]
+       (let [{:keys [exit out err]}
+             (run-nrepl-client "--port" (str port) "--code" "(+ 1 2)")]
+         (is (zero? exit) err)
+         (is (= "3" (str/trim out)) out))
+       (let [{:keys [exit out err]}
+             (run-nrepl-client-in dir "--code" "(* 6 7)")]
+         (is (zero? exit) err)
+         (is (= "42" (str/trim out)) out))
+       (let [{:keys [exit err]} (shell/sh "git" "init" :dir dir)
+             nested-dir         (io/file dir "nested")]
+         (is (zero? exit) err)
+         (is (.mkdir nested-dir))
+         (let [{:keys [exit out err]}
+               (run-nrepl-client-in
+                (str nested-dir)
+                "--code"
+                "(+ 20 22)")]
+           (is (zero? exit) err)
+           (is (= "42" (str/trim out)) out)))
+       (let [{:keys [exit err]}
+             (run-nrepl-client
+              "--port" (str port)
+              "--code" "(throw (ex-info \"expected\" {}))")]
+         (is (= 1 exit) err)
+         (is (str/includes? err "ex:") err))
+       (let [started-at (System/nanoTime)
+             {:keys [exit err]}
+             (run-nrepl-client
+              "--port" (str port)
+              "--timeout" "1"
+              "--code"
+              (str "(do (Thread/sleep 800) (println \"progress\") "
+                   "(Thread/sleep 800) :done)"))
+             elapsed-ms (/ (- (System/nanoTime) started-at) 1000000.0)]
+         (is (= 4 exit) err)
+         (is (str/includes? err "timed out") err)
+         (is (< elapsed-ms 1500)
+             (str "client exceeded its overall deadline: "
+                  elapsed-ms
+                  "ms"))))))
   (testing "connection errors"
     (let [{:keys [exit err]}
           (run-nrepl-client
@@ -225,14 +258,17 @@
       (is (str/includes? err "cannot connect") err)))
   (testing "usage errors"
     (is (= 64 (:exit (run-nrepl-client))))
-    (is (= 64 (:exit (run-nrepl-client
-                      "--port" "0"
-                      "--code" "(+ 1 2)"))))
-    (is (= 64 (:exit (run-nrepl-client
-                      "--port" "1"
-                      "--timeout" "0"
-                      "--code" "(+ 1 2)"))))
-    (is (= 64 (:exit (run-nrepl-client
-                      "--port" "1"
-                      "--timeout" "-1"
-                      "--code" "(+ 1 2)"))))))
+    (is (= 64
+           (:exit (run-nrepl-client
+                   "--port" "0"
+                   "--code" "(+ 1 2)"))))
+    (is (= 64
+           (:exit (run-nrepl-client
+                   "--port" "1"
+                   "--timeout" "0"
+                   "--code" "(+ 1 2)"))))
+    (is (= 64
+           (:exit (run-nrepl-client
+                   "--port" "1"
+                   "--timeout" "-1"
+                   "--code" "(+ 1 2)"))))))

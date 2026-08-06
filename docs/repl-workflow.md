@@ -10,6 +10,8 @@ the files being edited.
 - JDK 25 or newer.
 - Clojure CLI.
 - Babashka.
+- The repository-pinned zprint tasks, invoked through `bb fmt:check` and
+  `bb fmt:fix`.
 - `clj-nrepl-eval` on `PATH` for the preferred eval client.
 - `clj-paren-repair` on `PATH` for delimiter recovery.
 
@@ -148,6 +150,19 @@ caches, Git dependency checkouts, JARs, or generated POMs:
 Repository source can be read directly. Use `:reload` during manual namespace
 investigation so a cached require does not hide recent edits.
 
+## Formatting
+
+Use the pinned formatting tasks for routine formatting and checks:
+
+```shell
+bb fmt:check --file path/to/file.clj
+bb fmt:fix --file path/to/file.clj
+```
+
+With no scope option, the tasks process the repository. Use `--file` for one
+file or `--root` for a subtree. Project formatting is defined by `.zprint.edn`;
+do not invoke the unrelated macOS `zprint` executable directly.
+
 ## Parenthesis Repair
 
 When reload reports an unmatched, unexpected, or EOF delimiter error, do not
@@ -163,16 +178,21 @@ Multiple files are supported:
 clj-paren-repair path/to/first.clj path/to/second.clj
 ```
 
-In file mode the tool repairs delimiters and invokes cljfmt in the current
-project environment, so Collet's `.cljfmt.edn` is applied. Use it only for
-delimiter recovery, not routine formatting.
+Use the repair tool only for delimiter recovery, not routine formatting. Its
+formatting is not authoritative for Collet; format every repaired file:
+
+```shell
+bb fmt:fix --file path/to/first.clj
+bb fmt:fix --file path/to/second.clj
+```
 
 After repair:
 
-1. Inspect `git diff -- path/to/file.clj`.
-2. Confirm the repaired form still expresses the intended behavior.
-3. Evaluate `(user/reload)` again.
-4. Run the affected package or build tests.
+1. Run `bb fmt:fix --file <path>` on every repaired file.
+2. Inspect `git diff -- path/to/file.clj`.
+3. Confirm the repaired form still expresses the intended behavior.
+4. Evaluate `(user/reload)` again.
+5. Run the affected package or build tests.
 
 If `clj-paren-repair` is missing or returns a failure, stop and report the
 blocker rather than guessing at the delimiter structure.

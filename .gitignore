@@ -15,7 +15,9 @@ target/*.jar
 .hg/
 .idea
 *.iml
-.clj-kondo
+**/.clj-kondo
+/.clj-kondo/.cache
+!/.clj-kondo
 .cpcache
 data
 tmp

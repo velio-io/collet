@@ -124,7 +124,7 @@
       {:Bucket                    "pipe-test-bucket"
        :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
-    @(pipeline {:aws-creds {:aws-region        "eu-west-1"
+    (tf/run-pipeline! pipeline {:aws-creds {:aws-region        "eu-west-1"
                             :aws-key           "test"
                             :aws-secret        "test"
                             :endpoint-override {:protocol :http
