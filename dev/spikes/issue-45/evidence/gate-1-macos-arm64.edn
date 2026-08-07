@@ -1,0 +1,119 @@
+{:evidence-version 2
+ :issue 45
+ :gate :compatibility-and-recovery
+ :status :pass
+ :recorded-at "2026-08-07"
+ :environment
+ {:platform :macos-arm64
+  :java-version "25.0.1"
+  :main-jvm
+  {:duckdb              "v1.5.5"
+   :duckdb-jdbc         "1.5.5.1"
+   :arrow               "19.0.0"
+   :arrow-components    {:vector "19.0.0" :memory-core "19.0.0" :memory-unsafe "19.0.0" :c-data "19.0.0"}
+   :lance-java-present? false
+   :dependency-aligned? true}
+  :lance-helper-jvm
+  {:lance-java          "9.0.1"
+   :arrow               "18.3.0"
+   :arrow-components    {:vector "18.3.0" :memory-core "18.3.0" :memory-netty "18.3.0" :c-data "18.3.0" :dataset "18.3.0"}
+   :duckdb-jdbc         "1.5.5.1"
+   :dependency-aligned? true}
+  :ducktape-git-sha "f0fc5f38f272560821e1f9c8e7fe1634761c0580"}
+ :native-components
+ {:duckdb-lance-extension
+  {:version "2f167ea"
+   :sha256  "b0753f592047d3016465ad661275ba45def627b566461b54eb842e27dd5fb85a"}
+  :duckdb-httpfs-extension
+  {:version "827222f"
+   :sha256  "10514b4ef19f80bf4ec4bf90c124f5d34625f2606263b40ae8ec7979905bb779"}
+  :ducktape-duckdb
+  {:version "1.5.5"
+   :sha256  "b9027d18ef3e8d960568f77e946a83ca68009cb22d71cf7f94de842afdd094d8"}}
+ :configuration
+ {:rows                16
+  :batch-rows          4
+  :embedding-width     4
+  :duckdb-memory-limit "256MiB"}
+ :packaging-isolation
+ {:publishable-paths-changed             []
+  :worktree-plan-equals-clean-head-plan? true
+  :clean-head-pre-existing-plan          {:version "0.2.9" :packages 14}
+  :spike-selected-additional-packages    []}
+ :profile-types
+ [{:column :id :type "BIGINT"}
+  {:column :name :type "VARCHAR" :nullable? true}
+  {:column :active :type "BOOLEAN"}
+  {:column :score :type "DOUBLE"}
+  {:column :created-at :type "TIMESTAMP"}
+  {:column :address :type "STRUCT(line VARCHAR, city VARCHAR, zip INTEGER)" :nullable? true}
+  {:column :attributes :type "MAP(VARCHAR, VARCHAR)" :nullable? true :null-children? true}
+  {:column :tags :type "VARCHAR[]" :null-elements? true}
+  {:column :events :type "STRUCT(kind VARCHAR, happened_at TIMESTAMP, score INTEGER)[]" :null-elements? true :null-children? true}
+  {:column :embedding :type "FLOAT[4]" :nullable? true}]
+ :cases
+ [{:name :main-runtime-dependency-isolation :status :pass}
+  {:name                    :duckdb-jdbc-parquet
+   :status                  :pass
+   :rows                    16
+   :value-fidelity?         true
+   :integrated-schema-fidelity? true
+   :unsupported-physical-cells [:embedding/fixed-size-width]
+   :raw-embedding-type      "FLOAT[]"
+   :restored-embedding-type "FLOAT[4]"}
+  {:name :duckdb-jdbc-lance :status :pass :rows 16 :full-nested-fidelity? true}
+  {:name :jdbc-arrow-ipc :status :pass :rows 16 :full-nested-fidelity? true :allocator-peak-bytes 1975}
+  {:name              :collet-arrow-common-subset
+   :status            :pass
+   :unsupported-cells [:address :attributes :tags/null-element :events :embedding]}
+  {:name                 :ducktape-nested-tmd-view
+   :status               :pass
+   :object-columns       {:address true :attributes true :tags true :events true}
+   :unsupported-cells    [:embedding]
+   :omitted-null-columns [:name :address :attributes :tags :events]}
+  {:name                :lance-java-reopen-latest
+   :status              :pass
+   :version             2
+   :latest-version      2
+   :rows                17
+   :dependency-aligned? true}
+  {:name                :lance-java-reopen-pinned
+   :status              :pass
+   :version             1
+   :latest-version      2
+   :rows                16
+   :dependency-aligned? true}
+  {:name                :lance-java-duckdb-coexistence
+   :status              :pass
+   :version             2
+   :rows                17
+   :dependency-aligned? true}
+  {:name              :lance-precommit-recovery
+   :status            :pass
+   :fragments-created 1
+   :commit-attempted? false
+   :child-termination :runtime-halt
+   :child-exit        86
+   :cleanup-ran?      false
+   :prior-committed-version-retained? true
+   :rows-after-reopen 17}]
+ :forced-arrow19-diagnostic
+ {:hard?              false
+  :status             :fail-as-expected
+  :exit               1
+  :exact-message      "Execution error (UnsupportedOperationException) at io.netty.buffer.EmptyByteBuf/memoryAddress (EmptyByteBuf.java:961).\nnull"
+  :full-output-bytes  5818
+  :full-output-sha256 "5a6c63503a00f6bdd4f154f55550d1ad1fd9210d071d1b7effd64151898c5feb"
+  :artifact-path      "target/spike-45-redo/abrupt-check/child-open-c8c94e97-e2fa-4ada-a089-75a3234ed163/output.log"
+  :decision-evidence? false}
+ :s3-smoke
+ {:status         :pass
+  :implementation "LocalStack 4.14.0"
+  :fresh-jvm-and-duckdb-reopen? true
+  :formats        [:parquet :lance]
+  :operation      :projected-filtered-read
+  :no-object-store-performance-claim? true}
+ :decision
+ {:format    :pending-native-linux-gates
+  :arrow-ipc :core-interchange
+  :ducktape  :optional-tmd-view}}

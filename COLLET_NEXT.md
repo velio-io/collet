@@ -182,7 +182,7 @@ A large task output is published as a logical artifact dataset. The dataset may 
 ```clojure
 {:artifact/id          #uuid "..."
  :artifact/uri         "s3://collet-artifacts/runs/.../output"
- :artifact/format      :lance
+ :artifact/format      :format/to-be-selected
  :artifact/version     7
  :artifact/schema      {:name :normalized-profile :version 3}
  :artifact/content-key "sha256:..."
@@ -206,17 +206,28 @@ The foundation snapshot initially contains one logical entry rather than exposin
  :snapshot/entries [{:entry/key          :whole-task
                      :entry/artifact-ref [:artifact/id artifact-id]
                      :entry/content-key  "sha256:..."
-                     :entry/format       :lance
+                     :entry/format       :format/to-be-selected
                      :entry/records      58219}]}
 ```
 
 The snapshot ID hashes a versioned canonical logical manifest. It includes logical entry keys, content keys, schema/format identity, and required logical counts; it excludes storage URI, physical artifact reference, run/attempt identity, timestamps, and caller-provided map or entry order. The artifact reference is retained only to resolve the content. This lets the same logical dataset keep its identity when content is copied between local and object storage.
 
-The durable format is intentionally unresolved until #45 is completed:
+The durable format remains unresolved while the corrected #45 spike awaits its
+native Linux AMD64 gate and benchmark. The earlier Parquet decision was
+withdrawn because it mixed Lance's declared Arrow 18.3 runtime with Arrow 19,
+treated a translated container as native Linux, and assumed DuckDB `UPDATE` was
+the only column-evolution path. See the provisional
+[`ADR 0045`](docs/adr/0045-dataset-artifact-spike.md).
 
-- **Lance** is the leading hypothesis because it is Arrow-native, object-store-oriented, versioned, and designed for evolving multimodal/embedding datasets.
-- **Parquet plus DuckDB** is the conservative baseline with a simpler and more mature JVM path.
-- **Arrow IPC** remains useful for streaming and local interchange, but temporary IPC files are not a complete artifact system.
+- **Lance** passes the corrected macOS compatibility, version-reopen,
+  pre-commit recovery, and derived-column smoke. Native Ubuntu remains pending.
+- **Parquet plus DuckDB** remains the conservative baseline and survives the
+  corrected macOS gate through an explicit-schema read adapter; its physical
+  schema loses the fixed width of `FLOAT[n]` embeddings.
+- **Arrow IPC** remains the default core streaming/interchange path; temporary
+  IPC files are not a complete artifact system.
+- **DuckTape** may be an optional tech.ml.dataset view, but never the artifact
+  contract.
 
 For object-storage artifacts, a downstream task should normally scan the URI directly with projection and predicate pushdown. It should not download the complete artifact merely to memory-map it. Local staging or caching is an optimization for measured repeated-read or network-cost problems, not part of the artifact contract.
 
@@ -374,7 +385,7 @@ deployment. Dependency order matters more than issue number:
 
 - [#43](https://github.com/velio-io/collet/issues/43) modernizes the build and separates optional action dependencies.
 - [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin 1.x on the existing Java 25 baseline, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
-- [#45](https://github.com/velio-io/collet/issues/45) selects the durable dataset format and task-local analytical integration using evidence.
+- [#45](https://github.com/velio-io/collet/issues/45) is rerunning the durable-format decision with aligned Lance/Arrow runtimes and native Linux evidence; no durable format is selected yet.
 - [#46](https://github.com/velio-io/collet/issues/46) implements the selected nested and extended Arrow type boundary.
 - [#48](https://github.com/velio-io/collet/issues/48) establishes artifact, one-entry dataset snapshot, materialization, publication, and lineage identities for exact whole-task reuse.
 - [#47](https://github.com/velio-io/collet/issues/47) consumes #48 to add task-local DuckDB SQL; it is not a prerequisite for the artifact store.

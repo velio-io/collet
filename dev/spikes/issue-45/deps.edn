@@ -1,0 +1,56 @@
+{:paths ["src"]
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.5"}
+        org.clojure/data.json {:mvn/version "2.5.2"}
+        io.velio/collet-core {:local/root "../../../collet-core"}
+        io.velio/collet-action-s3 {:local/root "../../../collet-action-s3"}
+        io.velio/collet-test-fixtures {:local/root "../../../test-fixtures"}
+        org.duckdb/duckdb_jdbc {:mvn/version "1.5.5.1"}
+        org.apache.arrow/arrow-vector {:mvn/version "19.0.0"}
+        org.apache.arrow/arrow-memory-core {:mvn/version "19.0.0"}
+        org.apache.arrow/arrow-memory-unsafe
+        {:mvn/version "19.0.0"}
+        org.apache.arrow/arrow-c-data {:mvn/version "19.0.0"}}
+
+ :aliases
+ {:run {:jvm-opts  ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                    "--enable-native-access=ALL-UNNAMED"]
+        :main-opts ["-m" "collet.spike.issue-45"]}
+
+  ;; Lance Java 9.0.1 declares Arrow 18.3.0. Keep that complete dependency set
+  ;; in a short-lived helper JVM instead of overriding it with Collet's Arrow
+  ;; 19 runtime. :replace-deps makes an accidental classpath merge observable.
+  :lance-java-aligned
+  {:replace-deps {org.clojure/clojure                 {:mvn/version "1.12.5"}
+                  org.duckdb/duckdb_jdbc              {:mvn/version "1.5.5.1"}
+                  org.lance/lance-core                {:mvn/version "9.0.1"}
+                  org.apache.arrow/arrow-vector       {:mvn/version "18.3.0"}
+                  org.apache.arrow/arrow-memory-netty {:mvn/version "18.3.0"}
+                  org.apache.arrow/arrow-c-data       {:mvn/version "18.3.0"}
+                  org.apache.arrow/arrow-dataset      {:mvn/version "18.3.0"}}
+   :jvm-opts     ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                  "--enable-native-access=ALL-UNNAMED"]
+   :main-opts    ["-m" "collet.spike.issue-45-lance-java"]}
+
+  ;; This intentionally unsupported override reproduces the original spike
+  ;; configuration. It is diagnostic-only and can never qualify Lance.
+  :lance-java-forced-arrow19
+  {:replace-deps {org.clojure/clojure                 {:mvn/version "1.12.5"}
+                  org.duckdb/duckdb_jdbc              {:mvn/version "1.5.5.1"}
+                  org.lance/lance-core                {:mvn/version "9.0.1"}
+                  org.apache.arrow/arrow-vector       {:mvn/version "19.0.0"}
+                  org.apache.arrow/arrow-memory-netty {:mvn/version "19.0.0"}
+                  org.apache.arrow/arrow-c-data       {:mvn/version "19.0.0"}
+                  org.apache.arrow/arrow-dataset      {:mvn/version "19.0.0"}}
+   :jvm-opts     ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                  "--enable-native-access=ALL-UNNAMED"]
+   :main-opts    ["-m" "collet.spike.issue-45-lance-java"]}
+
+  ;; DuckTape is currently a snapshot.  A Git SHA keeps this comparison
+  ;; immutable without adding it to a published Collet artifact.
+  :ducktape {:extra-deps
+             {ai.dyal/ducktape {:git/url "https://github.com/dynamic-alpha/ducktape.git"
+                                :git/sha "f0fc5f38f272560821e1f9c8e7fe1634761c0580"}}}}}
