@@ -86,22 +86,25 @@ never presented as native-Linux evidence.
 
 ## Current provisional result
 
-The corrected macOS ARM64 gate passes aligned Lance latest/pinned reopen,
+Native Ubuntu AMD64 and macOS ARM64 pass aligned Lance latest/pinned reopen,
 DuckDB/Lance coexistence, orphan-fragment recovery, nested fidelity, JDBC
-Arrow, DuckTape nested object values, and LocalStack reopen. A bounded smoke
-also passes Lance add/replace of a derived fixed-size embedding by using Lance
-Java's computed-column API followed by the DuckDB extension's fixed-array cast.
+Arrow, DuckTape nested object values, LocalStack reopen, and the offline image
+check. Lance add/replace of a derived fixed-size embedding passes by combining
+Lance Java's computed-column API with the DuckDB extension's fixed-array cast.
 The same schema check makes Parquet's physical limitation explicit: DuckDB
 reopens its embedding as `FLOAT[]`; the Parquet adapter restores `FLOAT[n]`
 from the artifact schema and records the raw width loss as unsupported.
 
-The translated Linux AMD64 container still crashes inside `liblance_jni` while
-opening the dataset. Its checkpoint and complete HotSpot report are retained,
-but the host is `VirtualApple`; this is portability diagnostics, not evidence
-of a native Linux failure. The manual Ubuntu workflow must decide the native
-gate before the format decision is updated. Its first run leaves
-`run_benchmark` false and stops after uploading Gate 1 evidence; after review,
-rerun it with `run_benchmark` true to authorize the full Gate 2 measurement.
+The one-GiB native benchmark provisionally recommends Parquet. Lance passed all
+five latency limits but failed the process-cold RSS limit at 2.07x Parquet and
+both amplification limits: its add and replace each changed about 2.13 GB,
+versus 18.4 MB and 18.8 MB Parquet replacements. JDBC Arrow remains the core
+interchange, and DuckTape remains an optional TMD view only. The ADR is still
+pending review; no production format has been accepted or implemented.
+
+The translated Apple-Silicon-hosted Linux image's `liblance_jni` crash remains
+retained portability diagnostics. The passing native Ubuntu run proves that it
+is not a current Lance hard blocker.
 
 See [`evidence/`](evidence/) and
 [`docs/adr/0045-dataset-artifact-spike.md`](../../../docs/adr/0045-dataset-artifact-spike.md).
