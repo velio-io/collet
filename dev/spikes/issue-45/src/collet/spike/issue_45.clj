@@ -19,7 +19,7 @@
     [java.math BigInteger]
     [java.sql Array Connection DriverManager ResultSet ResultSetMetaData SQLException Struct Timestamp]
     [java.time Instant LocalDateTime ZoneOffset]
-    [java.util Map UUID]
+    [java.util Map Properties UUID]
     [java.util.zip ZipInputStream]
     [org.apache.arrow.memory RootAllocator]
     [org.apache.arrow.vector VectorSchemaRoot]
@@ -1118,15 +1118,23 @@
     [:spill (.resolve artifact-directory "duckdb-spill")]]))
 
 
+(defn- streaming-duckdb-connection
+  []
+  (let [properties (doto (Properties.)
+                     (.setProperty "jdbc_stream_results" "true"))]
+    (DriverManager/getConnection "jdbc:duckdb:" properties)))
+
+
 (defn- benchmark-connection!
   [^Path artifact-directory config]
   (let [temp-directory (ensure-directory! (.resolve artifact-directory "duckdb-spill"))
-        connection     (DriverManager/getConnection "jdbc:duckdb:")]
+        connection     (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal (:duckdb-memory-limit config))))
     (sql! connection (str "SET temp_directory = " (sql-literal (.toAbsolutePath temp-directory))))
     (sql! connection "SET preserve_insertion_order = false")
-    {:connection      connection
-     :spill-directory temp-directory}))
+    {:connection          connection
+     :spill-directory     temp-directory
+     :jdbc-stream-results true}))
 
 
 (defn- create-benchmark-profiles!
@@ -1189,7 +1197,7 @@
 (defn- cold-read!
   [format path embedding-width memory-limit temp-directory batch-size]
   (Class/forName "org.duckdb.DuckDBDriver")
-  (with-open [connection (DriverManager/getConnection "jdbc:duckdb:")]
+  (with-open [connection (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal memory-limit)))
     (sql! connection (str "SET temp_directory = " (sql-literal temp-directory)))
     (let [format (keyword format)
@@ -1216,6 +1224,7 @@
                    (throw (ex-info "Unknown cold-read format" {:format format})))]
       {:fresh-jvm               true
        :fresh-duckdb-connection true
+       :jdbc-stream-results     true
        :os-page-cache           :not-flushed
        :format                  format
        :result                  result})))
@@ -2116,11 +2125,13 @@
   [config phase iteration formats]
   (let [artifact-directory (unique-artifact-directory config
                                                       (str "benchmark-" (name phase) "-" iteration))
-        {:keys [connection spill-directory]} (benchmark-connection! artifact-directory config)
+        {:keys [connection spill-directory jdbc-stream-results]}
+        (benchmark-connection! artifact-directory config)
         environment        (with-open [connection connection]
                              (create-benchmark-profiles! connection config)
                              (cond-> {:duckdb-version      (duckdb-version connection)
                                       :logical-input-bytes (logical-input-bytes config)
+                                      :jdbc-stream-results jdbc-stream-results
                                       :profile-schema      (query-rows connection "DESCRIBE profiles")
                                       :artifact-directory  (.toString artifact-directory)
                                       :spill-directory     (.toString spill-directory)}
