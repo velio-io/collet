@@ -1,0 +1,58 @@
+{:evidence-version 2
+ :issue 45
+ :gate :compatibility-and-recovery
+ :status :inconclusive
+ :recorded-at "2026-08-07"
+ :classification :translated-container-not-native-linux
+ :host
+ {:physical-platform :macos-arm64
+  :guest-platform    :linux-amd64
+  :guest-host-name   "VirtualApple"
+  :network           "none"}
+ :environment
+ {:java-version           "25.0.3"
+  :duckdb                 "v1.5.5"
+  :duckdb-jdbc            "1.5.5.1"
+  :lance-java             "9.0.1"
+  :lance-java-arrow       "18.3.0"
+  :main-arrow             "19.0.0"
+  :main-arrow-components  {:vector "19.0.0" :memory-core "19.0.0" :memory-unsafe "19.0.0" :c-data "19.0.0"}
+  :lance-arrow-components {:vector "18.3.0" :memory-core "18.3.0" :memory-netty "18.3.0" :c-data "18.3.0" :dataset "18.3.0"}
+  :dependency-aligned?    true
+  :duckdb-lance-extension "2f167ea"}
+ :configuration {:rows 32 :batch-rows 8 :embedding-width 8}
+ :passed-before-failure
+ [:main-runtime-dependency-isolation
+  :duckdb-jdbc-parquet
+  :duckdb-jdbc-lance
+  :lance-second-version
+  :jdbc-arrow-ipc
+  :collet-arrow-common-subset
+  :ducktape-nested-tmd-view]
+ :failure
+ {:case :lance-java-reopen-latest
+  :child-exit 134
+  :signal :sigsegv
+  :last-checkpoint :allocator-opened
+  :missing-checkpoint :dataset-opened
+  :java-frame "org.lance.Dataset.openNative"
+  :native-frame "_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtB4_4iter8adapters7flatten7FlattenINtCsdWqgeKPIYK7_4slab5DrainINtNtB4_6option6OptionNtNtNtB4_4task4wake5WakerEEEECs6Ymvtjsbuwl_11lance_index+0x84"
+  :exact-header
+  "#  SIGSEGV (0xb) at pc=0x343438312f736e6f, pid=342, tid=352\n# Problematic frame:\n# C  [liblance_jni17287533467677409887.so+0x75fe9f4]  _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtB4_4iter8adapters7flatten7FlattenINtCsdWqgeKPIYK7_4slab5DrainINtNtB4_6option6OptionNtNtNtB4_4task4wake5WakerEEEECs6Ymvtjsbuwl_11lance_index+0x84"
+  :hs-err-bytes 936963
+  :hs-err-sha256 "4ee1e2aaa777e9e434da306e54b7da90a646755b620b139b664004384ef87ac2"
+  :peak-rss-bytes 346882048
+  :rss-samples 296
+  :artifact-path "target/spike-45-redo/final-docker-current/docker-runtime-1786108380009/check/child-open-8724bb1a-fc13-4e27-a323-33723746d02c/hs_err_pid342.log"}
+ :prior-translated-observation
+ {:exact-header  "#  SIGSEGV (0xb) at pc=0x00007fff697819f1, pid=341, tid=351\n# Problematic frame:\n# C  [liblance_jni2090108985976215960.so+0x75fe9f1]"
+  :hs-err-sha256 "2b40484ba91d0bb76d0195fe4dc11eb59f1f3697e75b497fe9569c80c5c823d7"}
+ :corrections
+ {:previous-lance-version             "8.0.0"
+  :previous-forced-arrow              "19.0.0"
+  :previous-exact-error-persisted?    false
+  :previous-native-linux-claim-valid? false}
+ :decision
+ {:lance  :not-rejected-by-this-run
+  :reason :translated-execution-cannot-satisfy-native-linux-gate
+  :required-next-evidence :github-actions-ubuntu-24.04-amd64}}

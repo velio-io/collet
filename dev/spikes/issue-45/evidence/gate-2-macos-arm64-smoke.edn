@@ -1,0 +1,127 @@
+{:evidence-version 2
+ :issue 45
+ :gate :measurement-machinery-smoke
+ :status :pass
+ :recorded-at "2026-08-07"
+ :environment
+ {:platform               :macos-arm64
+  :java-version           "25.0.1"
+  :duckdb                 "v1.5.5"
+  :duckdb-jdbc            "1.5.5.1"
+  :main-arrow             "19.0.0"
+  :main-arrow-components  {:vector "19.0.0" :memory-core "19.0.0" :memory-unsafe "19.0.0" :c-data "19.0.0"}
+  :lance-java             "9.0.1"
+  :lance-java-arrow       "18.3.0"
+  :lance-arrow-components {:vector "18.3.0" :memory-core "18.3.0" :memory-netty "18.3.0" :c-data "18.3.0" :dataset "18.3.0"}
+  :duckdb-lance-extension "2f167ea"}
+ :configuration
+ {:rows                  16
+  :embedding-width       4
+  :batch-rows            4
+  :duckdb-memory-limit   "32MiB"
+  :warmups               1
+  :measured-executions   1
+  :logical-input-bytes   256
+  :cold-definition       "fresh JVM and DuckDB connection; OS page cache is not flushed"
+  :performance-evidence? false}
+ :warmup-smoke
+ {:parquet
+  {:status                :pass
+   :artifact-bytes        3425
+   :write-ms              68.698209
+   :full-sequential-ms    215.981416
+   :projected-filtered-ms 9.989791
+   :sort-join-ms          10.221166
+   :process-cold-ms       133.877583
+   :process-cold-peak-rss 583778304
+   :derived-embedding     :pass}
+  :lance
+  {:status                :pass
+   :artifact-bytes        11007
+   :write-ms              32.86675
+   :full-sequential-ms    18.873208
+   :projected-filtered-ms 9.984125
+   :sort-join-ms          10.971166
+   :process-cold-ms       181.539916
+   :process-cold-peak-rss 647315456
+   :derived-embedding     :pass}
+  :arrow-ipc
+  {:status                :pass
+   :artifact-bytes        11410
+   :write-ms              16.324416
+   :full-sequential-ms    3.14325
+   :process-cold-ms       18.052542
+   :process-cold-peak-rss 622886912
+   :projected-filtered    :unsupported-interchange-only
+   :sort-join             :unsupported-interchange-only
+   :derived-embedding     :unsupported-interchange-only}}
+ :measured-smoke
+ {:parquet
+  {:status                :pass
+   :artifact-bytes        3425
+   :write-ms              12.627625
+   :full-sequential-ms    8.131792
+   :projected-filtered-ms 5.590916
+   :sort-join-ms          7.020542
+   :process-cold-ms       285.632375
+   :process-cold-peak-rss 638582784}
+  :lance
+  {:status                :pass
+   :artifact-bytes        11007
+   :write-ms              22.503917
+   :full-sequential-ms    9.313166
+   :projected-filtered-ms 9.070042
+   :sort-join-ms          11.804833
+   :process-cold-ms       175.707875
+   :process-cold-peak-rss 684195840}
+  :arrow-ipc
+  {:status                :pass
+   :artifact-bytes        11410
+   :write-ms              10.861917
+   :full-sequential-ms    1.582166
+   :process-cold-ms       17.053625
+   :process-cold-peak-rss 632225792}}
+ :lance-column-evolution
+ {:status :pass
+  :integration-path
+  [:lance-java-add-or-drop-computed-column
+   :duckdb-lance-cast-list-to-fixed-float-array]
+  :add-expression "make_array(CAST(id + index AS FLOAT) * CAST(0.5 AS FLOAT), ...)"
+  :replace-expression "make_array(CAST(id + index AS FLOAT) * CAST(0.75 AS FLOAT), ...)"
+  :final-type "FLOAT[4]"
+  :sample-values
+  [{:id 0 :derived-embedding [0.0 0.75 1.5 2.25]}
+   {:id 1 :derived-embedding [0.75 1.5 2.25 3.0]}]
+  :value-fidelity? true}
+ :parquet-schema-restoration
+ {:status                    :pass
+  :physical-embedding-type   "FLOAT[]"
+  :integrated-embedding-type "FLOAT[4]"
+  :schema-source             :explicit-artifact-schema
+  :unsupported-physical-cells [:embedding/fixed-size-width]}
+ :rewrite-amplification-smoke
+ {:phase :warmup
+  :lance-add
+  {:source-bytes    11007
+   :unchanged-bytes 11007
+   :added-bytes     7302
+   :rewritten-bytes 0
+   :unchanged-files 3
+   :added-files     7
+   :rewritten-files 0}
+  :lance-replace
+  {:unchanged-bytes 18296
+   :added-bytes     9592
+   :rewritten-bytes 13
+   :unchanged-files 9
+   :added-files     8
+   :rewritten-files 1}
+  :parquet
+  {:source-bytes              3425
+   :add-replacement-bytes     3680
+   :replace-replacement-bytes 3682}
+  :all-file-hashes-recorded? true}
+ :decision
+ {:format    :pending-native-linux-gate-and-benchmark
+  :arrow-ipc :core-interchange
+  :ducktape  :optional-tmd-view}}

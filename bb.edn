@@ -20,18 +20,32 @@
 
     (defn test-unit! []
       (shell "clojure" "-T:build-test")
-      (shell "clojure" "-M:kmono" "run" "--M" ":test"
-             "--" "-e" ":integration"))
+      (shell "clojure" "-M:kmono"
+             "run" "--M"
+             ":test"
+             "--"
+             "-e" ":integration"))
 
     (defn test-integration! []
       (shell "clojure" "-T:build" "build" ":module" ":collet-cli")
       (shell "clojure" "-P" "-X:build-test")
-      (shell "clojure" "-M:kmono" "run" "--M" ":test:integration"
-             "--" "-i" ":integration")))
+      (shell "clojure" "-M:kmono"
+             "run" "--M"
+             ":test:integration"
+             "--"
+             "-i" ":integration")))
 
   kmono
-  {:doc "Run the pinned Kmono CLI"
+  {:doc  "Run the pinned Kmono CLI"
    :task (apply shell (into ["clojure" "-M:kmono"] *command-line-args*))}
+
+  spike:45
+  {:doc  "Run the isolated Issue #45 dataset-artifact spike"
+   :task (apply shell
+                (into [{:dir "dev/spikes/issue-45"}
+                       "clojure" "-M:run:ducktape"]
+                      *command-line-args*)
+         )}
 
   fmt:check
   {:doc        "Check formatting of Clojure code and EDN files"
@@ -46,15 +60,15 @@
    :task       (fmt/fix! *command-line-args*)}
 
   test
-  {:doc "Run every unit and Docker integration test in separate JVMs"
+  {:doc  "Run every unit and Docker integration test in separate JVMs"
    :task (do (test-unit!) (test-integration!))}
 
   test:unit
-  {:doc "Run every module test suite without :integration tests"
+  {:doc  "Run every module test suite without :integration tests"
    :task (test-unit!)}
 
   test:integration
-  {:doc "Run Docker-backed and artifact startup integration tests"
+  {:doc  "Run Docker-backed and artifact startup integration tests"
    :task (test-integration!)}
 
   test:module
@@ -73,24 +87,27 @@
                           runner-options))))}
 
   build
-  {:doc "Build one module (defaults to all modules)"
+  {:doc  "Build one module (defaults to all modules)"
    :task (module-command! "build" "build" *command-line-args*)}
 
   install
-  {:doc "Install one module and its dependencies (defaults to all libraries)"
+  {:doc  "Install one module and its dependencies (defaults to all libraries)"
    :task (module-command! "install" "install" *command-line-args*)}
 
   verify
-  {:doc "Build and check public artifact contracts"
-   :task (no-args! "verify" *command-line-args*
+  {:doc  "Build and check public artifact contracts"
+   :task (no-args! "verify"
+                   *command-line-args*
                    ["clojure" "-T:build" "verify"])}
 
   release:plan
-  {:doc "Print the independent package release plan"
-   :task (no-args! "release:plan" *command-line-args*
+  {:doc  "Print the independent package release plan"
+   :task (no-args! "release:plan"
+                   *command-line-args*
                    ["clojure" "-T:build" "release-plan"])}
 
   release
-  {:doc "Release every changed package locally"
-   :task (no-args! "release" *command-line-args*
+  {:doc  "Release every changed package locally"
+   :task (no-args! "release"
+                   *command-line-args*
                    ["clojure" "-T:build" "release"])}}}
