@@ -1131,9 +1131,11 @@
         connection     (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal (:duckdb-memory-limit config))))
     (sql! connection (str "SET temp_directory = " (sql-literal (.toAbsolutePath temp-directory))))
+    (sql! connection "SET threads = 1")
     (sql! connection "SET preserve_insertion_order = false")
     {:connection          connection
      :spill-directory     temp-directory
+     :duckdb-threads      1
      :jdbc-stream-results true}))
 
 
@@ -1168,13 +1170,13 @@
     (case operation
       :full-sequential (str "SELECT * FROM " scan)
       :projected-filtered (str "SELECT id, name FROM " scan " WHERE id % 17 = 0")
-      ;; The sort key is the full embedding. It keeps the work substantially
-      ;; above the 256 MiB default rather than merely sorting scalar IDs.
+      ;; Expand each profile across 32 dimension rows, then sort the resulting
+      ;; 33,554,432 default rows by a numeric key. This exceeds 256 MiB while
+      ;; remaining spillable in DuckDB 1.5.5; wide array/string sort records do not.
       :sort-join (str "SELECT p.id FROM "
                       scan
-                      " p JOIN "
-                      scan
-                      " q ON p.id = q.id ORDER BY p.embedding")
+                      " p CROSS JOIN range(32) q(bucket) "
+                      "ORDER BY hash(p.id, q.bucket)")
       (throw (ex-info "Unknown benchmark operation" {:operation operation})))))
 
 
@@ -1200,6 +1202,7 @@
   (with-open [connection (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal memory-limit)))
     (sql! connection (str "SET temp_directory = " (sql-literal temp-directory)))
+    (sql! connection "SET threads = 1")
     (let [format (keyword format)
           result (case format
                    :arrow (measure! 0 #(consume-arrow-ipc! (Paths/get path (make-array String 0))))
@@ -1224,6 +1227,7 @@
                    (throw (ex-info "Unknown cold-read format" {:format format})))]
       {:fresh-jvm               true
        :fresh-duckdb-connection true
+       :duckdb-threads          1
        :jdbc-stream-results     true
        :os-page-cache           :not-flushed
        :format                  format
@@ -2132,12 +2136,13 @@
   [config phase iteration formats]
   (let [artifact-directory (unique-artifact-directory config
                                                       (str "benchmark-" (name phase) "-" iteration))
-        {:keys [connection spill-directory jdbc-stream-results]}
+        {:keys [connection spill-directory duckdb-threads jdbc-stream-results]}
         (benchmark-connection! artifact-directory config)
         environment        (with-open [connection connection]
                              (create-benchmark-profiles! connection config)
                              (cond-> {:duckdb-version      (duckdb-version connection)
                                       :logical-input-bytes (logical-input-bytes config)
+                                      :duckdb-threads      duckdb-threads
                                       :jdbc-stream-results jdbc-stream-results
                                       :profile-schema      (query-rows connection "DESCRIBE profiles")
                                       :artifact-directory  (.toString artifact-directory)
