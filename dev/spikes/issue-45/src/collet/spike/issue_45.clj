@@ -1167,7 +1167,7 @@
   (let [scan (format-scan-sql format path embedding-width)]
     (case operation
       :full-sequential (str "SELECT * FROM " scan)
-      :projected-filtered (str "SELECT id, name FROM " scan " WHERE id % 17 = 0 ORDER BY id")
+      :projected-filtered (str "SELECT id, name FROM " scan " WHERE id % 17 = 0")
       ;; The sort key is the full embedding. It keeps the work substantially
       ;; above the 256 MiB default rather than merely sorting scalar IDs.
       :sort-join (str "SELECT p.id FROM "
@@ -1566,9 +1566,9 @@
 
 
 (defn- jdbc-arrow->ipc!
-  [^Connection connection ^Path path batch-size]
+  [^Connection connection ^Path path batch-size sql]
   (with-open [statement  (.createStatement connection)
-              result-set ^DuckDBResultSet (.executeQuery statement "SELECT * FROM profiles ORDER BY id")
+              result-set ^DuckDBResultSet (.executeQuery statement sql)
               allocator  (RootAllocator.)
               reader     (.arrowExportStream result-set allocator (int batch-size))
               output     (FileOutputStream. (.toFile path))]
@@ -1731,7 +1731,10 @@
             (checked :jdbc-arrow-ipc
                      true
                      #(let [path     (.resolve artifacts "profiles.arrow")
-                            export   (jdbc-arrow->ipc! connection path (:batch-rows config))
+                            export   (jdbc-arrow->ipc! connection
+                                                       path
+                                                       (:batch-rows config)
+                                                       "SELECT * FROM profiles ORDER BY id")
                             readback (arrow-ipc-data path)
                             values   (fidelity baseline (:rows readback))
                             schema   {:status   (if (= (:schema export) (:schema readback)) :pass :fail)
@@ -2074,10 +2077,14 @@
   [^Connection connection config ^Path artifact-directory]
   (let [directory (ensure-directory! (.resolve artifact-directory "arrow"))
         artifact  (.resolve directory "profiles.arrow")
+        sql       "SELECT * FROM profiles"
         write     (measure! (logical-input-bytes config)
-                            #(let [export    (jdbc-arrow->ipc! connection artifact (:batch-rows config))
+                            #(let [export    (jdbc-arrow->ipc! connection
+                                                               artifact
+                                                               (:batch-rows config)
+                                                               sql)
                                    inventory (artifact-inventory artifact)]
-                               {:export export :inventory inventory}))
+                               {:sql sql :export export :inventory inventory}))
         full      (measure! (logical-input-bytes config) #(consume-arrow-ipc! artifact))
         cold      (cold-read-case config :arrow artifact (.resolve artifact-directory "duckdb-spill"))]
     {:status             (if (= :pass (:status cold)) :pass :fail)
