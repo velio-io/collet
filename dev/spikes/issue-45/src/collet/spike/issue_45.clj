@@ -1147,9 +1147,13 @@
 
 
 (defn- format-write-sql
-  [format path]
+  [config format path]
   (case format
-    :parquet (str "COPY profiles TO " (sql-literal path) " (FORMAT PARQUET, COMPRESSION zstd)")
+    :parquet (str "COPY profiles TO "
+                  (sql-literal path)
+                  " (FORMAT PARQUET, COMPRESSION zstd, ROW_GROUP_SIZE "
+                  (:batch-rows config)
+                  ")")
     :lance (str "COPY profiles TO "
                 (sql-literal path)
                 " (FORMAT lance, MODE 'overwrite', data_storage_version '2.2')")
@@ -1969,6 +1973,9 @@
         replace-artifact   (.resolve directory "profiles-with-derived-replaced.parquet")
         add-expression     (derived-embedding-sql (:embedding-width config) "0.5")
         replace-expression (derived-embedding-sql (:embedding-width config) "0.75")
+        copy-options       (str " (FORMAT PARQUET, COMPRESSION zstd, ROW_GROUP_SIZE "
+                                (:batch-rows config)
+                                ")")
         before             (artifact-inventory artifact)
         add                (measure! (logical-input-bytes config)
                                      #(let [sql (str "COPY (SELECT *, "
@@ -1979,7 +1986,7 @@
                                                                       (:embedding-width config))
                                                      ") TO "
                                                      (sql-literal add-artifact)
-                                                     " (FORMAT PARQUET, COMPRESSION zstd)")]
+                                                     copy-options)]
                                         {:statement (profiled-statement! connection
                                                                          (benchmark-profile-path artifact-directory :parquet :add-derived)
                                                                          sql)
@@ -1994,7 +2001,7 @@
                                                                       (:embedding-width config))
                                                      ") TO "
                                                      (sql-literal replace-artifact)
-                                                     " (FORMAT PARQUET, COMPRESSION zstd)")]
+                                                     copy-options)]
                                         {:statement (profiled-statement! connection
                                                                          (benchmark-profile-path artifact-directory :parquet :replace-derived)
                                                                          sql)
@@ -2027,7 +2034,7 @@
   [^Connection connection config ^Path artifact-directory format]
   (let [directory   (ensure-directory! (.resolve artifact-directory (name format)))
         artifact    (.resolve directory (if (= format :lance) "profiles.lance" "profiles.parquet"))
-        write-sql   (format-write-sql format artifact)
+        write-sql   (format-write-sql config format artifact)
         write       (measure! (logical-input-bytes config)
                               #(let [statement (profiled-statement!
                                                 connection
@@ -2180,12 +2187,13 @@
                            (range 1 (inc (:repetitions config))))
         samples      (into [warmup] measured)]
     {:status    (if (some #(not= :pass (:status %)) samples) :fail :pass)
-     :benchmark {:warmups             1
-                 :measured-executions (:repetitions config)
-                 :cold-definition     "fresh JVM and DuckDB connection; OS page cache is not flushed"
-                 :logical-input-bytes (logical-input-bytes config)
-                 :surviving-formats   survivors
-                 :disqualified        disqualified}
+     :benchmark {:warmups                1
+                 :measured-executions    (:repetitions config)
+                 :cold-definition        "fresh JVM and DuckDB connection; OS page cache is not flushed"
+                 :logical-input-bytes    (logical-input-bytes config)
+                 :parquet-row-group-rows (:batch-rows config)
+                 :surviving-formats      survivors
+                 :disqualified           disqualified}
      :warmup    warmup
      :measured  measured}))
 

@@ -25,6 +25,10 @@ both settings are recorded in the evidence. The memory-pressure workload joins
 each artifact row to 32 dimension rows and sorts the resulting 33,554,432
 default rows by a deterministic numeric hash. This exceeds 256 MiB without
 relying on DuckDB 1.5.5's non-spillable wide array or string sort records.
+Parquet writes use the configured 4,096-row batch size as an explicit row-group
+size so adding the second fixed-width embedding does not make the writer buffer
+a default row group larger than the DuckDB limit; the setting is recorded in
+the benchmark EDN.
 After each benchmark format, the spike records inventories and hashes, closes
 the DuckDB connection, and deletes generated Lance, Parquet, Arrow, evolution,
 and spill data outside the timed operation. It repeats cleanup at the sample
