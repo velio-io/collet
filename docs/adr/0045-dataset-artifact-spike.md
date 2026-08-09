@@ -1,18 +1,23 @@
-# ADR 0045: Reopen the Lance decision with aligned runtimes
+# ADR 0045: Select Parquet for internal dataset artifacts
 
-Status: provisional pending review. No production artifact contract or
-publishable dependency is introduced by this spike.
+Status: accepted. No production artifact API or publishable dependency is
+introduced by this spike.
 
-## Provisional decision
+## Decision
 
-Recommend Parquet plus DuckDB for the durable artifact format. Lance passed
+Select Parquet plus DuckDB for Collet-owned durable artifacts. Lance passed
 every compatibility and recovery hard gate and met every latency threshold,
-but it failed the predetermined process-cold RSS and both rewrite-amplification
-thresholds. The recommendation remains provisional until review; this spike
-does not accept the format or start its production implementation.
+but it failed the predetermined process-cold RSS and both
+rewrite-amplification thresholds.
 
 JDBC Arrow 19 remains the default core interchange. DuckTape may only be an
 optional tech.ml.dataset view and never the artifact contract.
+
+This decision is scoped to internal immutable artifacts. Lance remains
+technically viable as a user-selected, long-lived destination whose native
+versions and incremental updates are part of the requested sink semantics;
+that optional integration is tracked in
+[#62](https://github.com/velio-io/collet/issues/62).
 
 The earlier Lance rejection was based on three invalid inferences:
 
@@ -164,8 +169,8 @@ coerced.
 
 | Candidate | Packaging and operational surface | Current state |
 | --- | --- | --- |
-| Parquet + DuckDB | Main spike JVM plus manifest-driven fixed-array restoration; replacement artifact for column evolution | passes native gates and is provisionally recommended |
-| Lance | DuckDB native extension plus an isolated Lance Java/Arrow 18.3 helper | passes native gates but fails the RSS and amplification decision thresholds |
+| Parquet + DuckDB | Main spike JVM plus manifest-driven fixed-array restoration; replacement artifact for column evolution | selected for Collet-owned durable artifacts |
+| Lance | DuckDB native extension plus an isolated Lance Java/Arrow 18.3 helper | not selected internally; optional destination tracked in #62 |
 | Arrow IPC | Arrow 19 JDBC streaming | selected core interchange, not a durable table contract |
 | DuckTape | Pinned Git snapshot and matching native DuckDB library | optional TMD adapter only |
 
@@ -196,8 +201,9 @@ Lance's median initial artifact was 1,169,049,750 bytes; Parquet's was
 are deliberately repetitive, so this is evidence for this workload rather than
 a general compression claim. Lance's add/replace operations were faster than
 the Parquet replacements, but the working add/drop/cast sequence added roughly
-2.13 GB per change and its fresh helper process used twice Parquet's peak RSS.
-Those failures are sufficient to select Parquet under the approved rule.
+2.13 GB per change. The fresh benchmark JVM scanning Lance through the DuckDB
+extension reached twice Parquet's process-cold peak RSS. Those failures select
+Parquet under the approved rule.
 
 DuckDB 1.5.5 does not implement `EXPLAIN (ANALYZE, VERBOSE)`; its exact error is
 `Not implemented Error: Unimplemented explain type: verbose`. The spike records
@@ -237,3 +243,6 @@ uploaded.
 - **#47:** add task-local DuckDB SQL over the #48 Parquet artifacts with
   projection/predicate pushdown, configurable bounded memory and spill, and
   JDBC Arrow output.
+- **#62:** define Lance as an optional destination with explicit commit,
+  idempotency, version-pinning, retention, and packaging semantics. It must not
+  replace the Parquet internal artifact contract.

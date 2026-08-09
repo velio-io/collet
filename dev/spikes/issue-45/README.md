@@ -84,7 +84,7 @@ while the runtime check uses `--network none`. It records whether execution was
 native Linux or a translated container; translated Apple-Silicon results are
 never presented as native-Linux evidence.
 
-## Current provisional result
+## Final result
 
 Native Ubuntu AMD64 and macOS ARM64 pass aligned Lance latest/pinned reopen,
 DuckDB/Lance coexistence, orphan-fragment recovery, nested fidelity, JDBC
@@ -95,12 +95,18 @@ The same schema check makes Parquet's physical limitation explicit: DuckDB
 reopens its embedding as `FLOAT[]`; the Parquet adapter restores `FLOAT[n]`
 from the artifact schema and records the raw width loss as unsupported.
 
-The one-GiB native benchmark provisionally recommends Parquet. Lance passed all
-five latency limits but failed the process-cold RSS limit at 2.07x Parquet and
-both amplification limits: its add and replace each changed about 2.13 GB,
-versus 18.4 MB and 18.8 MB Parquet replacements. JDBC Arrow remains the core
-interchange, and DuckTape remains an optional TMD view only. The ADR is still
-pending review; no production format has been accepted or implemented.
+The accepted decision selects Parquet plus DuckDB for Collet-owned durable
+artifacts. Lance passed all five latency limits but failed the process-cold RSS
+limit at 2.07x Parquet and both amplification limits: its add and replace each
+changed about 2.13 GB, versus 18.4 MB and 18.8 MB Parquet replacements. JDBC
+Arrow remains the core interchange, and DuckTape remains an optional TMD view
+only. This spike does not implement the production artifact API.
+
+Lance remains viable as a user-selected destination when its long-lived,
+versioned, incremental dataset semantics are explicitly wanted. That optional
+integration is tracked in
+[#62](https://github.com/velio-io/collet/issues/62); it does not reopen the
+internal artifact decision.
 
 The translated Apple-Silicon-hosted Linux image's `liblance_jni` crash remains
 retained portability diagnostics. The passing native Ubuntu run proves that it
