@@ -182,7 +182,7 @@ A large task output is published as a logical artifact dataset. The dataset may 
 ```clojure
 {:artifact/id          #uuid "..."
  :artifact/uri         "s3://collet-artifacts/runs/.../output"
- :artifact/format      :format/to-be-selected
+ :artifact/format      :format/parquet
  :artifact/version     7
  :artifact/schema      {:name :normalized-profile :version 3}
  :artifact/content-key "sha256:..."
@@ -206,24 +206,30 @@ The foundation snapshot initially contains one logical entry rather than exposin
  :snapshot/entries [{:entry/key          :whole-task
                      :entry/artifact-ref [:artifact/id artifact-id]
                      :entry/content-key  "sha256:..."
-                     :entry/format       :format/to-be-selected
+                     :entry/format       :format/parquet
                      :entry/records      58219}]}
 ```
 
 The snapshot ID hashes a versioned canonical logical manifest. It includes logical entry keys, content keys, schema/format identity, and required logical counts; it excludes storage URI, physical artifact reference, run/attempt identity, timestamps, and caller-provided map or entry order. The artifact reference is retained only to resolve the content. This lets the same logical dataset keep its identity when content is copied between local and object storage.
 
-The durable format remains unresolved while the corrected #45 spike awaits its
-native Linux AMD64 gate and benchmark. The earlier Parquet decision was
-withdrawn because it mixed Lance's declared Arrow 18.3 runtime with Arrow 19,
-treated a translated container as native Linux, and assumed DuckDB `UPDATE` was
-the only column-evolution path. See the provisional
-[`ADR 0045`](docs/adr/0045-dataset-artifact-spike.md).
+The accepted #45 decision selects **Parquet plus DuckDB** for Collet-owned
+durable artifacts; see
+[`ADR 0045`](docs/adr/0045-dataset-artifact-spike.md). Native Ubuntu Gate 1
+proved that aligned Lance works under JDK 25, including version-pinned reopen,
+pre-commit recovery, LocalStack, and offline deployment. In the one-GiB Gate 2
+run, Lance met all five latency thresholds but used 2.07x Parquet's
+process-cold peak RSS and changed about 2.13 GB for both add and replace versus
+18.4/18.8 MB Parquet replacements. Those results fail the approved 1.25x RSS
+and 0.75x amplification rules.
 
-- **Lance** passes the corrected macOS compatibility, version-reopen,
-  pre-commit recovery, and derived-column smoke. Native Ubuntu remains pending.
-- **Parquet plus DuckDB** remains the conservative baseline and survives the
-  corrected macOS gate through an explicit-schema read adapter; its physical
-  schema loses the fixed width of `FLOAT[n]` embeddings.
+- **Parquet plus DuckDB** is the selected internal format. Reads use the artifact
+  schema to restore `FLOAT[n]`, because the physical Parquet scan exposes
+  `FLOAT[]`; benchmark writes use bounded 4,096-row groups.
+- **Lance** is technically viable on the required native platforms, but its
+  helper/native operational surface is not justified for internal immutable
+  artifacts by this workload's RSS and column-evolution evidence. It remains an
+  optional destination candidate in
+  [#62](https://github.com/velio-io/collet/issues/62).
 - **Arrow IPC** remains the default core streaming/interchange path; temporary
   IPC files are not a complete artifact system.
 - **DuckTape** may be an optional tech.ml.dataset view, but never the artifact
@@ -385,7 +391,7 @@ deployment. Dependency order matters more than issue number:
 
 - [#43](https://github.com/velio-io/collet/issues/43) modernizes the build and separates optional action dependencies.
 - [#44](https://github.com/velio-io/collet/issues/44) separates immutable definitions from durable runs, introduces embedded Datalevin 1.x on the existing Java 25 baseline, and establishes versioned semantic task/action fingerprints with a conservative non-reusable fallback.
-- [#45](https://github.com/velio-io/collet/issues/45) is rerunning the durable-format decision with aligned Lance/Arrow runtimes and native Linux evidence; no durable format is selected yet.
+- [#45](https://github.com/velio-io/collet/issues/45) selected Parquet plus DuckDB for Collet-owned durable artifacts from aligned native Linux evidence.
 - [#46](https://github.com/velio-io/collet/issues/46) implements the selected nested and extended Arrow type boundary.
 - [#48](https://github.com/velio-io/collet/issues/48) establishes artifact, one-entry dataset snapshot, materialization, publication, and lineage identities for exact whole-task reuse.
 - [#47](https://github.com/velio-io/collet/issues/47) consumes #48 to add task-local DuckDB SQL; it is not a prerequisite for the artifact store.
@@ -396,6 +402,11 @@ deployment. Dependency order matters more than issue number:
 - [#53](https://github.com/velio-io/collet/issues/53) reconstructs derived state and safely adopts verified orphan artifacts.
 - [#54](https://github.com/velio-io/collet/issues/54) defines bounded, vendor-neutral execution telemetry for ABEL and other backends.
 - [#55](https://github.com/velio-io/collet/issues/55) decides the trust and process boundary for SCI, GraalVM, Python, and custom code.
+
+Optional post-foundation integration
+[#62](https://github.com/velio-io/collet/issues/62) keeps Lance outside the
+internal artifact path and tracks it as a versioned destination. It does not
+block the foundation graph or reopen #45.
 
 ## Foundation gaps not yet scheduled
 

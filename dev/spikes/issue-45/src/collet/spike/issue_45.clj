@@ -19,7 +19,7 @@
     [java.math BigInteger]
     [java.sql Array Connection DriverManager ResultSet ResultSetMetaData SQLException Struct Timestamp]
     [java.time Instant LocalDateTime ZoneOffset]
-    [java.util Map UUID]
+    [java.util Map Properties UUID]
     [java.util.zip ZipInputStream]
     [org.apache.arrow.memory RootAllocator]
     [org.apache.arrow.vector VectorSchemaRoot]
@@ -1118,15 +1118,25 @@
     [:spill (.resolve artifact-directory "duckdb-spill")]]))
 
 
+(defn- streaming-duckdb-connection
+  []
+  (let [properties (doto (Properties.)
+                     (.setProperty "jdbc_stream_results" "true"))]
+    (DriverManager/getConnection "jdbc:duckdb:" properties)))
+
+
 (defn- benchmark-connection!
   [^Path artifact-directory config]
   (let [temp-directory (ensure-directory! (.resolve artifact-directory "duckdb-spill"))
-        connection     (DriverManager/getConnection "jdbc:duckdb:")]
+        connection     (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal (:duckdb-memory-limit config))))
     (sql! connection (str "SET temp_directory = " (sql-literal (.toAbsolutePath temp-directory))))
+    (sql! connection "SET threads = 1")
     (sql! connection "SET preserve_insertion_order = false")
-    {:connection      connection
-     :spill-directory temp-directory}))
+    {:connection          connection
+     :spill-directory     temp-directory
+     :duckdb-threads      1
+     :jdbc-stream-results true}))
 
 
 (defn- create-benchmark-profiles!
@@ -1137,9 +1147,13 @@
 
 
 (defn- format-write-sql
-  [format path]
+  [config format path]
   (case format
-    :parquet (str "COPY profiles TO " (sql-literal path) " (FORMAT PARQUET, COMPRESSION zstd)")
+    :parquet (str "COPY profiles TO "
+                  (sql-literal path)
+                  " (FORMAT PARQUET, COMPRESSION zstd, ROW_GROUP_SIZE "
+                  (:batch-rows config)
+                  ")")
     :lance (str "COPY profiles TO "
                 (sql-literal path)
                 " (FORMAT lance, MODE 'overwrite', data_storage_version '2.2')")
@@ -1159,14 +1173,14 @@
   (let [scan (format-scan-sql format path embedding-width)]
     (case operation
       :full-sequential (str "SELECT * FROM " scan)
-      :projected-filtered (str "SELECT id, name FROM " scan " WHERE id % 17 = 0 ORDER BY id")
-      ;; The sort key is the full embedding. It keeps the work substantially
-      ;; above the 256 MiB default rather than merely sorting scalar IDs.
+      :projected-filtered (str "SELECT id, name FROM " scan " WHERE id % 17 = 0")
+      ;; Expand each profile across 32 dimension rows, then sort the resulting
+      ;; 33,554,432 default rows by a numeric key. This exceeds 256 MiB while
+      ;; remaining spillable in DuckDB 1.5.5; wide array/string sort records do not.
       :sort-join (str "SELECT p.id FROM "
                       scan
-                      " p JOIN "
-                      scan
-                      " q ON p.id = q.id ORDER BY p.embedding")
+                      " p CROSS JOIN range(32) q(bucket) "
+                      "ORDER BY hash(p.id, q.bucket)")
       (throw (ex-info "Unknown benchmark operation" {:operation operation})))))
 
 
@@ -1189,9 +1203,10 @@
 (defn- cold-read!
   [format path embedding-width memory-limit temp-directory batch-size]
   (Class/forName "org.duckdb.DuckDBDriver")
-  (with-open [connection (DriverManager/getConnection "jdbc:duckdb:")]
+  (with-open [connection (streaming-duckdb-connection)]
     (sql! connection (str "SET memory_limit = " (sql-literal memory-limit)))
     (sql! connection (str "SET temp_directory = " (sql-literal temp-directory)))
+    (sql! connection "SET threads = 1")
     (let [format (keyword format)
           result (case format
                    :arrow (measure! 0 #(consume-arrow-ipc! (Paths/get path (make-array String 0))))
@@ -1216,6 +1231,8 @@
                    (throw (ex-info "Unknown cold-read format" {:format format})))]
       {:fresh-jvm               true
        :fresh-duckdb-connection true
+       :duckdb-threads          1
+       :jdbc-stream-results     true
        :os-page-cache           :not-flushed
        :format                  format
        :result                  result})))
@@ -1557,9 +1574,9 @@
 
 
 (defn- jdbc-arrow->ipc!
-  [^Connection connection ^Path path batch-size]
+  [^Connection connection ^Path path batch-size sql]
   (with-open [statement  (.createStatement connection)
-              result-set ^DuckDBResultSet (.executeQuery statement "SELECT * FROM profiles ORDER BY id")
+              result-set ^DuckDBResultSet (.executeQuery statement sql)
               allocator  (RootAllocator.)
               reader     (.arrowExportStream result-set allocator (int batch-size))
               output     (FileOutputStream. (.toFile path))]
@@ -1722,7 +1739,10 @@
             (checked :jdbc-arrow-ipc
                      true
                      #(let [path     (.resolve artifacts "profiles.arrow")
-                            export   (jdbc-arrow->ipc! connection path (:batch-rows config))
+                            export   (jdbc-arrow->ipc! connection
+                                                       path
+                                                       (:batch-rows config)
+                                                       "SELECT * FROM profiles ORDER BY id")
                             readback (arrow-ipc-data path)
                             values   (fidelity baseline (:rows readback))
                             schema   {:status   (if (= (:schema export) (:schema readback)) :pass :fail)
@@ -1953,6 +1973,9 @@
         replace-artifact   (.resolve directory "profiles-with-derived-replaced.parquet")
         add-expression     (derived-embedding-sql (:embedding-width config) "0.5")
         replace-expression (derived-embedding-sql (:embedding-width config) "0.75")
+        copy-options       (str " (FORMAT PARQUET, COMPRESSION zstd, ROW_GROUP_SIZE "
+                                (:batch-rows config)
+                                ")")
         before             (artifact-inventory artifact)
         add                (measure! (logical-input-bytes config)
                                      #(let [sql (str "COPY (SELECT *, "
@@ -1963,7 +1986,7 @@
                                                                       (:embedding-width config))
                                                      ") TO "
                                                      (sql-literal add-artifact)
-                                                     " (FORMAT PARQUET, COMPRESSION zstd)")]
+                                                     copy-options)]
                                         {:statement (profiled-statement! connection
                                                                          (benchmark-profile-path artifact-directory :parquet :add-derived)
                                                                          sql)
@@ -1978,7 +2001,7 @@
                                                                       (:embedding-width config))
                                                      ") TO "
                                                      (sql-literal replace-artifact)
-                                                     " (FORMAT PARQUET, COMPRESSION zstd)")]
+                                                     copy-options)]
                                         {:statement (profiled-statement! connection
                                                                          (benchmark-profile-path artifact-directory :parquet :replace-derived)
                                                                          sql)
@@ -2011,7 +2034,7 @@
   [^Connection connection config ^Path artifact-directory format]
   (let [directory   (ensure-directory! (.resolve artifact-directory (name format)))
         artifact    (.resolve directory (if (= format :lance) "profiles.lance" "profiles.parquet"))
-        write-sql   (format-write-sql format artifact)
+        write-sql   (format-write-sql config format artifact)
         write       (measure! (logical-input-bytes config)
                               #(let [statement (profiled-statement!
                                                 connection
@@ -2065,10 +2088,14 @@
   [^Connection connection config ^Path artifact-directory]
   (let [directory (ensure-directory! (.resolve artifact-directory "arrow"))
         artifact  (.resolve directory "profiles.arrow")
+        sql       "SELECT * FROM profiles"
         write     (measure! (logical-input-bytes config)
-                            #(let [export    (jdbc-arrow->ipc! connection artifact (:batch-rows config))
+                            #(let [export    (jdbc-arrow->ipc! connection
+                                                               artifact
+                                                               (:batch-rows config)
+                                                               sql)
                                    inventory (artifact-inventory artifact)]
-                               {:export export :inventory inventory}))
+                               {:sql sql :export export :inventory inventory}))
         full      (measure! (logical-input-bytes config) #(consume-arrow-ipc! artifact))
         cold      (cold-read-case config :arrow artifact (.resolve artifact-directory "duckdb-spill"))]
     {:status             (if (= :pass (:status cold)) :pass :fail)
@@ -2116,11 +2143,14 @@
   [config phase iteration formats]
   (let [artifact-directory (unique-artifact-directory config
                                                       (str "benchmark-" (name phase) "-" iteration))
-        {:keys [connection spill-directory]} (benchmark-connection! artifact-directory config)
+        {:keys [connection spill-directory duckdb-threads jdbc-stream-results]}
+        (benchmark-connection! artifact-directory config)
         environment        (with-open [connection connection]
                              (create-benchmark-profiles! connection config)
                              (cond-> {:duckdb-version      (duckdb-version connection)
                                       :logical-input-bytes (logical-input-bytes config)
+                                      :duckdb-threads      duckdb-threads
+                                      :jdbc-stream-results jdbc-stream-results
                                       :profile-schema      (query-rows connection "DESCRIBE profiles")
                                       :artifact-directory  (.toString artifact-directory)
                                       :spill-directory     (.toString spill-directory)}
@@ -2157,12 +2187,13 @@
                            (range 1 (inc (:repetitions config))))
         samples      (into [warmup] measured)]
     {:status    (if (some #(not= :pass (:status %)) samples) :fail :pass)
-     :benchmark {:warmups             1
-                 :measured-executions (:repetitions config)
-                 :cold-definition     "fresh JVM and DuckDB connection; OS page cache is not flushed"
-                 :logical-input-bytes (logical-input-bytes config)
-                 :surviving-formats   survivors
-                 :disqualified        disqualified}
+     :benchmark {:warmups                1
+                 :measured-executions    (:repetitions config)
+                 :cold-definition        "fresh JVM and DuckDB connection; OS page cache is not flushed"
+                 :logical-input-bytes    (logical-input-bytes config)
+                 :parquet-row-group-rows (:batch-rows config)
+                 :surviving-formats      survivors
+                 :disqualified           disqualified}
      :warmup    warmup
      :measured  measured}))
 

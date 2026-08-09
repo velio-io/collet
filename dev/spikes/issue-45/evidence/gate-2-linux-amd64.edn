@@ -1,0 +1,679 @@
+{:evidence-version 1
+ :issue 45
+ :gate :measurement-and-decision
+ :status :pass
+ :source {:workflow-run-id      31258409578
+          :workflow-run-url     "https://github.com/velio-io/collet/actions/runs/31258409578"
+          :git-commit           "7693ef56982f1304cbdb9ca56387541ed122f0ff"
+          :artifact-name        "spike-45-linux-amd64"
+          :benchmark-edn-sha256 "aa4163885908eaae615745539c31c7b6f12d52123465c2326423f0b1fd836073"
+          :direct-edn-sha256    "932095e929450f39283df64dc57151cacdbc898e2bc3a8b64fef932a73f1e69e"
+          :s3-edn-sha256        "b656b5f5a181eba5b9244c6c070cbd5a4c41418193bd0c407731161f8e04473d"
+          :docker-edn-sha256    "238543eb57caee4d94678b822e8df8a1c96b544ad13a57a5292e286500f911ce"}
+ :timestamp "2026-08-08T13:14:51.144762360Z"
+ :environment {:java               {:version "25.0.3"
+                                    :vm      "OpenJDK 64-Bit Server VM"}
+               :os                 {:name "Linux" :arch "amd64"}
+               :duckdb             "v1.5.5"
+               :duckdb-jdbc        "1.5.5.1"
+               :arrow              "19.0.0"
+               :lance-extension    "2f167ea"
+               :lance-java         "9.0.1"
+               :lance-helper-arrow "18.3.0"}
+ :configuration {:rows                   1048576
+                 :embedding-width        256
+                 :logical-input-bytes    1073741824
+                 :batch-rows             4096
+                 :parquet-row-group-rows 4096
+                 :duckdb-memory-limit    "256MiB"
+                 :duckdb-threads         1
+                 :jdbc-stream-results    true
+                 :warmups                1
+                 :measured-executions    3
+                 :cold-definition        "fresh JVM and DuckDB connection; OS page cache is not flushed"}
+ :hard-gates {:direct                    :pass
+              :localstack-s3             :pass
+              :offline-linux-amd64-image :pass
+              :schema-and-evolution      :pass
+              :cleanup                   :pass}
+ :workloads {:write "write the complete generated profile table"
+             :full-sequential "consume every row through JDBC Arrow"
+             :projected-filtered "SELECT id, name WHERE id % 17 = 0"
+             :sort-join "cross join each id with range(32), sort 33,554,432 numeric rows by hash(id,bucket)"
+             :derived-embedding "add at 0.5 multiplier, then replace at 0.75 multiplier"
+             :plan {:requested            :analyze-verbose
+                    :exact-fallback-error "Not implemented Error: Unimplemented explain type: verbose"
+                    :recorded             :all
+                    :recorded-sections    [:logical-plan :optimized-logical-plan :physical-plan]}
+             :scanned-byte-note
+             "DuckDB profiling reports backend-visible bytes. Parquet reports bytes on full and sort reads; the Lance extension reports zero, so these counters are evidence but not a cross-format physical-byte claim."}
+ :warmup {:status  :pass
+          :formats {:parquet   {:status           :pass
+                                :artifact-bytes   15295724
+                                :sort-spill-bytes 660111360
+                                :schema           :pass
+                                :evolution        :pass}
+                    :lance     {:status           :pass
+                                :artifact-bytes   1169073942
+                                :sort-spill-bytes 739409920
+                                :schema           :pass
+                                :evolution        :pass}
+                    :arrow-ipc {:status         :pass
+                                :artifact-bytes 1282662386}}
+          :cleanup :pass}
+ :samples
+ [{:iteration 1
+   :status :pass
+   :parquet
+   {:artifact {:bytes 15295724
+               :files {"profiles.parquet"
+                       {:bytes  15295724
+                        :sha256 "55550f115e562e6a008ee826f44217bed8131e4efb73cee59bf9d58d2f07b750"}}}
+    :write {:elapsed-ms                12745.090619
+            :throughput-mib-per-s      80.3446621614013
+            :jvm-heap-after-used-bytes 98796688
+            :process-rss-after-bytes   1775448064
+            :duckdb-peak-buffer-bytes  11735040}
+    :full-sequential {:elapsed-ms                 3831.714042
+                      :throughput-mib-per-s       267.24332473033746
+                      :jvm-heap-after-used-bytes  117671056
+                      :process-rss-after-bytes    1807912960
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   48357080
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    1053464
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 95.514891
+                         :throughput-mib-per-s       10720.841423563996
+                         :jvm-heap-after-used-bytes  132351120
+                         :process-rss-after-bytes    1805901824
+                         :duckdb-peak-buffer-bytes   48357080
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 5856.630627
+                :throughput-mib-per-s       174.8445591359641
+                :jvm-heap-after-used-bytes  170099856
+                :process-rss-after-bytes    2035150848
+                :duckdb-peak-buffer-bytes   517095788
+                :peak-spill-directory-bytes 657784832
+                :scanned-byte-evidence      {:total-bytes-read    47616
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     4021.629312
+                   :peak-rss-bytes 707354624}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms        42174.489267
+               :replacement-bytes 18445106
+               :files             {"profiles-with-derived.parquet"
+                                   {:bytes  18445106
+                                    :sha256 "ea117bfe1151428636ef29852c6ab546fa96cf8554dd6e8523d6514736e53db8"}}}
+     :replace {:elapsed-ms        42076.840715
+               :replacement-bytes 18787184
+               :files             {"profiles-with-derived-replaced.parquet"
+                                   {:bytes  18787184
+                                    :sha256 "91aceccbfdc54954f23378d199b2c0f5ef0c37dd5132d3a52151bd631e4cccf0"}}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :lance
+   {:artifact
+    {:bytes 1169049750
+     :files
+     {"_transactions/0-022ce657-4fa8-4fa3-a7e8-62f97beb44f6.txn"
+      {:bytes  867
+       :sha256 "aaf52e7e66ab83536b32a01041cf753a04ae46692a8c96b7e18dd6cf2e254a87"}
+      "_versions/18446744073709551614.manifest"
+      {:bytes  1815
+       :sha256 "27c927a1e68352cf554dc5aea3c4fbcf5cf76919506bafb959491a2f6dc42ebe"}
+      "data/1000011110111100010100108d4c6542228453f4a16065e9ca.lance"
+      {:bytes  1169047068
+       :sha256 "e68af3e1dfcffef991d2d52cc2657d1718ef0f5e546b2dae5cc2ff50ac624bc1"}}}
+    :write {:elapsed-ms                6658.644974
+            :throughput-mib-per-s      153.78504245209214
+            :jvm-heap-after-used-bytes 186877072
+            :process-rss-after-bytes   1937977344
+            :duckdb-peak-buffer-bytes  5963776}
+    :full-sequential {:elapsed-ms                 2640.352589
+                      :throughput-mib-per-s       387.82699108675746
+                      :jvm-heap-after-used-bytes  205751440
+                      :process-rss-after-bytes    2013302784
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   5963776
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    0
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 94.712628
+                         :throughput-mib-per-s       10811.652275132732
+                         :jvm-heap-after-used-bytes  218334352
+                         :process-rss-after-bytes    2025578496
+                         :duckdb-peak-buffer-bytes   5963776
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 6366.75739
+                :throughput-mib-per-s       160.8354044726683
+                :jvm-heap-after-used-bytes  58746976
+                :process-rss-after-bytes    2277363712
+                :duckdb-peak-buffer-bytes   491884544
+                :peak-spill-directory-bytes 740130816
+                :scanned-byte-evidence      {:total-bytes-read    0
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     2834.962697
+                   :peak-rss-bytes 1452331008}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms    14975.618733
+               :amplification {:unchanged-bytes 1169049750
+                               :added-bytes     2131793911
+                               :rewritten-bytes 0
+                               :unchanged-files 3
+                               :added-files     7
+                               :rewritten-files 0}}
+     :replace {:elapsed-ms    16522.939223
+               :amplification {:unchanged-bytes 3300843648
+                               :added-bytes     2131796212
+                               :rewritten-bytes 13
+                               :unchanged-files 9
+                               :added-files     8
+                               :rewritten-files 1}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :arrow-ipc
+   {:artifact         {:bytes 1282662386
+                       :files {"profiles.arrow"
+                               {:bytes  1282662386
+                                :sha256 "7dec4d807a02bb70c461b13f7e3874c62bc84306ecdaf8e1ac28f70294be3e93"}}}
+    :write            {:elapsed-ms                 7310.189022
+                       :throughput-mib-per-s       140.07845719423588
+                       :jvm-heap-after-used-bytes  119564384
+                       :process-rss-after-bytes    1706889216
+                       :arrow-allocator-peak-bytes 10032056}
+    :full-sequential  {:elapsed-ms                 87.690276
+                       :throughput-mib-per-s       11677.46353084805
+                       :jvm-heap-after-used-bytes  123758688
+                       :process-rss-after-bytes    1710014464
+                       :arrow-allocator-peak-bytes 16777216}
+    :process-cold     {:elapsed-ms     217.544187
+                       :peak-rss-bytes 659980288}
+    :table-operations :unsupported
+    :cleanup          :pass}
+   :cleanup :pass}
+  {:iteration 2
+   :status :pass
+   :parquet
+   {:artifact {:bytes 15295724
+               :files {"profiles.parquet"
+                       {:bytes  15295724
+                        :sha256 "55550f115e562e6a008ee826f44217bed8131e4efb73cee59bf9d58d2f07b750"}}}
+    :write {:elapsed-ms                12523.107749
+            :throughput-mib-per-s      81.76884049263002
+            :jvm-heap-after-used-bytes 136341600
+            :process-rss-after-bytes   1722052608
+            :duckdb-peak-buffer-bytes  11735040}
+    :full-sequential {:elapsed-ms                 3742.74435
+                      :throughput-mib-per-s       273.5960312116963
+                      :jvm-heap-after-used-bytes  157313120
+                      :process-rss-after-bytes    1744424960
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   48283352
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    1053464
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 95.423619
+                         :throughput-mib-per-s       10731.095830687369
+                         :jvm-heap-after-used-bytes  169896032
+                         :process-rss-after-bytes    1741225984
+                         :duckdb-peak-buffer-bytes   48283352
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 5862.210364
+                :throughput-mib-per-s       174.67813954415777
+                :jvm-heap-after-used-bytes  207644768
+                :process-rss-after-bytes    1971793920
+                :duckdb-peak-buffer-bytes   517079404
+                :peak-spill-directory-bytes 660504576
+                :scanned-byte-evidence      {:total-bytes-read    47616
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     3934.610992
+                   :peak-rss-bytes 701517824}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms        42093.319079
+               :replacement-bytes 18445106
+               :files             {"profiles-with-derived.parquet"
+                                   {:bytes  18445106
+                                    :sha256 "ea117bfe1151428636ef29852c6ab546fa96cf8554dd6e8523d6514736e53db8"}}}
+     :replace {:elapsed-ms        42007.89451
+               :replacement-bytes 18787184
+               :files             {"profiles-with-derived-replaced.parquet"
+                                   {:bytes  18787184
+                                    :sha256 "91aceccbfdc54954f23378d199b2c0f5ef0c37dd5132d3a52151bd631e4cccf0"}}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :lance
+   {:artifact
+    {:bytes 1169071317
+     :files
+     {"_transactions/0-f72c977a-c31b-40de-976d-14f6e963c195.txn"
+      {:bytes  867
+       :sha256 "f4da984850c9765ad29e49f6d94245238e0fc70d1b06bec57b14bfbdc355db9c"}
+      "_versions/18446744073709551614.manifest"
+      {:bytes  1814
+       :sha256 "4479458a816ef8b57ec74daad6f30eeac888aaf07fdb731b4f821453447f27ae"}
+      "data/1010101000001000000100108de26847cf86d53c3f760409b0.lance"
+      {:bytes  1169068636
+       :sha256 "50db2c052bdbc473b8086cf2ec21bc7490fc06029f04496fe95564425cf0ee71"}}}
+    :write {:elapsed-ms                6586.407519
+            :throughput-mib-per-s      155.4717039670014
+            :jvm-heap-after-used-bytes 224421984
+            :process-rss-after-bytes   1812250624
+            :duckdb-peak-buffer-bytes  5963776}
+    :full-sequential {:elapsed-ms                 2636.813229
+                      :throughput-mib-per-s       388.3475661976816
+                      :jvm-heap-after-used-bytes  243296352
+                      :process-rss-after-bytes    1991974912
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   5963776
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    0
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 102.819042
+                         :throughput-mib-per-s       9959.244708776805
+                         :jvm-heap-after-used-bytes  59852512
+                         :process-rss-after-bytes    2005061632
+                         :duckdb-peak-buffer-bytes   5963776
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 6264.306637
+                :throughput-mib-per-s       163.46581662394442
+                :jvm-heap-after-used-bytes  95504096
+                :process-rss-after-bytes    2255032320
+                :duckdb-peak-buffer-bytes   491978752
+                :peak-spill-directory-bytes 746651648
+                :scanned-byte-evidence      {:total-bytes-read    0
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     2846.018644
+                   :peak-rss-bytes 1514962944}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms    14988.029823
+               :amplification {:unchanged-bytes 1169071317
+                               :added-bytes     2131793911
+                               :rewritten-bytes 0
+                               :unchanged-files 3
+                               :added-files     7
+                               :rewritten-files 0}}
+     :replace {:elapsed-ms    16646.369922
+               :amplification {:unchanged-bytes 3300865215
+                               :added-bytes     2131796212
+                               :rewritten-bytes 13
+                               :unchanged-files 9
+                               :added-files     8
+                               :rewritten-files 1}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :arrow-ipc
+   {:artifact         {:bytes 1282662386
+                       :files {"profiles.arrow"
+                               {:bytes  1282662386
+                                :sha256 "a4d3deb9852c159cd6c7e09b95270d5223bb6bf72cf9e7aec2d3b33c731db179"}}}
+    :write            {:elapsed-ms                 7325.645523
+                       :throughput-mib-per-s       139.78290333391004
+                       :jvm-heap-after-used-bytes  156321504
+                       :process-rss-after-bytes    1783648256
+                       :arrow-allocator-peak-bytes 10032056}
+    :full-sequential  {:elapsed-ms                 85.904151
+                       :throughput-mib-per-s       11920.2621535716
+                       :jvm-heap-after-used-bytes  160515808
+                       :process-rss-after-bytes    1790300160
+                       :arrow-allocator-peak-bytes 16777216}
+    :process-cold     {:elapsed-ms     174.434215
+                       :peak-rss-bytes 658673664}
+    :table-operations :unsupported
+    :cleanup          :pass}
+   :cleanup :pass}
+  {:iteration 3
+   :status :pass
+   :parquet
+   {:artifact {:bytes 15295724
+               :files {"profiles.parquet"
+                       {:bytes  15295724
+                        :sha256 "55550f115e562e6a008ee826f44217bed8131e4efb73cee59bf9d58d2f07b750"}}}
+    :write {:elapsed-ms                12558.658438
+            :throughput-mib-per-s      81.53737161141193
+            :jvm-heap-after-used-bytes 173098720
+            :process-rss-after-bytes   1805148160
+            :duckdb-peak-buffer-bytes  11735040}
+    :full-sequential {:elapsed-ms                 3761.1425
+                      :throughput-mib-per-s       272.2576982924736
+                      :jvm-heap-after-used-bytes  191973088
+                      :process-rss-after-bytes    1822941184
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   48283352
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    1053464
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 96.001287
+                         :throughput-mib-per-s       10666.523668583734
+                         :jvm-heap-after-used-bytes  206653152
+                         :process-rss-after-bytes    1821347840
+                         :duckdb-peak-buffer-bytes   48283352
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 5806.420005
+                :throughput-mib-per-s       176.35651556694444
+                :jvm-heap-after-used-bytes  244401888
+                :process-rss-after-bytes    2053341184
+                :duckdb-peak-buffer-bytes   517079404
+                :peak-spill-directory-bytes 664436736
+                :scanned-byte-evidence      {:total-bytes-read    47616
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     3993.126256
+                   :peak-rss-bytes 661913600}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms        42121.367196
+               :replacement-bytes 18445106
+               :files             {"profiles-with-derived.parquet"
+                                   {:bytes  18445106
+                                    :sha256 "ea117bfe1151428636ef29852c6ab546fa96cf8554dd6e8523d6514736e53db8"}}}
+     :replace {:elapsed-ms        42028.043447
+               :replacement-bytes 18787184
+               :files             {"profiles-with-derived-replaced.parquet"
+                                   {:bytes  18787184
+                                    :sha256 "91aceccbfdc54954f23378d199b2c0f5ef0c37dd5132d3a52151bd631e4cccf0"}}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :lance
+   {:artifact
+    {:bytes 1169041558
+     :files
+     {"_transactions/0-757928b0-3f1b-4782-8f58-fe6781299861.txn"
+      {:bytes  867
+       :sha256 "9eb16564ef42049f4691fa39b0567f4fbc7a9e8d1a3152e4e4090693020c9553"}
+      "_versions/18446744073709551614.manifest"
+      {:bytes  1815
+       :sha256 "8c5babd7a6e7be890a8311d599a7ab81182339161bea37ea1ea6be3d26f7116d"}
+      "data/10111111110110110001001126aaed4821b6cb081e14bd6cec.lance"
+      {:bytes  1169038876
+       :sha256 "03cfa6f22a4f8c013cdb88357642b194e31f1b670867d3996db734ec2ae6d6ff"}}}
+    :write {:elapsed-ms                6548.291139
+            :throughput-mib-per-s      156.37667572556597
+            :jvm-heap-after-used-bytes 64161864
+            :process-rss-after-bytes   1878028288
+            :duckdb-peak-buffer-bytes  5963776}
+    :full-sequential {:elapsed-ms                 2625.69327
+                      :throughput-mib-per-s       389.9922400303825
+                      :jvm-heap-after-used-bytes  83036232
+                      :process-rss-after-bytes    1982148608
+                      :arrow-allocator-peak-bytes 10032056
+                      :duckdb-peak-buffer-bytes   5963776
+                      :peak-spill-directory-bytes 0
+                      :scanned-byte-evidence      {:total-bytes-read    0
+                                                   :total-bytes-written 0}
+                      :plan-mode                  :all}
+    :projected-filtered {:elapsed-ms                 91.40294
+                         :throughput-mib-per-s       11203.140730484161
+                         :jvm-heap-after-used-bytes  95619144
+                         :process-rss-after-bytes    1987469312
+                         :duckdb-peak-buffer-bytes   5963776
+                         :peak-spill-directory-bytes 0
+                         :scanned-byte-evidence      {:total-bytes-read    0
+                                                      :total-bytes-written 0}
+                         :plan-mode                  :all}
+    :sort-join {:elapsed-ms                 6241.43842
+                :throughput-mib-per-s       164.0647445497027
+                :jvm-heap-after-used-bytes  133367880
+                :process-rss-after-bytes    2243284992
+                :duckdb-peak-buffer-bytes   491950080
+                :peak-spill-directory-bytes 744816640
+                :scanned-byte-evidence      {:total-bytes-read    0
+                                             :total-bytes-written 0}
+                :bounded-or-spilled?        true
+                :plan-mode                  :all}
+    :process-cold {:elapsed-ms     2782.821068
+                   :peak-rss-bytes 1415458816}
+    :derived-embedding
+    {:status  :pass
+     :add     {:elapsed-ms    14743.932444
+               :amplification {:unchanged-bytes 1169041558
+                               :added-bytes     2131793911
+                               :rewritten-bytes 0
+                               :unchanged-files 3
+                               :added-files     7
+                               :rewritten-files 0}}
+     :replace {:elapsed-ms    16657.465475
+               :amplification {:unchanged-bytes 3300835456
+                               :added-bytes     2131796212
+                               :rewritten-bytes 13
+                               :unchanged-files 9
+                               :added-files     8
+                               :rewritten-files 1}}}
+    :schema :pass
+    :profiles :pass
+    :cleanup :pass}
+   :arrow-ipc
+   {:artifact         {:bytes 1282662386
+                       :files {"profiles.arrow"
+                               {:bytes  1282662386
+                                :sha256 "aea50975cac3ea777a048989aed8ccf0a28c78dbf2bc1ed800dd4628bc962756"}}}
+    :write            {:elapsed-ms                 7294.181838
+                       :throughput-mib-per-s       140.38586132653523
+                       :jvm-heap-after-used-bytes  194185288
+                       :process-rss-after-bytes    1787953152
+                       :arrow-allocator-peak-bytes 10032056}
+    :full-sequential  {:elapsed-ms                 86.172201
+                       :throughput-mib-per-s       11883.18260549014
+                       :jvm-heap-after-used-bytes  198379592
+                       :process-rss-after-bytes    1805864960
+                       :arrow-allocator-peak-bytes 16777216}
+    :process-cold     {:elapsed-ms     195.138224
+                       :peak-rss-bytes 648327168}
+    :table-operations :unsupported
+    :cleanup          :pass}
+   :cleanup :pass}]
+ :medians
+ {:parquet
+  {:artifact-bytes     15295724
+   :write              {:elapsed-ms                12558.658438
+                        :throughput-mib-per-s      81.53737161141193
+                        :jvm-heap-after-used-bytes 136341600
+                        :process-rss-after-bytes   1775448064}
+   :full-sequential    {:elapsed-ms                 3761.1425
+                        :throughput-mib-per-s       272.2576982924736
+                        :jvm-heap-after-used-bytes  157313120
+                        :process-rss-after-bytes    1807912960
+                        :arrow-allocator-peak-bytes 10032056}
+   :projected-filtered {:elapsed-ms                95.514891
+                        :throughput-mib-per-s      10720.841423563996
+                        :jvm-heap-after-used-bytes 169896032
+                        :process-rss-after-bytes   1805901824
+                        :duckdb-peak-buffer-bytes  48283352}
+   :sort-join          {:elapsed-ms                 5856.630627
+                        :throughput-mib-per-s       174.8445591359641
+                        :jvm-heap-after-used-bytes  207644768
+                        :process-rss-after-bytes    2035150848
+                        :duckdb-peak-buffer-bytes   517079404
+                        :peak-spill-directory-bytes 660504576}
+   :process-cold       {:elapsed-ms     3993.126256
+                        :peak-rss-bytes 701517824}
+   :derived-embedding  {:add-elapsed-ms            42121.367196
+                        :replace-elapsed-ms        42028.043447
+                        :add-replacement-bytes     18445106
+                        :replace-replacement-bytes 18787184}}
+  :lance
+  {:artifact-bytes     1169049750
+   :write              {:elapsed-ms                6586.407519
+                        :throughput-mib-per-s      155.4717039670014
+                        :jvm-heap-after-used-bytes 186877072
+                        :process-rss-after-bytes   1878028288}
+   :full-sequential    {:elapsed-ms                 2636.813229
+                        :throughput-mib-per-s       388.3475661976816
+                        :jvm-heap-after-used-bytes  205751440
+                        :process-rss-after-bytes    1991974912
+                        :arrow-allocator-peak-bytes 10032056}
+   :projected-filtered {:elapsed-ms                94.712628
+                        :throughput-mib-per-s      10811.652275132732
+                        :jvm-heap-after-used-bytes 95619144
+                        :process-rss-after-bytes   2005061632
+                        :duckdb-peak-buffer-bytes  5963776}
+   :sort-join          {:elapsed-ms                 6264.306637
+                        :throughput-mib-per-s       163.46581662394442
+                        :jvm-heap-after-used-bytes  95504096
+                        :process-rss-after-bytes    2255032320
+                        :duckdb-peak-buffer-bytes   491950080
+                        :peak-spill-directory-bytes 744816640}
+   :process-cold       {:elapsed-ms     2834.962697
+                        :peak-rss-bytes 1452331008}
+   :derived-embedding  {:add-elapsed-ms                 14975.618733
+                        :replace-elapsed-ms             16646.369922
+                        :add-added-plus-rewritten-bytes 2131793911
+                        :replace-added-plus-rewritten-bytes 2131796225}}
+  :arrow-ipc
+  {:artifact-bytes  1282662386
+   :write           {:elapsed-ms                 7310.189022
+                     :throughput-mib-per-s       140.07845719423588
+                     :jvm-heap-after-used-bytes  156321504
+                     :process-rss-after-bytes    1783648256
+                     :arrow-allocator-peak-bytes 10032056}
+   :full-sequential {:elapsed-ms                 86.172201
+                     :throughput-mib-per-s       11883.18260549014
+                     :jvm-heap-after-used-bytes  160515808
+                     :process-rss-after-bytes    1790300160
+                     :arrow-allocator-peak-bytes 16777216}
+   :process-cold    {:elapsed-ms     195.138224
+                     :peak-rss-bytes 658673664}}}
+ :decision
+ {:hard-gates-pass? true
+  :rules            [{:metric                 :write-latency
+                      :threshold              {:operator :<= :value 1.2}
+                      :lance-to-parquet-ratio 0.5244515209579108
+                      :pass?                  true}
+                     {:metric                 :full-sequential-latency
+                      :threshold              {:operator :<= :value 1.2}
+                      :lance-to-parquet-ratio 0.7010670903854347
+                      :pass?                  true}
+                     {:metric                 :projected-filtered-latency
+                      :threshold              {:operator :<= :value 1.2}
+                      :lance-to-parquet-ratio 0.9916006499970773
+                      :pass?                  true}
+                     {:metric                 :sort-join-latency
+                      :threshold              {:operator :<= :value 1.2}
+                      :lance-to-parquet-ratio 1.069609308826913
+                      :pass?                  true}
+                     {:metric                 :process-cold-latency
+                      :threshold              {:operator :<= :value 1.2}
+                      :lance-to-parquet-ratio 0.7099606962690538
+                      :pass?                  true}
+                     {:metric                 :process-cold-peak-rss
+                      :threshold              {:operator :<= :value 1.25}
+                      :lance-to-parquet-ratio 2.070269575930262
+                      :pass?                  false}
+                     {:metric                 :add-amplification
+                      :threshold              {:operator :<= :value 0.75}
+                      :lance-to-parquet-ratio 115.57504256142524
+                      :pass?                  false}
+                     {:metric                 :replace-amplification
+                      :threshold              {:operator :<= :value 0.75}
+                      :lance-to-parquet-ratio 113.47076948839167
+                      :pass?                  false}]
+  :recommendation   {:format           :parquet
+                     :status           :provisional-pending-review
+                     :core-interchange :jdbc-arrow
+                     :ducktape         :optional-tmd-view-only
+                     :reason           [:cold-process-rss-threshold-failed
+                                        :add-amplification-threshold-failed
+                                        :replace-amplification-threshold-failed]}}
+ :invalid-runs
+ [{:workflow-run-id 31256106128
+   :workflow-run-url "https://github.com/velio-io/collet/actions/runs/31256106128"
+   :benchmark-edn-sha256 "7e40b2de7f5f3b3f58f7e1c63a4574609db010f442258f5ea518476843e9a4a0"
+   :classification :invalid-benchmark
+   :repair :enable-jdbc-stream-results
+   :errors
+   [{:format :parquet
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to allocate data of size 16.0 KiB (255.9 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}
+    {:format :lance
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to pin block of size 256.0 KiB (256.3 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}
+    {:format :arrow-ipc
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to pin block of size 256.0 KiB (256.5 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}]}
+  {:workflow-run-id 31256647289
+   :workflow-run-url "https://github.com/velio-io/collet/actions/runs/31256647289"
+   :benchmark-edn-sha256 "07e7fca12259698bd7f907e16b46c3e0278c858ec793b6e7050febc41806c3c9"
+   :classification :invalid-benchmark
+   :repair :remove-unrequired-order-by-from-streaming-operations
+   :errors
+   [{:format :parquet
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: could not allocate block of size 256.0 KiB (256.6 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}
+    {:format :lance
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to pin block of size 256.0 KiB (256.3 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}
+    {:format :arrow-ipc
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to pin block of size 256.0 KiB (256.7 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}]}
+  {:workflow-run-id 31256997074
+   :workflow-run-url "https://github.com/velio-io/collet/actions/runs/31256997074"
+   :benchmark-edn-sha256 "8153ec9e51a27d3f35c3cee17713bc6563382df081570a798a117b071f0952bc"
+   :classification :invalid-benchmark
+   :repair :replace-nonspillable-wide-sort-with-numeric-sort-join
+   :errors
+   [{:format :parquet
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: could not allocate block of size 256.0 KiB (256.1 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}
+    {:format :lance
+     :class "java.sql.SQLException"
+     :message
+     "Out of Memory Error: failed to pin block of size 256.0 KiB (255.8 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}]}
+  {:workflow-run-id 31257800270
+   :workflow-run-url "https://github.com/velio-io/collet/actions/runs/31257800270"
+   :benchmark-edn-sha256 "db2fe05308f9b8f57797345742681ab309522b65594bf29939b05b3c308e4282"
+   :classification :invalid-benchmark
+   :repair :set-parquet-row-group-rows-to-batch-size
+   :errors
+   [{:format :parquet
+     :class "java.sql.SQLException"
+     :operation :add-derived-embedding
+     :message
+     "Out of Memory Error: failed to allocate data of size 32.0 MiB (235.0 MiB/256.0 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads"}]}]
+ :sanitization {:removed [:absolute-workspace-paths :dependency-cache-paths :localstack-credentials]
+                :raw-workflow-artifact-committed? false
+                :generated-dataset-binaries-uploaded? false}}

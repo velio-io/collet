@@ -19,6 +19,16 @@ bb spike:45 benchmark [--rows N] [--embedding-width N] [--memory-limit 256MiB] [
 Every public command writes machine-readable EDN and exits nonzero when a hard
 check fails. Benchmark defaults are one warm-up and three measured runs over
 1,048,576 rows x 256 `FLOAT` values: one GiB of logical embedding input.
+Every candidate uses one DuckDB worker and JDBC streaming results so the fixed
+256 MiB limit is available to the workload rather than parallel result buffers;
+both settings are recorded in the evidence. The memory-pressure workload joins
+each artifact row to 32 dimension rows and sorts the resulting 33,554,432
+default rows by a deterministic numeric hash. This exceeds 256 MiB without
+relying on DuckDB 1.5.5's non-spillable wide array or string sort records.
+Parquet writes use the configured 4,096-row batch size as an explicit row-group
+size so adding the second fixed-width embedding does not make the writer buffer
+a default row group larger than the DuckDB limit; the setting is recorded in
+the benchmark EDN.
 After each benchmark format, the spike records inventories and hashes, closes
 the DuckDB connection, and deletes generated Lance, Parquet, Arrow, evolution,
 and spill data outside the timed operation. It repeats cleanup at the sample
@@ -74,24 +84,33 @@ while the runtime check uses `--network none`. It records whether execution was
 native Linux or a translated container; translated Apple-Silicon results are
 never presented as native-Linux evidence.
 
-## Current provisional result
+## Final result
 
-The corrected macOS ARM64 gate passes aligned Lance latest/pinned reopen,
+Native Ubuntu AMD64 and macOS ARM64 pass aligned Lance latest/pinned reopen,
 DuckDB/Lance coexistence, orphan-fragment recovery, nested fidelity, JDBC
-Arrow, DuckTape nested object values, and LocalStack reopen. A bounded smoke
-also passes Lance add/replace of a derived fixed-size embedding by using Lance
-Java's computed-column API followed by the DuckDB extension's fixed-array cast.
+Arrow, DuckTape nested object values, LocalStack reopen, and the offline image
+check. Lance add/replace of a derived fixed-size embedding passes by combining
+Lance Java's computed-column API with the DuckDB extension's fixed-array cast.
 The same schema check makes Parquet's physical limitation explicit: DuckDB
 reopens its embedding as `FLOAT[]`; the Parquet adapter restores `FLOAT[n]`
 from the artifact schema and records the raw width loss as unsupported.
 
-The translated Linux AMD64 container still crashes inside `liblance_jni` while
-opening the dataset. Its checkpoint and complete HotSpot report are retained,
-but the host is `VirtualApple`; this is portability diagnostics, not evidence
-of a native Linux failure. The manual Ubuntu workflow must decide the native
-gate before the format decision is updated. Its first run leaves
-`run_benchmark` false and stops after uploading Gate 1 evidence; after review,
-rerun it with `run_benchmark` true to authorize the full Gate 2 measurement.
+The accepted decision selects Parquet plus DuckDB for Collet-owned durable
+artifacts. Lance passed all five latency limits but failed the process-cold RSS
+limit at 2.07x Parquet and both amplification limits: its add and replace each
+changed about 2.13 GB, versus 18.4 MB and 18.8 MB Parquet replacements. JDBC
+Arrow remains the core interchange, and DuckTape remains an optional TMD view
+only. This spike does not implement the production artifact API.
+
+Lance remains viable as a user-selected destination when its long-lived,
+versioned, incremental dataset semantics are explicitly wanted. That optional
+integration is tracked in
+[#62](https://github.com/velio-io/collet/issues/62); it does not reopen the
+internal artifact decision.
+
+The translated Apple-Silicon-hosted Linux image's `liblance_jni` crash remains
+retained portability diagnostics. The passing native Ubuntu run proves that it
+is not a current Lance hard blocker.
 
 See [`evidence/`](evidence/) and
 [`docs/adr/0045-dataset-artifact-spike.md`](../../../docs/adr/0045-dataset-artifact-spike.md).

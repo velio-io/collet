@@ -1,0 +1,146 @@
+{:evidence-version 1
+ :issue            45
+ :gate             :compatibility-and-recovery
+ :status           :pass
+ :source           {:workflow-run-id  31255915266
+                    :workflow-run-url "https://github.com/velio-io/collet/actions/runs/31255915266"
+                    :git-commit       "f5ebac05c619637d5e7a69903fdad799b07e366e"
+                    :artifact-name    "spike-45-linux-amd64"}
+ :timestamp        "2026-08-08T11:52:24.944386521Z"
+ :configuration    {:rows                512
+                    :embedding-width     16
+                    :batch-rows          64
+                    :duckdb-memory-limit "256MiB"}
+ :environment      {:java                {:version "25.0.3"
+                                          :vm      "OpenJDK 64-Bit Server VM"}
+                    :os                  {:name "Linux" :arch "amd64"}
+                    :dependencies        {:clojure            "1.12.5"
+                                          :duckdb-jdbc        "1.5.5.1"
+                                          :duckdb             "v1.5.5"
+                                          :main-arrow         "19.0.0"
+                                          :lance-java         "9.0.1"
+                                          :lance-helper-arrow "18.3.0"
+                                          :ducktape-git-sha   "f0fc5f38f272560821e1f9c8e7fe1634761c0580"}
+                    :native              {:lance-extension  {:version "2f167ea"
+                                                             :sha256  "a8b1463e8541a960859b05c39096a60a3c777d12fd63d9867ce62bb251ab2a1a"}
+                                          :httpfs-extension {:version "827222f"
+                                                             :sha256  "887c392b1e49128d11667c81e3698d8b00dfdeb456771acf66d05a0f74f7b7d8"}
+                                          :ducktape-duckdb  {:version "1.5.5"
+                                                             :sha256  "fc23f12e376c47be520f75221288281906e7942e8fd6f6ce4849198ba60d0405"}}
+                    :dependency-aligned? true}
+ :cases            [{:name :main-runtime-dependency-isolation :hard? true :status :pass}
+                    {:name :duckdb-jdbc-parquet
+                     :hard? true
+                     :status :pass
+                     :rows 512
+                     :value-fidelity :pass
+                     :integrated-schema-fidelity :pass
+                     :physical-schema-fidelity :fail
+                     :unsupported-physical-cells [:embedding/fixed-size-width]
+                     :physical-embedding-type "FLOAT[]"
+                     :integrated-embedding-type "FLOAT[16]"}
+                    {:name            :duckdb-jdbc-lance
+                     :hard?           true
+                     :status          :pass
+                     :rows            512
+                     :value-fidelity  :pass
+                     :schema-fidelity :pass
+                     :embedding-type  "FLOAT[16]"}
+                    {:name              :lance-second-version
+                     :hard?             true
+                     :status            :pass
+                     :rows-after-append 513}
+                    {:name                   :lance-java-reopen-latest
+                     :hard?                  true
+                     :status                 :pass
+                     :requested-version      :latest
+                     :version                2
+                     :latest-version         2
+                     :rows                   513
+                     :dependency-aligned?    true
+                     :allocator-peak-bytes   128
+                     :process-peak-rss-bytes 199155712}
+                    {:name                   :lance-java-reopen-pinned
+                     :hard?                  true
+                     :status                 :pass
+                     :requested-version      1
+                     :version                1
+                     :latest-version         2
+                     :rows                   512
+                     :dependency-aligned?    true
+                     :allocator-peak-bytes   128
+                     :process-peak-rss-bytes 199110656}
+                    {:name                   :lance-java-duckdb-coexistence
+                     :hard?                  true
+                     :status                 :pass
+                     :version                2
+                     :rows                   513
+                     :dependency-aligned?    true
+                     :same-jvm?              true
+                     :process-peak-rss-bytes 255950848}
+                    {:name                       :lance-precommit-recovery
+                     :hard?                      true
+                     :status                     :pass
+                     :child-expected-exit        86
+                     :child-actual-exit          86
+                     :committed-version-after-reopen 2
+                     :rows-after-reopen          513
+                     :orphan-fragments-excluded? true
+                     :orphan-fragment            {:bytes  212
+                                                  :sha256 "c42647eafd4fa75f4e5c038865df03d08f8be4d4e06fad0bf5629cb65f1e8ae4"}}
+                    {:name                 :jdbc-arrow-ipc
+                     :hard?                true
+                     :status               :pass
+                     :rows                 512
+                     :value-fidelity       :pass
+                     :schema-fidelity      :pass
+                     :allocator-peak-bytes 29849}
+                    {:name              :collet-arrow-common-subset
+                     :hard?             true
+                     :status            :pass
+                     :rows              512
+                     :unsupported-cells [:address :attributes :tags/null-element :events :embedding]}
+                    {:name                   :ducktape-nested-tmd-view
+                     :hard?                  false
+                     :status                 :pass
+                     :rows                   512
+                     :nested-clojure-values? true
+                     :object-columns         {:address true :attributes true :tags true :events true}
+                     :unsupported-cells      [:embedding]
+                     :omitted-null-columns   [:name :address :attributes :tags :events]}
+                    {:name   :localstack-s3-recovery
+                     :hard?  true
+                     :status :pass
+                     :rows   128
+                     :lance-projected-filtered-reopen? true
+                     :parquet-projected-filtered-reopen? true}
+                    {:name     :linux-amd64-image-no-network
+                     :hard?    true
+                     :status   :pass
+                     :platform "linux/amd64"
+                     :network  "none"}]
+ :diagnostics      [{:name        :lance-java-forced-arrow19
+                     :hard?       false
+                     :status      :observed
+                     :purpose     :reproduce-invalid-mixed-classpath
+                     :exit        1
+                     :exact-error "Execution error (UnsupportedOperationException) at io.netty.buffer.EmptyByteBuf/memoryAddress (EmptyByteBuf.java:961).\nnull"
+                     :log         {:bytes  7301
+                                   :sha256 "977cb7d4f11a5ae65593694605e240af0a995c2806989420beb4731bf6d4ac05"}}]
+ :type-matrix      [{:column :id :duckdb "BIGINT" :arrow "Int64" :collet-arrow :supported}
+                    {:column :name :duckdb "VARCHAR" :arrow "Utf8" :collet-arrow :supported}
+                    {:column :active :duckdb "BOOLEAN" :arrow "Bool" :collet-arrow :supported}
+                    {:column :score :duckdb "DOUBLE" :arrow "Float64" :collet-arrow :supported}
+                    {:column :created-at :duckdb "TIMESTAMP" :arrow "Timestamp(us)" :collet-arrow :supported}
+                    {:column :address :duckdb "STRUCT" :arrow "Struct" :collet-arrow :unsupported}
+                    {:column :attributes :duckdb "MAP(VARCHAR,VARCHAR)" :arrow "Map" :collet-arrow :unsupported}
+                    {:column :tags :duckdb "VARCHAR[]" :arrow "List<Utf8>" :collet-arrow :unsupported}
+                    {:column :events :duckdb "STRUCT[]" :arrow "List<Struct>" :collet-arrow :unsupported}
+                    {:column :embedding :duckdb "FLOAT[n]" :arrow "FixedSizeList<Float32>[n]" :collet-arrow :unsupported}]
+ :source-artifacts {:direct-edn         {:sha256 "9b04020d18ded4e9747cb21814622d3663e998be65c66117a99ad6116889dda5"}
+                    :s3-edn             {:sha256 "01c2cad00ea6f2177c2180e0568d8072ecc6d7dc1eacb632c66f50f66fc21f53"}
+                    :docker-edn         {:sha256 "8af32dd004650c734255a68c19bab3c62bed21f35e9f349f5ef490d3c3ddd74a"}
+                    :docker-build-log   {:sha256 "d791a4efe7c4f61f3ad071cff301fb8a03d346fcd247324371c2153613804773"}
+                    :docker-runtime-log {:sha256 "1a47836877344e446b27a08aa5e397df01a7224c6de496c5a90b2a7fd1ce3c2c"}}
+ :sanitization     {:removed [:absolute-workspace-paths :dependency-cache-paths :localstack-credentials]
+                    :raw-workflow-artifact-committed? false}}

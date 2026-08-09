@@ -1,15 +1,23 @@
-# ADR 0045: Reopen the Lance decision with aligned runtimes
+# ADR 0045: Select Parquet for internal dataset artifacts
 
-Status: provisional. The earlier Parquet acceptance is withdrawn. No production
-artifact contract or publishable dependency is introduced by this spike.
+Status: accepted. No production artifact API or publishable dependency is
+introduced by this spike.
 
-## Provisional decision
+## Decision
 
-Keep the durable artifact format unresolved until the corrected native Ubuntu
-Gate 1 and one-GiB Gate 2 run completes. Lance and Parquet are both still
-candidates. JDBC Arrow 19 remains the default core interchange regardless of
-the durable-format result. DuckTape may only be an optional tech.ml.dataset
-view and never the artifact contract.
+Select Parquet plus DuckDB for Collet-owned durable artifacts. Lance passed
+every compatibility and recovery hard gate and met every latency threshold,
+but it failed the predetermined process-cold RSS and both
+rewrite-amplification thresholds.
+
+JDBC Arrow 19 remains the default core interchange. DuckTape may only be an
+optional tech.ml.dataset view and never the artifact contract.
+
+This decision is scoped to internal immutable artifacts. Lance remains
+technically viable as a user-selected, long-lived destination whose native
+versions and incremental updates are part of the requested sink semantics;
+that optional integration is tracked in
+[#62](https://github.com/velio-io/collet/issues/62).
 
 The earlier Lance rejection was based on three invalid inferences:
 
@@ -76,25 +84,25 @@ either an IPC hop or a new lifetime-aware C Data-to-TMD adapter; nested and
 fixed-size-list mappings remain issue #46 work. DuckTape remains the smaller
 optional TMD path.
 
-FFM is therefore a separately approval-gated fallback, not a way to reinterpret
-the translated-container crash. Finish the native Ubuntu gate first. Only an
-authoritative native failure plausibly isolated to JNI should trigger a narrow
-FFM probe limited to open, version, row count, and projected scan before any
-write or object-store surface is considered.
+FFM is therefore deferred. Native Ubuntu passed the Lance Java and DuckDB Lance
+paths, so there is no immediate justification for Collet to own a Rust C ABI.
+Revisit a narrow FFM probe only for a future failure plausibly isolated to JNI
+or a measured control-plane need that the supported bindings cannot satisfy.
 
-## Corrected Gate 1 evidence
+## Gate 1 evidence
 
-The aligned macOS ARM64 / JDK 25.0.1 functional run passes:
+Native Ubuntu AMD64 on JDK 25.0.3 passes, and the macOS ARM64 functional run
+also passes:
 
 - full nested value fidelity through DuckDB Parquet, DuckDB Lance, and JDBC
   Arrow;
-- latest Lance version 2 with 17 rows and explicitly pinned version 1 with 16
+- latest Lance version 2 with 513 rows and explicitly pinned version 1 with 512
   rows after a fresh JVM restart;
 - DuckDB JDBC, the DuckDB Lance extension, Lance Java 9.0.1, and Arrow 18.3 in
   one aligned helper JVM;
 - one uncommitted child-created fragment excluded after the child force-halts
   with exit 86 before cleanup or commit, with the prior committed version and
-  17-row count retained;
+  513-row count retained;
 - existing Collet Arrow on its supported scalar/timestamp subset;
 - DuckTape maps/vectors for nullable `STRUCT`, `MAP`, `LIST`, and `LIST<STRUCT>`
   object columns; fixed-size arrays remain explicitly unsupported there;
@@ -117,8 +125,9 @@ Execution error (UnsupportedOperationException) at io.netty.buffer.EmptyByteBuf/
 null
 ```
 
-The complete 5,818-byte Clojure report is retained in `output.log` with SHA-256
-`5a6c63503a00f6bdd4f154f55550d1ad1fd9210d071d1b7effd64151898c5feb`.
+The native run's complete 7,301-byte Clojure report is retained in `output.log`
+with SHA-256
+`977cb7d4f11a5ae65593694605e240af0a995c2806989420beb4731bf6d4ac05`.
 This diagnostic is non-qualifying because the runtime deliberately contradicts
 Lance's declared Arrow dependency.
 
@@ -137,9 +146,9 @@ The report identifies `Host: VirtualApple`, Java 25.0.3, Lance 9.0.1, and Arrow
 `4ee1e2aaa777e9e434da306e54b7da90a646755b620b139b664004384ef87ac2`.
 The full report, combined output, checkpoints, sizes, and hashes are retained
 for this exact run. The checkpoint boundary repeats across translated runs,
-while addresses, PIDs, and extracted-library names are run-specific. This is
-not evidence that native Ubuntu fails. The manual workflow is the authority
-for that hard gate.
+while addresses, PIDs, and extracted-library names are run-specific. Native
+Ubuntu subsequently passed, so this remains translated-host portability
+diagnostics and is not a Lance blocker.
 
 ## Nested-type and packaging matrix
 
@@ -160,38 +169,80 @@ coerced.
 
 | Candidate | Packaging and operational surface | Current state |
 | --- | --- | --- |
-| Parquet + DuckDB | Main spike JVM plus manifest-driven fixed-array restoration; replacement artifact for column evolution | survives corrected macOS gate with one physical-schema gap |
-| Lance | DuckDB native extension plus an isolated Lance Java/Arrow 18.3 helper | survives corrected macOS gate; native Ubuntu pending |
+| Parquet + DuckDB | Main spike JVM plus manifest-driven fixed-array restoration; replacement artifact for column evolution | selected for Collet-owned durable artifacts |
+| Lance | DuckDB native extension plus an isolated Lance Java/Arrow 18.3 helper | not selected internally; optional destination tracked in #62 |
 | Arrow IPC | Arrow 19 JDBC streaming | selected core interchange, not a durable table contract |
 | DuckTape | Pinned Git snapshot and matching native DuckDB library | optional TMD adapter only |
 
-## Gate 2 smoke and pending measurement
+## Gate 2 measurement
 
-A 16-row x 4-float smoke validates the measurement machinery only; it is not
-performance evidence. Parquet, Lance, and Arrow IPC all completed write, cold
-read, and applicable operations. Lance add preserved all 11,007 existing bytes,
-added 7,302 bytes, and rewrote 0 bytes. Lance replace preserved 18,296 bytes,
-added 9,592 bytes, and rewrote a 13-byte latest-version hint. The comparable
-Parquet artifacts were 3,425 source bytes, 3,680 add bytes, and 3,682 replace
-bytes. Every file was hashed before and after.
+[Native run 31258409578](https://github.com/velio-io/collet/actions/runs/31258409578)
+used 1,048,576 rows x 256 floats, exactly one GiB of logical embedding input,
+one warm-up, three measured executions, a 256 MiB DuckDB limit, JDBC streaming,
+one DuckDB worker, and 4,096-row Parquet row groups. Every format and cleanup
+case passed. The sort/join emitted 33,554,432 rows and spilled in every sample.
+The runner's OS page cache was not flushed.
 
-The required decision still needs native Linux AMD64 with a 256 MiB DuckDB
-limit, at least one GiB logical input, one warm-up, and three measured runs.
-The runner's OS page cache is not flushed. If native Gate 1 fails, Lance is
-rejected without running its expensive benchmark. If evidence is mixed, choose
-Parquet. Select Lance only if every hard gate passes and measured versioning and
-column-evolution benefit justifies its native/helper operational surface. The
-manual workflow defaults `run_benchmark` to false; Gate 2 requires a second,
-explicitly approved dispatch after reviewing the uploaded Gate 1 evidence.
+Median measured results:
+
+| Metric | Parquet | Lance | Lance / Parquet | Rule |
+| --- | ---: | ---: | ---: | --- |
+| Write latency | 12,558.66 ms | 6,586.41 ms | 0.524x | <= 1.20x, pass |
+| Full sequential latency | 3,761.14 ms | 2,636.81 ms | 0.701x | <= 1.20x, pass |
+| Projected/filtered latency | 95.51 ms | 94.71 ms | 0.992x | <= 1.20x, pass |
+| Sort/join latency | 5,856.63 ms | 6,264.31 ms | 1.070x | <= 1.20x, pass |
+| Process-cold latency | 3,993.13 ms | 2,834.96 ms | 0.710x | <= 1.20x, pass |
+| Process-cold peak RSS | 701,517,824 bytes | 1,452,331,008 bytes | 2.070x | <= 1.25x, fail |
+| Add changed/replacement bytes | 18,445,106 | 2,131,793,911 | 115.575x | <= 0.75x, fail |
+| Replace changed/replacement bytes | 18,787,184 | 2,131,796,225 | 113.471x | <= 0.75x, fail |
+
+Lance's median initial artifact was 1,169,049,750 bytes; Parquet's was
+15,295,724 bytes and Arrow IPC's was 1,282,662,386 bytes. The generated columns
+are deliberately repetitive, so this is evidence for this workload rather than
+a general compression claim. Lance's add/replace operations were faster than
+the Parquet replacements, but the working add/drop/cast sequence added roughly
+2.13 GB per change. The fresh benchmark JVM scanning Lance through the DuckDB
+extension reached twice Parquet's process-cold peak RSS. Those failures select
+Parquet under the approved rule.
+
+DuckDB 1.5.5 does not implement `EXPLAIN (ANALYZE, VERBOSE)`; its exact error is
+`Not implemented Error: Unimplemented explain type: verbose`. The spike records
+DuckDB's `all` fallback, containing logical, optimized, and physical plans.
+Parquet profiling reports read bytes for full and sort reads, while the Lance
+extension reports zero. These counters are retained as backend-visible evidence
+and are not presented as a comparable physical-byte measurement.
+
+Four earlier native runs were invalid instrumentation/workload iterations, not
+format decisions: JDBC result materialization, unnecessary ordering, a
+non-spillable wide sort, and Parquet's default row-group buffering during the
+double-width rewrite. Their run IDs, source hashes, and exact error strings are
+retained in `gate-2-linux-amd64.edn`. The final repair explicitly uses the
+existing 4,096-row batch size for every benchmark Parquet write; the approved
+rows, embedding width, memory limit, and repetition count were unchanged.
+
+The sanitized evidence is
+[`gate-1-linux-amd64.edn`](../../dev/spikes/issue-45/evidence/gate-1-linux-amd64.edn)
+and
+[`gate-2-linux-amd64.edn`](../../dev/spikes/issue-45/evidence/gate-2-linux-amd64.edn).
+Raw workflow artifacts remain outside Git, and no generated dataset binary was
+uploaded.
 
 ## Follow-ups
 
-- [tech.ml.dataset#389](https://github.com/techascent/tech.ml.dataset/issues/389): recommend DuckTape only as an optional object-column view. Its fixed-size
-  array gap and omitted top-level nil keys prevent it from defining Collet's
-  artifact contract.
-- **#46:** implement the supported nested Arrow boundary without assuming the
-  final durable format and without JSON coercion.
-- **#47:** keep task-local DuckDB SQL capable of scanning either surviving
-  artifact format until the native decision lands.
-- **#48:** keep artifact identity, manifests, publication, recovery, and
-  object-store behavior format-neutral until this ADR becomes accepted.
+- [tech.ml.dataset#389](https://github.com/techascent/tech.ml.dataset/issues/389):
+  keep Arrow IPC/JDBC Arrow as the integration boundary and offer DuckTape only
+  as an optional object-column view. Its fixed-size-array gap and omitted
+  top-level nil keys prevent it from defining Collet's artifact contract.
+- **#46:** define the nested JDBC Arrow boundary, including null parents, null
+  children, null list elements, maps, structs, lists, and fixed-size floats,
+  without JSON coercion; document Parquet's manifest-driven `FLOAT[n]` cast.
+- **#48:** implement format-neutral artifact and snapshot identities with a
+  Parquet/DuckDB storage adapter, immutable publication, checksums, recovery,
+  and object-store behavior. Do not copy Lance's internal version model into
+  the public contract.
+- **#47:** add task-local DuckDB SQL over the #48 Parquet artifacts with
+  projection/predicate pushdown, configurable bounded memory and spill, and
+  JDBC Arrow output.
+- **#62:** define Lance as an optional destination with explicit commit,
+  idempotency, version-pinning, retention, and packaging semantics. It must not
+  replace the Parquet internal artifact contract.
