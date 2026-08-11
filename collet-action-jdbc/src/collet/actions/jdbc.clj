@@ -1,22 +1,22 @@
 (ns collet.actions.jdbc
   (:require
-   [clojure.java.io :as io]
    [charred.api :as charred]
-   [next.jdbc :as jdbc]
-   [next.jdbc.result-set :as rs]
-   [next.jdbc.connection :as connection]
-   [next.jdbc.date-time :as date-time]
-   [honey.sql :as sql]
+   [clojure.java.io :as io]
    [collet.action :as action]
    [collet.arrow :as arrow]
    [collet.utils :as utils]
+   [honey.sql :as sql]
+   [next.jdbc :as jdbc]
+   [next.jdbc.connection :as connection]
+   [next.jdbc.date-time :as date-time]
+   [next.jdbc.result-set :as rs]
    [tech.v3.dataset :as ds])
   (:import
-   [clojure.lang ILookup]
-   [java.io Closeable File Writer]
-   [java.util Arrays Locale]
-   [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
-   [java.time Duration LocalDate LocalDateTime LocalTime]))
+    [clojure.lang ILookup]
+    [java.io Closeable File Writer]
+    [java.util Arrays Locale]
+    [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
+    [java.time Duration LocalDate LocalDateTime LocalTime]))
 
 
 ;; next.jdbc.types namespace exports the following functions to convert Clojure types to SQL types:
@@ -27,32 +27,33 @@
 ;; as-nvarchar as-longnvarchar as-nclob as-sqlxml as-ref-cursor as-time-with-timezone
 ;; as-timestamp-with-timezone
 
+
 ;; convert SQL dates and timestamps to local time automatically
 (date-time/read-as-local)
 
 
 (extend-protocol rs/ReadableColumn
-  Time
-  (read-column-by-label [^Time v _]
-    (.toLocalTime v))
-  (read-column-by-index [^Time v _2 _3]
-    (.toLocalTime v)))
+ Time
+ (read-column-by-label [^Time v _]
+   (.toLocalTime v))
+ (read-column-by-index [^Time v _2 _3]
+   (.toLocalTime v)))
 
 
 (extend-protocol rs/ReadableColumn
-  Array
-  (read-column-by-label [^Array v _]
-    (vec (.getArray v)))
-  (read-column-by-index [^Array v _ _]
-    (vec (.getArray v))))
+ Array
+ (read-column-by-label [^Array v _]
+   (vec (.getArray v)))
+ (read-column-by-index [^Array v _ _]
+   (vec (.getArray v))))
 
 
 (extend-protocol rs/ReadableColumn
-  Clob
-  (read-column-by-label [^Clob v _]
-    (rs/clob->string v))
-  (read-column-by-index [^Clob v _2 _3]
-    (rs/clob->string v)))
+ Clob
+ (read-column-by-label [^Clob v _]
+   (rs/clob->string v))
+ (read-column-by-index [^Clob v _2 _3]
+   (rs/clob->string v)))
 
 
 (defn append-row-to-file
@@ -102,7 +103,7 @@
   "Returns a map of column names and their SQL types."
   [^ResultSet row prefix-table?]
   (let [^ResultSetMetaData md (rs/metadata row)]
-    (->> (for [i (range 1 (inc (.getColumnCount md)))
+    (->> (for [i    (range 1 (inc (.getColumnCount md)))
                :let [maybe-table-name (try (.getTableName md i)
                                            (catch SQLFeatureNotSupportedException _ nil))
                      table-name       (when (some? maybe-table-name)
@@ -127,7 +128,8 @@
                           :or   {auto-commit false}} connection]
                      (-> {:jdbcUrl     (connection/jdbc-url connection)
                           :auto-commit auto-commit}
-                         (utils/assoc-some :user user :password password)
+                         (utils/assoc-some :user user
+                                           :password password)
                          (jdbc/get-datasource)))
 
                    :else connection)]
@@ -161,31 +163,33 @@
       (set! column-types (get-columns-types record prefix-table?)))
     (aset batch size (record->map record))
     (set! size (inc size))
-   ;; flush the batch if it's full
+    ;; flush the batch if it's full
     (when (= (alength batch) size)
       (flush-batch this batch)))
 
   (flush-batch [this batch-out]
-   ;; check if convertable to arrow
-    (when (nil? arrow?)       ;; we completed the first batch
+    ;; check if convertable to arrow
+    (when (nil? arrow?) ;; we completed the first batch
       (if-let [batch-arrow-columns (arrow/get-columns batch-out)]
         ;; arrow pathway
         (do (set! arrow? true)
             (set! arrow-columns batch-arrow-columns)
-            (set! file (doto (File/createTempFile "jdbc-query-data" ".arrow")
-                         (.deleteOnExit)))
+            (set! file
+                  (doto (File/createTempFile "jdbc-query-data" ".arrow")
+                    (.deleteOnExit)))
             (set! writer (collet.arrow/make-writer file arrow-columns)))
         ;; json pathway
         (do (set! arrow? false)
-            (set! file (doto (File/createTempFile "jdbc-query-data" ".json")
-                         (.deleteOnExit)))
+            (set! file
+                  (doto (File/createTempFile "jdbc-query-data" ".json")
+                    (.deleteOnExit)))
             (set! writer (io/writer file :append true)))))
-   ;; write to file (arrow or json) based on the previous check
+    ;; write to file (arrow or json) based on the previous check
     (if arrow?
       (collet.arrow/write writer batch-out)
       (doseq [record batch-out]
         (append-row-to-file writer record)))
-   ;; clear the batch
+    ;; clear the batch
     (set! size 0)
     (^[Object/1 Object] Arrays/fill batch nil))
 
@@ -213,7 +217,14 @@
 (defn ->batch-result
   ^BatchResult [batch-size prefix-table?]
   (->BatchResult
-   (object-array batch-size) prefix-table? 0 nil nil nil nil nil))
+   (object-array batch-size)
+   prefix-table?
+   0
+   nil
+   nil
+   nil
+   nil
+   nil))
 
 
 (def query-params-spec
@@ -261,14 +272,14 @@
                            (sql/format query options)
                            query)
             options      (utils/assoc-some
-                           {:concurrency concurrency
-                            :result-type result-type
-                            :cursors     cursors
-                            :fetch-size  fetch-size
-                            :builder-fn  (if (not prefix-table?)
-                                           rs/as-unqualified-lower-maps
-                                           rs/as-lower-maps)}
-                           :timeout timeout)]
+                          {:concurrency concurrency
+                           :result-type result-type
+                           :cursors     cursors
+                           :fetch-size  fetch-size
+                           :builder-fn  (if (not prefix-table?)
+                                          rs/as-unqualified-lower-maps
+                                          rs/as-lower-maps)}
+                          :timeout timeout)]
         (->> (jdbc/plan conn query-string options)
              (run! #(append batch %)))))
 
@@ -278,7 +289,11 @@
     (cond
       ;; no files were written, return the result set as a sequence of maps
       (nil? (:file batch))
-      (take (:size batch) (:batch batch))
+      (let [records (take (:size batch) (:batch batch))]
+        (if-let [columns (arrow/get-columns records)]
+          (with-meta records {:arrow-columns columns})
+          ;; Dynamic JSON values remain on the action's existing fallback path.
+          (with-meta records {:collet.arrow/skip-conversion? true})))
 
       (:arrow? batch)
       (collet.arrow/read-dataset (:file batch) (:arrow-columns batch))
@@ -291,10 +306,14 @@
                              identity)
             cleanup-fn     #(do (.close reader)
                                 (.delete ^File (:file batch)))]
-        (->rows-seq lines row-mapping-fn cleanup-fn)))))
+        ;; Do not reinterpret a deliberate JDBC JSON fallback as a core schema error.
+        (with-meta
+          (->rows-seq lines row-mapping-fn cleanup-fn)
+          {:collet.arrow/skip-conversion? true})))))
 
 
-(defmethod action/action-fn ::query [_]
+(defmethod action/action-fn ::query
+  [_]
   make-query)
 
 
@@ -343,12 +362,13 @@
                              (sql/format options))
                          statement)
           options      (utils/assoc-some
-                         {:builder-fn (if (not prefix-table?)
-                                        rs/as-unqualified-lower-maps
-                                        rs/as-lower-maps)}
-                         :timeout timeout)]
+                        {:builder-fn (if (not prefix-table?)
+                                       rs/as-unqualified-lower-maps
+                                       rs/as-lower-maps)}
+                        :timeout timeout)]
       (jdbc/execute! conn query-string options))))
 
 
-(defmethod action/action-fn ::execute [_]
+(defmethod action/action-fn ::execute
+  [_]
   execute-statement)

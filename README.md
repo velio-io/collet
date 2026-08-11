@@ -206,10 +206,17 @@ By default, data returned from tasks will be offloaded to Arrow files. These fil
 into the JVM heap) and represented as [TMD datasets](https://github.com/techascent/tech.ml.dataset?tab=readme-ov-file)
 or dataset sequences when data is required for processing.
 
-**Note!** Currently, not all types of data can be offloaded to Arrow. It works for collections with simple types like
-strings, numbers, dates, etc., and for lists with simple values.
-Nested data structures like maps aren't supported yet but will be in future releases. Collections that can't be
-converted to Arrow will be kept in memory.
+Nested values can be offloaded through Arrow when task-result metadata supplies
+an explicit :arrow-columns schema. Supported shapes include fixed Structs,
+dynamic UTF-8 Maps, Lists including List<Struct>, fixed Float32 embeddings,
+and exact decimals. Arrow remains the schema authority; ambiguous values such
+as an ordinary Clojure map require that metadata rather than guessing whether
+they are a Struct or Map.
+
+Scalar-only results remain memory-mapped. Nested values are exposed as TMD
+object columns one Arrow record batch at a time, so only the requested bounded
+batch is copied to JVM heap. See [the Arrow boundary guide](./docs/arrow.md)
+for the schema grammar, batching, decimal, Java Time, and error rules.
 
 You can disable this feature by setting the `:use-arrow` key to false in the pipeline specification.
 

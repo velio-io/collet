@@ -233,9 +233,11 @@ uploaded.
   keep Arrow IPC/JDBC Arrow as the integration boundary and offer DuckTape only
   as an optional object-column view. Its fixed-size-array gap and omitted
   top-level nil keys prevent it from defining Collet's artifact contract.
-- **#46:** define the nested JDBC Arrow boundary, including null parents, null
-  children, null list elements, maps, structs, lists, and fixed-size floats,
-  without JSON coercion; document Parquet's manifest-driven `FLOAT[n]` cast.
+- **#46:** Arrow IPC now owns the versioned nested record-batch schema:
+  null parents, null children, null list elements, maps, structs, lists,
+  fixed-size floats, exact decimals, and Java Time values without JSON
+  coercion. Issue #48 consumes this schema to restore Parquet's
+  manifest-driven FLOAT[n] logical cast.
 - **#48:** implement format-neutral artifact and snapshot identities with a
   Parquet/DuckDB storage adapter, immutable publication, checksums, recovery,
   and object-store behavior. Do not copy Lance's internal version model into

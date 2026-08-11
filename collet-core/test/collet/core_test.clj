@@ -1,9 +1,13 @@
 (ns collet.core-test
   (:require
    [clojure.test :refer :all]
+   [collet.actions.mapper :as mapper]
+   [collet.actions.slicer :as slicer]
+   [collet.arrow :as arrow]
    [collet.core :as sut]
    [collet.test-fixtures :as tf]
-   [collet.utils :as utils]))
+   [collet.utils :as utils]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.core))
@@ -133,94 +137,97 @@
 
 (deftest compile-and-run-task
   (testing "Compiles and runs a task"
-    (let [task-spec {:name    :test-task
-                     :actions [{:type   :clj/select-keys
-                                :name   :keys-selector
-                                :params [{:a 1 :b 2 :c 3 :d 4 :e 5}
-                                         [:a :b :e]]}
-                               {:type      :custom
-                                :name      :format-string
-                                :selectors '{a [:state :keys-selector :a]
-                                             b [:state :keys-selector :b]
-                                             e [:state :keys-selector :e]}
-                                :params    '[a b e]
-                                :fn        (fn [a b e]
-                                             (format "Params extracted a: %s, b: %s, e: %s"
-                                                     a b e))}]}
+    (let [task-spec         {:name    :test-task
+                             :actions [{:type   :clj/select-keys
+                                        :name   :keys-selector
+                                        :params [{:a 1 :b 2 :c 3 :d 4 :e 5}
+                                                 [:a :b :e]]}
+                                       {:type      :custom
+                                        :name      :format-string
+                                        :selectors '{a [:state :keys-selector :a]
+                                                     b [:state :keys-selector :b]
+                                                     e [:state :keys-selector :e]}
+                                        :params    '[a b e]
+                                        :fn        (fn [a b e]
+                                                     (format "Params extracted a: %s, b: %s, e: %s"
+                                                             a
+                                                             b
+                                                             e))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          actual    (task-fn {:config {} :state {}})]
+          actual            (task-fn {:config {} :state {}})]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with setup actions"
-    (let [task-spec {:name    :test-task
-                     :setup   [{:type   :clj/select-keys
-                                :name   :keys-selector
-                                :params [{:a 1 :b 2 :c 3 :d 4 :e 5}
-                                         [:a :b :e]]}]
-                     :actions [{:type      :custom
-                                :name      :format-string
-                                :selectors '{a [:state :keys-selector :a]
-                                             b [:state :keys-selector :b]
-                                             e [:state :keys-selector :e]}
-                                :params    '[a b e]
-                                :fn        (fn [a b e]
-                                             (format "Params extracted a: %s, b: %s, e: %s"
-                                                     a b e))}]}
+    (let [task-spec         {:name    :test-task
+                             :setup   [{:type   :clj/select-keys
+                                        :name   :keys-selector
+                                        :params [{:a 1 :b 2 :c 3 :d 4 :e 5}
+                                                 [:a :b :e]]}]
+                             :actions [{:type      :custom
+                                        :name      :format-string
+                                        :selectors '{a [:state :keys-selector :a]
+                                                     b [:state :keys-selector :b]
+                                                     e [:state :keys-selector :e]}
+                                        :params    '[a b e]
+                                        :fn        (fn [a b e]
+                                                     (format "Params extracted a: %s, b: %s, e: %s"
+                                                             a
+                                                             b
+                                                             e))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          actual    (task-fn {:config {} :state {}})]
+          actual            (task-fn {:config {} :state {}})]
       (is (= actual "Params extracted a: 1, b: 2, e: 5"))))
 
   (testing "Task with iterator"
-    (let [counter   (atom 0)
-          task-spec {:name     :test-task
-                     :actions  [{:type :custom
-                                 :name :count-action
-                                 :fn   (fn []
-                                         {:count (swap! counter inc)})}]
-                     :iterator {:next true}
-                     :return   [:state :count-action :count]}
+    (let [counter           (atom 0)
+          task-spec         {:name     :test-task
+                             :actions  [{:type :custom
+                                         :name :count-action
+                                         :fn   (fn []
+                                                 {:count (swap! counter inc)})}]
+                             :iterator {:next true}
+                             :return   [:state :count-action :count]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task-fn {:config {} :state {}})]
+          result            (task-fn {:config {} :state {}})]
       ;; result becomes a sequence of what :data iterator property returns
       (is (= (take 10 result) (range 1 11)))
       (is (= (first result) 11))))
 
   (testing "Task with external actions"
-    (let [task-spec {:name    :test-task
-                     :actions [{:name   :count-action
-                                :type   :test.collet/counter-action.edn
-                                :params [0]}]
-                     ;; name of the action is overridden by the external action
-                     :return  [:state :my-external-action]}
+    (let [task-spec         {:name    :test-task
+                             :actions [{:name   :count-action
+                                        :type   :test.collet/counter-action.edn
+                                        :params [0]}]
+                             ;; name of the action is overridden by the external action
+                             :return  [:state :my-external-action]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)
-          result    (task-fn {:config {} :state {}})]
+          result            (task-fn {:config {} :state {}})]
       (is (= 1 result)))))
 
 
 (deftest handle-task-errors-test
   (testing "Tasks failed on error"
-    (let [task-spec {:name    :throwing-task
-                     :actions [{:type :custom
-                                :name :bad-action
-                                :fn   (fn []
-                                        (throw (ex-info "Bad action" {})))}]}
+    (let [task-spec         {:name    :throwing-task
+                             :actions [{:type :custom
+                                        :name :bad-action
+                                        :fn   (fn []
+                                                (throw (ex-info "Bad action" {})))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
       (is (thrown? Exception (task-fn {:config {} :state {}})))))
 
   (testing "Tasks retried on failure"
-    (let [runs-count (atom 0)
-          task-spec  {:name    :throwing-task
-                      :retry   {:max-retries 3}
-                      :actions [{:type :custom
-                                 :name :bad-action
-                                 :fn   (fn []
-                                         (swap! runs-count inc)
-                                         (throw (ex-info "Bad action" {})))}]}
+    (let [runs-count        (atom 0)
+          task-spec         {:name    :throwing-task
+                             :retry   {:max-retries 3}
+                             :actions [{:type :custom
+                                        :name :bad-action
+                                        :fn   (fn []
+                                                (swap! runs-count inc)
+                                                (throw (ex-info "Bad action" {})))}]}
           {:keys [task-fn]} (sut/compile-task (utils/eval-ctx) task-spec)]
       (is (thrown? Exception (task-fn {:config {} :state {}})))
       ;; function will be called 4 times: 1 initial run + 3 retries
       (is (= @runs-count 4)))))
-
 
 
 (deftest execute-task-test
@@ -277,3 +284,91 @@
           (is (= 2 (count result)))
           (is (= ["PR1" "PR2"]
                  (map :title result))))))))
+
+
+(deftest arrow-task-result-batching-test
+  (let [schema (arrow/normalize-schema
+                {:version 1
+                 :fields  [{:key :id :name "id" :type :int64}]})
+        rows   (with-meta (map #(hash-map :id %) (range 8200))
+                          {:arrow-columns schema})
+        result (sut/handle-task-result :lazy-rows rows {:use-arrow true :keep-result true})
+        data   (sut/arrow->dataset result)]
+    (is (sut/arrow-task-result? result))
+    (is (= [4096 4096 8] (mapv ds/row-count data)))
+    (is (= {:id 0} (first (ds/rows (first data)))))
+    (is (= {:id 8199} (last (ds/rows (last data)))))
+    (is (= schema (:arrow-columns (meta data)))))
+  (let [schema  (arrow/normalize-schema
+                 {:version 1
+                  :fields  [{:key :id :name "id" :type :int64}]})
+        batches (with-meta [[] [{:id 1} {:id 2}] [] [{:id 3}]]
+                           {:arrow-columns schema})
+        result  (sut/handle-task-result :batched-rows batches {:use-arrow true :keep-result true})]
+    (is (= [2 1] (mapv ds/row-count (sut/arrow->dataset result)))))
+  (let [error (try
+                (sut/handle-task-result :ambiguous
+                                        [{:profile {:name "Ada"}}]
+                                        {:use-arrow true :keep-result true})
+                (catch clojure.lang.ExceptionInfo error
+                  error))]
+    (is (= :collet.error/arrow-schema-required
+           (:collet.error/type (ex-data error)))))
+  (let [fallback (with-meta (map identity [{:json {:a 1}}])
+                            {:collet.arrow/skip-conversion? true})
+        result   (sut/handle-task-result :jdbc-json-fallback
+                                         fallback
+                                         {:use-arrow true :keep-result true})]
+    (is (not (sut/arrow-task-result? result)))
+    (is (= [{:json {:a 1}}] (vec result)))
+    (is (true? (-> result meta :collet.arrow/skip-conversion?))))
+  (let [schema   (arrow/normalize-schema
+                  {:version 1
+                   :fields  [{:key :id :name "id" :type :int64}]})
+        view     (with-meta [(ds/->dataset [{:id 1}])
+                             (ds/->dataset [{:id 2} {:id 3}])]
+                            {:ds-seq true})
+        result   (sut/handle-task-result :arrow-view view {:use-arrow true :keep-result true})
+        datasets (sut/arrow->dataset result)]
+    (is (sut/arrow-task-result? result))
+    (is (= [1 2] (mapv ds/row-count datasets)))
+    (is (= [{:id 1} {:id 2} {:id 3}]
+           (vec (mapcat ds/rows datasets))))
+    (is (= schema (:arrow-columns (meta datasets))))))
+
+
+(deftest arrow-task-result-consumer-test
+  (let [schema   (arrow/normalize-schema
+                  {:version 1
+                   :fields  [{:key :id :name "id" :type :int64}
+                             {:key    :profile
+                              :name   "profile"
+                              :type   :struct
+                              :fields [{:key :name :name "name" :type :string}
+                                       {:key :score :name "score" :type :int32}]}
+                             {:key     :events
+                              :name    "events"
+                              :type    :list
+                              :element {:type   :struct
+                                        :fields [{:key :kind :name "kind" :type :string}]}}]})
+        rows     (with-meta [{:id      1
+                              :profile {:name "Ada" :score 7}
+                              :events  [{:kind "created"}]}
+                             {:id      2
+                              :profile nil
+                              :events  []}]
+                            {:arrow-columns schema})
+        result   (sut/handle-task-result :nested-rows rows {:use-arrow true :keep-result true})
+        datasets (sut/arrow->dataset result)
+        mapped   (mapper/map-sequence {:sequence datasets} nil)
+        sliced   (slicer/concat-dataset-seq datasets)]
+    (is (= {:id      1
+            :profile {:name "Ada" :score 7}
+            :events  [{:kind "created"}]}
+           (:current mapped)))
+    (is (= schema (:arrow-columns (meta sliced))))
+    (is (= [{:id      1
+             :profile {:name "Ada" :score 7}
+             :events  [{:kind "created"}]}
+            {:id 2 :profile nil :events []}]
+           (mapv #(arrow/prep-record % schema) (ds/rows sliced))))))
