@@ -1,18 +1,18 @@
 (ns collet.actions.jdbc-test
   (:require
-   [clojure.test :refer :all]
-   [next.jdbc :as jdbc]
    [clj-test-containers.core :as tc]
-   [collet.test-containers :as containers]
-   [collet.test-fixtures :as tf]
+   [clojure.test :refer :all]
+   [collet.actions.jdbc :as sut]
    [collet.core :as collet]
    [collet.deps :as collet.deps]
+   [collet.test-containers :as containers]
+   [collet.test-fixtures :as tf]
    [collet.utils :as utils]
-   [collet.actions.jdbc :as sut]
+   [next.jdbc :as jdbc]
    [tech.v3.dataset :as ds])
   (:import
-   [clojure.lang LazySeq]
-   [java.time LocalDate LocalDateTime LocalTime Duration]))
+    [clojure.lang LazySeq]
+    [java.time LocalDate LocalDateTime LocalTime Duration]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.jdbc))
@@ -164,7 +164,9 @@
 (defn populate-pg-data-types [conn]
   ;; create enum type
   (jdbc/execute! conn ["CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')"])
-  (jdbc/execute! conn ["CREATE TABLE data_types (id SERIAL PRIMARY KEY,
+  (jdbc/execute!
+   conn
+   ["CREATE TABLE data_types (id SERIAL PRIMARY KEY,
                                                  bool_col BOOLEAN,
                                                  int_col INT,
                                                  float_col FLOAT,
@@ -176,15 +178,21 @@
                                                  jsonb_col JSONB,
                                                  interval_col INTERVAL,
                                                  mood_col mood)"])
-  (jdbc/execute! conn ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
+  (jdbc/execute!
+   conn
+   ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
                         VALUES (true, 42, 3.14, 'text', '2024-04-22', '21:01:03', '2024-04-22 21:01:03', '{\"a\": 1}', '{\"b\": 2}', '1 day 2 hours 3 minutes 4 seconds', 'happy')"])
-  (jdbc/execute! conn ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
+  (jdbc/execute!
+   conn
+   ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
                         VALUES (false, 43, 3.15, 'text2', '2024-04-23', '21:01:04', '2024-04-23 21:01:04', '{\"c\": 3}', '{\"d\": 4}', '2 days 3 hours 4 minutes 5 seconds', 'sad')"]))
 
 
 (defn add-more-rows [conn]
   (dotimes [_i 20]
-    (jdbc/execute! conn ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
+    (jdbc/execute!
+     conn
+     ["INSERT INTO data_types (bool_col, int_col, float_col, text_col, date_col, time_col, timestamp_col, json_col, jsonb_col, interval_col, mood_col)
                           VALUES (true, 42, 3.14, 'text', '2024-04-22', '21:01:03', '2024-04-22 21:01:03', '{\"a\": 1}', '{\"b\": 2}', '1 day 2 hours 3 minutes 4 seconds', 'happy')"])))
 
 
@@ -215,31 +223,32 @@
                                                                        :from   :data-types}}}]}]})
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             result   (:query run)]
-        (is (= (list #:data_types{:bool_col      true
-                                  :date_col      (LocalDate/parse "2024-04-22")
-                                  :float_col     3.14
-                                  :id            1
-                                  :int_col       42
-                                  :interval_col  (Duration/parse "PT26H3M4S")
-                                  :json_col      {:a 1}
-                                  :jsonb_col     {:b 2}
-                                  :mood_col      "happy"
-                                  :text_col      "text"
-                                  :time_col      (LocalTime/parse "21:01:03")
-                                  :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
-                     #:data_types{:bool_col      false
-                                  :date_col      (LocalDate/parse "2024-04-23")
-                                  :float_col     3.15
-                                  :id            2
-                                  :int_col       43
-                                  :interval_col  (Duration/parse "PT51H4M5S")
-                                  :json_col      {:c 3}
-                                  :jsonb_col     {:d 4}
-                                  :mood_col      "sad"
-                                  :text_col      "text2"
-                                  :time_col      (LocalTime/parse "21:01:04")
-                                  :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04")})
-               result)))
+        (is
+         (= (list #:data_types{:bool_col      true
+                               :date_col      (LocalDate/parse "2024-04-22")
+                               :float_col     3.14
+                               :id            1
+                               :int_col       42
+                               :interval_col  (Duration/parse "PT26H3M4S")
+                               :json_col      {:a 1}
+                               :jsonb_col     {:b 2}
+                               :mood_col      "happy"
+                               :text_col      "text"
+                               :time_col      (LocalTime/parse "21:01:03")
+                               :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
+                  #:data_types{:bool_col      false
+                               :date_col      (LocalDate/parse "2024-04-23")
+                               :float_col     3.15
+                               :id            2
+                               :int_col       43
+                               :interval_col  (Duration/parse "PT51H4M5S")
+                               :json_col      {:c 3}
+                               :jsonb_col     {:d 4}
+                               :mood_col      "sad"
+                               :text_col      "text2"
+                               :time_col      (LocalTime/parse "21:01:04")
+                               :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04")})
+            result)))
 
       (let [pipeline (collet/compile-pipeline
                       {:name  :data-types
@@ -256,8 +265,9 @@
                                                            :query      {:select [:*]
                                                                         :from   :data-types
                                                                         :where  [:= :mood_col (types/as-other mood)]}}}]}]})
-            run      (tf/run-pipeline! pipeline {:connection connection-map
-                                                 :mood       "sad"})
+            run      (tf/run-pipeline! pipeline
+                                       {:connection connection-map
+                                        :mood       "sad"})
             result   (:query run)]
         (is (= 1 (count result)))
         (is (= "sad" (-> result first :data_types/mood_col)))))
@@ -279,24 +289,24 @@
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             result   (:query run)]
         (are [key expected] (= expected (-> result first key))
-          :bool_col true
-          :mood_col "happy"
-          :interval_col (Duration/parse "PT26H3M4S")
-          :json_col {:a 1}
-          :jsonb_col {:b 2}
-          :date_col (LocalDate/parse "2024-04-22")
-          :time_col (LocalTime/parse "21:01:03")
-          :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03"))
+         :bool_col      true
+         :mood_col      "happy"
+         :interval_col  (Duration/parse "PT26H3M4S")
+         :json_col      {:a 1}
+         :jsonb_col     {:b 2}
+         :date_col      (LocalDate/parse "2024-04-22")
+         :time_col      (LocalTime/parse "21:01:03")
+         :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03"))
 
         (are [key expected] (= expected (-> result second key))
-          :bool_col false
-          :mood_col "sad"
-          :interval_col (Duration/parse "PT51H4M5S")
-          :json_col {:c 3}
-          :jsonb_col {:d 4}
-          :date_col (LocalDate/parse "2024-04-23")
-          :time_col (LocalTime/parse "21:01:04")
-          :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04"))))
+         :bool_col      false
+         :mood_col      "sad"
+         :interval_col  (Duration/parse "PT51H4M5S")
+         :json_col      {:c 3}
+         :jsonb_col     {:d 4}
+         :date_col      (LocalDate/parse "2024-04-23")
+         :time_col      (LocalTime/parse "21:01:04")
+         :timestamp_col (LocalDateTime/parse "2024-04-23T21:01:04"))))
 
     ;; add 20 more records to the table
     (with-open [conn (jdbc/get-connection connection-map)]
@@ -321,10 +331,12 @@
                                                                            :from   :data-types}}}]}]})
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             result   (:query run)
-            columns  (-> result meta :arrow-columns)]
-        (is (= 3 (count result)))
-        (is (utils/ds-seq? result))
-        (is (= [10 10 2] (map ds/row-count result)))
+            datasets (collet/arrow->dataset result)
+            columns  (-> datasets meta :arrow-columns)]
+        (is (collet/arrow-task-result? result))
+        (is (= 3 (count datasets)))
+        (is (utils/ds-seq? datasets))
+        (is (= [10 10 2] (map ds/row-count datasets)))
         (is (= {:id            1
                 :bool_col      true
                 :mood_col      "happy"
@@ -332,7 +344,7 @@
                 :date_col      (LocalDate/parse "2024-04-22")
                 :time_col      (LocalTime/parse "21:01:03")
                 :timestamp_col (LocalDateTime/parse "2024-04-22T21:01:03")}
-               (-> (first result)
+               (-> (first datasets)
                    (ds/row-at 0)
                    (collet.arrow/prep-record columns))))))
 
@@ -432,8 +444,8 @@
                                                                        :from     :employees
                                                                        :order-by [:id]}}
                                               :return    [[:$/cat :employees/user_name]]}]}]})
-            _        (with-open [conn (jdbc/get-connection connection-map)]
-                       (containers/populate-employees! conn))
+            _ (with-open [conn (jdbc/get-connection connection-map)]
+                (containers/populate-employees! conn))
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             result   (:query run)]
         (is (= 5 (count result)))
@@ -519,9 +531,9 @@
                                                                            :order-by [:u.username :p.product_name]}
                                                               :options    {:dialect :mysql
                                                                            :quoted  false}}}]}]})
-            _        (with-open [conn (jdbc/get-connection connection-map)]
-                       (create-tables conn)
-                       (populate-orders-data conn))
+            _ (with-open [conn (jdbc/get-connection connection-map)]
+                (create-tables conn)
+                (populate-orders-data conn))
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             result   (:query run)]
         (is (instance? LazySeq result))

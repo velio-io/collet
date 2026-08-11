@@ -713,6 +713,77 @@
    (.-columns arrow-task-result)))
 
 
+(def ^:private arrow-batch-size 4096)
+
+
+(defn- batch-candidate?
+  [batch]
+  (or (ds/dataset? batch)
+      (sequential? batch)))
+
+
+(defn- nonempty-batch?
+  [batch]
+  (and (batch-candidate? batch)
+       (pos? (collet.arrow/get-batch-size batch))))
+
+
+(defn- record-batch?
+  [batch]
+  (or (ds/dataset? batch)
+      (and (sequential? batch)
+           (let [row (first batch)]
+             (or (nil? row) (map? row))))))
+
+
+(defn- result-layout
+  [data]
+  (let [sampled-item (first (drop-while nil? (take 200 data)))
+        batches?     (record-batch? sampled-item)]
+    ;; An empty batch establishes batched shape but cannot supply schema
+    ;; metadata, so locate the first non-empty batch separately.
+    {:batches?    batches?
+     :first-batch (when batches?
+                    (first (filter nonempty-batch? data)))}))
+
+
+(defn- skip-arrow-conversion?
+  [data]
+  (true? (-> data meta :collet.arrow/skip-conversion?)))
+
+
+(defn- result-schema
+  [data batches? first-batch]
+  (let [explicit-schema (or (-> data meta :arrow-columns)
+                            (-> first-batch meta :arrow-columns))]
+    (if explicit-schema
+      (collet.arrow/normalize-schema explicit-schema)
+      (let [records (if batches?
+                      (mapcat #(if (ds/dataset? %) (ds/rows %) %) data)
+                      data)
+            inference-candidate?
+            (if-some [record (first (remove nil? (take 200 records)))]
+              (map? record)
+              true)]
+        (when inference-candidate?
+          (collet.arrow/infer-schema! records))))))
+
+
+(defn- write-arrow-result!
+  [task-name data schema batches?]
+  (let [file ^File (File/createTempFile (name task-name) ".arrow")]
+    (.deleteOnExit file)
+    (with-open [writer (collet.arrow/make-writer file schema)]
+      (if batches?
+        (doseq [batch data
+                :when (nonempty-batch? batch)]
+          (collet.arrow/write writer batch))
+        (doseq [batch (partition-all arrow-batch-size data)
+                :when (nonempty-batch? batch)]
+          (collet.arrow/write writer batch))))
+    (ArrowTaskResult. task-name schema file)))
+
+
 (defn handle-task-result
   [task-name data {:keys [use-arrow keep-result]}]
   (if (not (sequential? data))
@@ -721,26 +792,13 @@
     ;; process as a sequence
     (cond
       (and keep-result use-arrow)
-      (let [seq-items?    (sequential? (first data))
-            arrow-columns (if seq-items?
-                            (collet.arrow/get-columns (first data))
-                            (collet.arrow/get-columns data))]
-        (if (some? arrow-columns)
-          ;; write to arrow file
-          (let [file ^File (File/createTempFile (name task-name) ".arrow")]
-            (.deleteOnExit file)
-            (with-open [writer (collet.arrow/make-writer file arrow-columns)]
-              (if seq-items?
-                (loop [batch     (first data)
-                       remaining (rest data)]
-                  (when (some? batch)
-                    (collet.arrow/write writer batch)
-                    (recur (first remaining) (rest remaining))))
-                ;; TODO add batching for flat sequences
-                (collet.arrow/write writer data)))
-            (ArrowTaskResult. task-name arrow-columns file))
-          ;; return as is
-          (doall data)))
+      (if (skip-arrow-conversion? data)
+        (doall data)
+        (let [{:keys [batches? first-batch]} (result-layout data)
+              schema (result-schema data batches? first-batch)]
+          (if schema
+            (write-arrow-result! task-name data schema batches?)
+            (doall data))))
 
       keep-result
       (doall data)

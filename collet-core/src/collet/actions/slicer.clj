@@ -1,29 +1,32 @@
 (ns collet.actions.slicer
   (:require
+   [collet.action :as action]
+   [collet.arrow :as collet.arrow]
+   [collet.conditions :as collet.conds]
+   [collet.select :as collet.select]
+   [collet.utils :as utils]
+   [ham-fisted.api :as hamf]
    [tech.v3.dataset :as ds]
    [tech.v3.dataset.column :as ds.col]
    [tech.v3.dataset.join :as ds.join]
+   [tech.v3.dataset.reductions :as ds.reduce]
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.bitmap :as dtype.bitmap]
-   [tech.v3.datatype.protocols :as dtype.proto]
-   [tech.v3.dataset.reductions :as ds.reduce]
-   [ham-fisted.api :as hamf]
-   [collet.action :as action]
-   [collet.conditions :as collet.conds]
-   [collet.arrow :as collet.arrow]
-   [collet.utils :as utils]
-   [collet.select :as collet.select]))
+   [tech.v3.datatype.protocols :as dtype.proto]))
 
 
 (defn concat-dataset-seq
   [dataset-seq]
-  (let [arrow-columns (-> dataset-seq meta :arrow-columns)]
-    (cond->> dataset-seq
-      (some? arrow-columns)
-      (map (fn [dataset]
-             (ds/row-map dataset #(collet.arrow/prep-record % arrow-columns))))
-      :always
-      (apply utils/parallel-concat))))
+  (let [arrow-columns (-> dataset-seq meta :arrow-columns)
+        dataset       (cond->> dataset-seq
+                        (some? arrow-columns)
+                        (map (fn [dataset]
+                               (ds/row-map dataset #(collet.arrow/prep-record % arrow-columns))))
+                        :always
+                        (apply utils/parallel-concat))]
+    (cond-> dataset
+      arrow-columns
+      (with-meta (assoc (meta dataset) :arrow-columns arrow-columns)))))
 
 
 (defn do-join
@@ -54,7 +57,9 @@
                          (= target-key :_collet_join_target)
                          (conj target-key))
         joined-ds      (ds.join/left-join
-                        [source-key target-key] left-ds right-ds)]
+                        [source-key target-key]
+                        left-ds
+                        right-ds)]
     (apply dissoc joined-ds helper-columns)))
 
 
@@ -113,23 +118,25 @@
    (into {}
          (map (fn [[k v]]
                 (let [[rf-func rf-col] (if (sequential? v) v [v k])
-                      reducer (case rf-func
-                                :values (vector-reducer rf-col)
-                                :distinct (ds.reduce/distinct
-                                           rf-col #(prep-column (assoc options :column-name rf-col) %))
-                                :count-distinct (ds.reduce/count-distinct rf-col)
-                                :first-value (ds.reduce/first-value rf-col)
-                                :row-count (ds.reduce/row-count)
-                                :mean (ds.reduce/mean rf-col)
-                                :sum (ds.reduce/sum rf-col))]
+                      reducer          (case rf-func
+                                         :values (vector-reducer rf-col)
+                                         :distinct (ds.reduce/distinct
+                                                    rf-col
+                                                    #(prep-column (assoc options :column-name rf-col) %))
+                                         :count-distinct (ds.reduce/count-distinct rf-col)
+                                         :first-value (ds.reduce/first-value rf-col)
+                                         :row-count (ds.reduce/row-count)
+                                         :mean (ds.reduce/mean rf-col)
+                                         :sum (ds.reduce/sum rf-col))]
                   [k reducer])))
          columns)))
 
 
 (defn do-fold-by
   "Fold dataset by the provided columns"
-  [dataset {:keys [by rollup rollup-except columns]
-            :or   {rollup false rollup-except false}}]
+  [dataset
+   {:keys [by rollup rollup-except columns]
+    :or   {rollup false rollup-except false}}]
   (let [rollup'           (cond
                             (true? rollup) :all
                             (vector? rollup) (set rollup)
@@ -191,8 +198,9 @@
 
 
 (defn do-group-by
-  [dataset {:keys [by join-groups group-col]
-            :or   {join-groups true group-col :_group_by_key}}]
+  [dataset
+   {:keys [by join-groups group-col]
+    :or   {join-groups true group-col :_group_by_key}}]
   (let [groups (if (utils/ds-seq? dataset)
                  (let [arrow-columns (-> dataset meta :arrow-columns)
                        groups-seq    (cond->> dataset
@@ -345,8 +353,10 @@
          :select (do-select d args)
          :map (do-map-with d args)
          d))
-     dataset apply)))
+     dataset
+     apply)))
 
 
-(defmethod action/action-fn :slicer [_]
+(defmethod action/action-fn :slicer
+  [_]
   prep-dataset)

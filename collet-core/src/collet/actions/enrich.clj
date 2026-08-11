@@ -1,6 +1,7 @@
 (ns collet.actions.enrich
   (:require
    [collet.action :as action]
+   [collet.select]
    [collet.utils :as utils]))
 
 
@@ -40,7 +41,8 @@
                        (fn [acc sym path]
                          (->> (utils/replace-all path {:$enrich/item [:state mapper-key :current]})
                               (assoc acc sym)))
-                       {} selectors)
+                       {}
+                       selectors)
         execute-when' (utils/replace-all execute-when {:$enrich/item [:state mapper-key :current]})]
     ;; return a vector of three actions
     ;; slicer action
@@ -50,29 +52,31 @@
       :params    {:sequence target-sym}}
      ;; enrich (get additional data) action
      (utils/assoc-some
-       {:type      action
-        :name      action-key
-        :selectors selectors'
-        :params    params}
-       :when execute-when'
-       :fn custom-fn
-       :return return)
+      {:type      action
+       :name      action-key
+       :selectors selectors'
+       :params    params}
+      :when execute-when'
+      :fn custom-fn
+      :return return)
      ;; fold (collect results) action
      {:type      :fold
       :name      action-name
       :selectors {item-sym [:state mapper-key :current]
                   with-sym [:state action-key]}
       :params    (utils/assoc-some
-                   {:item item-sym
-                    :with with-sym}
-                   :in fold-in)}]))
+                  {:item item-sym
+                   :with with-sym}
+                  :in fold-in)}]))
 
 
-(defmethod action/prep :enrich [action-spec]
+(defmethod action/prep :enrich
+  [action-spec]
   (enrich action-spec))
 
 
-(defmethod action/expand :enrich [task action]
+(defmethod action/expand :enrich
+  [task action]
   ;; Unwraps the enrich bindings and replaces the iterator with the mapper keys
   (let [action-name (:name action)
         base-name   (name action-name)
@@ -81,10 +85,12 @@
       :always
       (assoc :state-format (or (:state-format task) :latest))
       (some? (:iterator task))
-      (update :iterator utils/replace-all
+      (update :iterator
+              utils/replace-all
               {:$enrich/item          [:state mapper-key :current]
                :$enrich/has-next-item [:state mapper-key :next]})
       (some? (:update task))
-      (update :return utils/replace-all
+      (update :return
+              utils/replace-all
               {:$enrich/item          [:state mapper-key :current]
                :$enrich/has-next-item [:state mapper-key :next]}))))

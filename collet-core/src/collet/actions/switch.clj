@@ -2,7 +2,8 @@
   (:require
    [clojure.walk :as walk]
    [collet.action :as action]
-   [collet.conditions :as collet.conds]))
+   [collet.conditions :as collet.conds]
+   [collet.select]))
 
 
 (defn expand-selectors [ctx selectors condition]
@@ -28,17 +29,19 @@
   (reduce
    (fn [c action-fn]
      (action-fn c))
-   ctx actions))
+   ctx
+   actions))
 
 
 (def switch-params-spec
   [:map
    [:selectors {:optional true}
     [:map-of :symbol collet.select/select-path]]
-   [:case [:vector
-           [:map
-            [:condition [:or [:= :default] collet.conds/condition?]]
-            [:actions [:vector fn?]]]]]])
+   [:case
+    [:vector
+     [:map
+      [:condition [:or [:= :default] collet.conds/condition?]]
+      [:actions [:vector fn?]]]]]])
 
 
 (defn switch-action
@@ -65,5 +68,6 @@
    case))
 
 
-(defmethod action/action-fn :switch [action-spec]
+(defmethod action/action-fn :switch
+  [action-spec]
   (partial switch-action (select-keys action-spec [:selectors :case])))

@@ -29,7 +29,8 @@
  :paths []
 
  :deps
- {io.velio/collet-core          {:local/root "collet-core"}
+ {org.clojure/clojure           {:mvn/version "1.12.5"}
+  io.velio/collet-core          {:local/root "collet-core"}
   io.velio/collet-action-http   {:local/root "collet-action-http"}
   io.velio/collet-action-file   {:local/root "collet-action-file"}
   io.velio/collet-action-odata  {:local/root "collet-action-odata"}
