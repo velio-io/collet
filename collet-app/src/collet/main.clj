@@ -7,7 +7,6 @@
    [clojure.tools.cli :as tools.cli]
    [collet.aws :as aws]
    [collet.core :as collet]
-   [collet.store.datalevin :as datalevin]
    [collet.utils :as utils]
    [com.brunobonacci.mulog :as ml])
   (:import
@@ -228,8 +227,7 @@
   "Creates the process-lifetime Collet context and opens its Store."
   []
   (collet/context
-   {:store (datalevin/store
-            {:dir (get-env "COLLET_DATA_DIR" 'Str :or "./.collet/db")})}))
+   {:data-dir (get-env "COLLET_DATA_DIR" 'Str :or "./.collet")}))
 
 
 (Thread/setDefaultUncaughtExceptionHandler

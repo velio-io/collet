@@ -3,11 +3,15 @@
    [clojure.java.io :as io]
    [malli.instrument :as mi])
   (:import
-   [java.nio.file Files]
-   [java.nio.file.attribute FileAttribute]))
+    [java.nio.file Files]
+    [java.nio.file.attribute FileAttribute]))
+
 
 (defn resource-path [resource-name]
-  (some-> resource-name io/resource io/file str))
+  (some-> resource-name
+          io/resource
+          io/file
+          str))
 
 
 (defn- delete-tree!
@@ -25,35 +29,46 @@
     (try
       (test)
       (finally
-        (delete-tree! root)))))
+       (delete-tree! root)))))
 
 
 (defn instrument! [ns]
   (fn [test]
     (with-temp-dir
-      (fn []
-        (mi/collect! {:ns ns})
-        (mi/instrument!)
-        (test)))))
+     (fn []
+       (mi/collect! {:ns ns})
+       (mi/instrument!)
+       (test)))))
 
 
 (defn run-pipeline!
-  "Runs a compiled pipeline against an isolated Datalevin Store and returns its
-  completed Run handle."
+  "Runs a compiled pipeline in an isolated Context and returns the terminal run
+  metadata merged with task results captured before Artifact cleanup."
   [pipeline config]
   (let [dir       (-> (Files/createTempDirectory
                        "collet-test-"
                        (make-array FileAttribute 0))
                       .toFile)
-        store-fn  (requiring-resolve 'collet.store.datalevin/store)
         context   (requiring-resolve 'collet.core/context)
         start     (requiring-resolve 'collet.core/start)
         close     (requiring-resolve 'collet.core/close)
-        ctx       (context {:store (store-fn {:dir (.getAbsolutePath dir)})})]
+        results   (atom {})
+        run-ready (promise)
+        ctx       (context
+                   {:data-dir         (.getAbsolutePath dir)
+                    :on-task-complete (fn [task]
+                                        (let [run    @run-ready
+                                              name   (:task/name task)
+                                              result (get run name)]
+                                          (swap! results assoc
+                                            name
+                                            (if (seq? result)
+                                              (doall result)
+                                              result))))})]
     (try
       (let [run (start ctx pipeline config)]
-        @run
-        run)
+        (deliver run-ready run)
+        (merge @run @results))
       (finally
-        (close ctx)
-        (delete-tree! dir)))))
+       (close ctx)
+       (delete-tree! dir)))))

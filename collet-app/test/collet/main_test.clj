@@ -1,17 +1,29 @@
 (ns collet.main-test
   (:require
+   [clj-test-containers.core :as tc]
    [clojure.java.io :as io]
+   [clojure.java.shell :refer [sh]]
    [clojure.string :as string]
    [clojure.test :refer [deftest is testing]]
    [clojure.tools.cli :as tools.cli]
-   [clojure.java.shell :refer [sh]]
-   [clj-test-containers.core :as tc]
-   [collet.test-containers :as containers]
    [collet.aws :as aws]
    [collet.core :as collet]
-   [collet.main :as sut])
+   [collet.main :as sut]
+   [collet.test-containers :as containers])
   (:import
-   [java.util.regex Pattern]))
+    [java.nio.file FileVisitOption Files LinkOption Path]
+    [java.nio.file.attribute FileAttribute]
+    [java.util.regex Pattern]))
+
+
+(defn- delete-tree!
+  [^Path path]
+  (when (Files/exists path (make-array LinkOption 0))
+    (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
+      (doseq [entry (sort-by str
+                             #(compare %2 %1)
+                             (iterator-seq (.iterator paths)))]
+        (Files/deleteIfExists ^Path entry)))))
 
 
 (deftest parse-options-test
@@ -53,8 +65,8 @@
 
   (testing "spec supports include tag with overrides"
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "configs/pipeline-with-includes.edn") sut/cli-options)
-          inc-actions (->> (-> options :pipeline-spec :tasks)
-                           (map (comp first :actions)))]
+          inc-actions              (->> (-> options :pipeline-spec :tasks)
+                                        (map (comp first :actions)))]
       (is (nil? errors))
       (is (every? #(and (= (:name %) :gh-request)
                         (= (:type %) :collet.actions.http/request)
@@ -68,7 +80,10 @@
              (-> inc-actions second :params :url)))
 
       (is (= {:state "closed" :per_page 100}
-             (-> inc-actions second :params :query-params
+             (-> inc-actions
+                 second
+                 :params
+                 :query-params
                  (select-keys [:state :per_page]))))
 
       (is (instance? Pattern (-> inc-actions second :params :query-params :rx))
@@ -78,6 +93,7 @@
     (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "{:name :parent-pipe :regex #rgx \"foo\"}") sut/cli-options)]
       (is (nil? errors))
       (is (instance? Pattern (-> options :pipeline-spec :regex))))))
+
 
 (deftest ^:integration s3-config-test
   (let [container      (containers/localstack)
@@ -89,15 +105,17 @@
                                             :hostname "localhost"
                                             :port     container-port}}
         s3-client      (aws/make-client :s3 aws-creds)]
-    (aws/invoke! s3-client :CreateBucket
-                 {:Bucket                    "test-bucket"
-                  :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+    (aws/invoke! s3-client
+     :CreateBucket
+     {:Bucket "test-bucket"
+      :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     (with-open [file-stream (io/input-stream "configs/pipeline-test-config.edn")]
-      (aws/invoke! s3-client :PutObject
-                   {:Bucket "test-bucket"
-                    :Key    "test-pipeline-config.edn"
-                    :Body   file-stream}))
+      (aws/invoke! s3-client
+       :PutObject
+       {:Bucket "test-bucket"
+        :Key    "test-pipeline-config.edn"
+        :Body   file-stream}))
 
     (with-redefs [aws/make-client (fn [& _] s3-client)]
       (let [{:keys [errors options]} (tools.cli/parse-opts '("-s" "s3://test-user:test-pass@test-bucket/test-pipeline-config.edn?region=eu-west-1") sut/cli-options)]
@@ -117,19 +135,25 @@
 (deftest runtime-context-uses-the-configured-data-directory
   (testing "the default is relative to the process working directory"
     (binding [sut/*env* {}]
-      (let [ctx (sut/create-runtime-context)]
-        (try
-          (is (= "./.collet/db" (get-in ctx [:store :dir])))
-          (finally
-            (collet/close ctx))))))
+      (with-redefs [collet/context identity]
+        (is (= {:data-dir "./.collet"}
+               (sut/create-runtime-context))))))
 
   (testing "COLLET_DATA_DIR overrides the default"
-    (binding [sut/*env* {"COLLET_DATA_DIR" "/tmp/collet-app-data"}]
-      (let [ctx (sut/create-runtime-context)]
-        (try
-          (is (= "/tmp/collet-app-data" (get-in ctx [:store :dir])))
-          (finally
-            (collet/close ctx)))))))
+    (let [data-dir (Files/createTempDirectory
+                    "collet-app-data-"
+                    (make-array FileAttribute 0))]
+      (try
+        (binding [sut/*env* {"COLLET_DATA_DIR" (str data-dir)}]
+          (let [ctx (sut/create-runtime-context)]
+            (try
+              (is (= (str (.resolve data-dir "db")) (get-in ctx [:store :dir])))
+              (is (= (str (.resolve data-dir "artifacts"))
+                     (str (:artifact-dir ctx))))
+              (finally
+               (collet/close ctx)))))
+        (finally
+         (delete-tree! data-dir))))))
 
 
 (deftest ^:integration pipeline-execution-test
@@ -145,6 +169,6 @@
             "-s" "configs/sample-pipeline.edn"
             "-c" "{}"
             :env (assoc (into {} (System/getenv))
-                        "COLLET_DATA_DIR" data-dir))]
+                   "COLLET_DATA_DIR" data-dir))]
     (is (zero? exit))
     (is (string/includes? out "Pipeline completed."))))

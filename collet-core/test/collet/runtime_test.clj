@@ -2,17 +2,23 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [collet.action :as action]
+   [collet.artifact :as artifact]
    [collet.core :as collet]
    [collet.store :as store]
    [collet.store.datalevin :as datalevin]
-   [datalevin.core :as d])
+   [datalevin.core :as d]
+   [tech.v3.dataset :as ds])
   (:import
     [java.nio.file FileVisitOption Files Path]
     [java.nio.file.attribute FileAttribute]
-    [java.util UUID]))
+    [java.util UUID]
+    [java.util.concurrent AbstractExecutorService]))
 
 
 (def task-gate (atom nil))
+
+
+(def task-input-ready (atom nil))
 
 
 (def active-tasks (atom 0))
@@ -51,8 +57,22 @@
   [{:id 1} {:id 2}])
 
 
+(defn empty-rows []
+  [])
+
+
 (defn record-execution []
   (swap! task-executions inc))
+
+
+(defn counted-rows []
+  (swap! task-executions inc)
+  [{:id 1} {:id 2}])
+
+
+(defn skipped-records []
+  (with-meta (map identity [{:json {:a 1}}])
+             {:collet.arrow/skip-conversion? true}))
 
 
 (defn record-expansion []
@@ -99,13 +119,50 @@
    (update-task! [_ task-id changes]
      (when-let [error (fault :update-task changes)]
        (throw error))
-     (store/update-task! delegate task-id changes))))
+     (store/update-task! delegate task-id changes))
+   (complete-task! [_ task-id completion]
+     (when-let [error (fault :complete-task completion)]
+       (throw error))
+     (store/complete-task! delegate task-id completion))
+   (finalize-run! [_ run-id run-changes retained-task-ids]
+     (when-let [error (fault :finalize-run
+                             {:run/id            run-id
+                              :run/changes       run-changes
+                              :retained-task-ids retained-task-ids})]
+       (throw error))
+     (store/finalize-run! delegate run-id run-changes retained-task-ids))
+   (get-task-output [_ task-id]
+     (store/get-task-output delegate task-id))
+   (get-artifact [_ artifact-id]
+     (store/get-artifact delegate artifact-id))
+   (get-lineage [_ task-id direction]
+     (store/get-lineage delegate task-id direction))))
 
 
 (defn gated-one
   []
   @(deref task-gate)
   1)
+
+
+(defn gated-plus-two
+  [value]
+  @(deref task-gate)
+  (+ value 2))
+
+
+(defn gated-row-count
+  [datasets]
+  (let [row-count (reduce + (map ds/row-count datasets))]
+    (deliver @task-input-ready row-count)
+    @(deref task-gate)
+    row-count))
+
+
+(defn gated-fail!
+  []
+  @(deref task-gate)
+  (fail!))
 
 
 (defn counted-task
@@ -125,6 +182,18 @@
   (Files/createTempDirectory
    "collet-runtime-"
    (make-array FileAttribute 0)))
+
+
+(defn- artifact-directory
+  ^Path
+  [ctx artifact]
+  (.resolve ^Path (:artifact-dir ctx)
+            (str "runs/"
+                 (:artifact/run-id artifact)
+                 "/tasks/"
+                 (:artifact/task-id artifact)
+                 "/"
+                 (:artifact/id artifact))))
 
 
 (defn- delete-store!
@@ -186,14 +255,49 @@
 (deftest context-construction-opens-the-store
   (let [parent (temporary-store-path)
         path   (.resolve parent "db")
+        db     (datalevin/store {:dir (str path)})
         ctx    (collet/context
-                {:store (datalevin/store {:dir (str path)})})]
+                {:store db})]
     (try
       (is (Files/exists path (make-array java.nio.file.LinkOption 0)))
       (is (map? ctx))
+      (is (identical? db (:store ctx)))
+      (is (= "./.collet/artifacts" (str (:artifact-dir ctx))))
       (finally
        (collet/close ctx)
        (delete-store! parent)))))
+
+
+(deftest task-future-is-registered-before-execution
+  (let [run-id       (random-uuid)
+        task-id      (random-uuid)
+        task-name    :fast
+        task-futures (atom {})
+        runtime      {:tasks        {task-name {:name task-name}}
+                      :task-futures task-futures}
+        executor     (proxy [AbstractExecutorService] []
+                       (shutdown [])
+                       (shutdownNow [] [])
+                       (isShutdown [] false)
+                       (isTerminated [] false)
+                       (awaitTermination [_ _] true)
+                       (execute [command]
+                         (.run ^Runnable command)))
+        ctx          {:store    ::store
+                      :executor executor
+                      :runs     (atom {run-id runtime})}
+        task         {:task/id   task-id
+                      :task/name task-name}]
+    (with-redefs-fn
+      {#'store/update-task!
+       (fn [_ _ changes]
+         (merge task changes))
+       #'collet/execute-run-task!
+       (fn [_ _ started-task]
+         (swap! task-futures dissoc (:name started-task)))}
+      #(do
+         (#'collet/start-ready-task! ctx run-id task)
+         (is (empty? @task-futures))))))
 
 
 (deftest durable-run-executes-through-the-store
@@ -235,6 +339,366 @@
        (delete-store! path)))))
 
 
+(deftest only-retained-results-publish-artifacts
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name :retained-results
+                   :tasks
+                   [{:name    :unused
+                     :actions [{:name :unused
+                                :type :custom
+                                :fn   'collet.runtime-test/record-execution}]}
+                    {:name    :source
+                     :actions [{:name :source
+                                :type :custom
+                                :fn   'collet.runtime-test/record-execution}]}
+                    {:name    :dependent
+                     :inputs  [:source]
+                     :actions [{:name      :dependent
+                                :type      :custom
+                                :selectors '{value [:inputs :source]}
+                                :params    '[value]
+                                :fn        'collet.runtime-test/plus-two}]}
+                    {:name       :kept
+                     :keep-state true
+                     :actions    [{:name :kept
+                                   :type :custom
+                                   :fn   'collet.runtime-test/record-execution}]}]})]
+    (try
+      (reset! task-executions 0)
+      (let [run     (collet/start ctx pipeline {})
+            result  @run
+            by-name (into {}
+                          (map (juxt :task/name identity))
+                          (store/get-task-runs (:store ctx) (:run/id result)))]
+        (is (= :done (:run/status result)))
+        (is (nil? (:task/output (get by-name :unused))))
+        (is (nil? (:task/output (get by-name :dependent))))
+        (is (nil? (:task/output (get by-name :source))))
+        (is (some? (:task/output (get by-name :kept))))
+        (is (nil? (:source run)))
+        (is (some? (:kept run)))
+        (is (= :computed (:task/outcome (get by-name :source))))
+        (is (= :computed (:task/outcome (get by-name :kept)))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest dataset-handoff-remains-until-running-readers-quiesce
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name      :dataset-handoff-lifecycle
+                   :use-arrow true
+                   :tasks     [{:name    :source
+                                :actions [{:name :source
+                                           :type :custom
+                                           :fn   'collet.runtime-test/rows}]}
+                               {:name       :count-rows
+                                :inputs     [:source]
+                                :keep-state true
+                                :actions    [{:name      :count-rows
+                                              :type      :custom
+                                              :selectors '{datasets [:inputs :source]}
+                                              :params    '[datasets]
+                                              :fn        'collet.runtime-test/gated-row-count}]}]})]
+    (try
+      (reset! task-gate (promise))
+      (reset! task-input-ready (promise))
+      (let [run (collet/start ctx pipeline {})]
+        (is (= 2 (deref @task-input-ready 10000 ::timeout)))
+        (let [tasks      (into {}
+                               (map (juxt :task/name identity))
+                               (store/get-task-runs (:store ctx) (:run/id run)))
+              source     (get tasks :source)
+              output-ref (:task/output source)
+              artifact   (store/get-artifact (:store ctx) (second output-ref))
+              directory  (artifact-directory ctx artifact)]
+          (is (= :artifact/id (first output-ref)))
+          (is (= :dataset (:artifact/kind artifact)))
+          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (is (= [{:id 1} {:id 2}]
+                 (mapv #(into {} %)
+                       (mapcat ds/rows (collet/read-output ctx output-ref)))))
+
+          (deliver @task-gate true)
+          (is (= :done (:run/status @run)))
+          (is (= 2 (:count-rows run)))
+          (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
+          (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
+          (is (not (Files/exists directory
+                                 (make-array java.nio.file.LinkOption 0))))))
+      (finally
+       (deliver @task-gate true)
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest store-release-failure-preserves-metadata-and-files
+  (let [path          (temporary-store-path)
+        db            (datalevin/store {:dir (str (.resolve path "db"))})
+        artifact-dir  (.resolve path "artifacts")
+        release-error (ex-info "release failed" {})
+        ctx           (collet/context
+                       {:store
+                        (faulting-store
+                         db
+                         (fn [operation _]
+                           (when (= :finalize-run operation)
+                             release-error)))
+                        :artifact-dir artifact-dir})
+        pipeline      (collet/compile-pipeline
+                       {:name  :store-release-failure
+                        :tasks [{:name    :source
+                                 :actions [{:name :source
+                                            :type :custom
+                                            :fn   'collet.runtime-test/one}]}
+                                {:name    :dependent
+                                 :inputs  [:source]
+                                 :actions [{:name      :dependent
+                                            :type      :custom
+                                            :selectors '{value [:inputs :source]}
+                                            :params    '[value]
+                                            :fn        'collet.runtime-test/plus-two}]}]})]
+    (try
+      (let [run       (collet/start ctx pipeline {})
+            result    @run
+            tasks     (store/get-task-runs db (:run/id result))
+            source    (some #(when (= :source (:task/name %)) %) tasks)
+            output    (:task/output source)
+            artifact  (store/get-artifact db (second output))
+            directory (artifact-directory ctx artifact)]
+        (is (= :failed (:run/status result)))
+        (is (= "Pipeline persistence failed."
+               (get-in result [:run/error :message])))
+        (is (= :artifact/id (first output)))
+        (is (= artifact (store/get-artifact db (second output))))
+        (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+        (collet/close ctx)
+        (let [reopened (collet/context {:data-dir path})]
+          (try
+            (is (= artifact
+                   (store/get-artifact (:store reopened) (second output))))
+            (let [read-error (try
+                               (collet/read-output reopened output)
+                               nil
+                               (catch clojure.lang.ExceptionInfo error
+                                 error))]
+              (is (= :collet.error/unknown-output
+                     (:collet.error/type (ex-data read-error)))))
+            (finally
+             (collet/close reopened)))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest filesystem-delete-failure-leaves-an-invisible-orphan
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name  :filesystem-release-failure
+                   :tasks [{:name    :source
+                            :actions [{:name :source
+                                       :type :custom
+                                       :fn   'collet.runtime-test/one}]}
+                           {:name       :dependent
+                            :inputs     [:source]
+                            :keep-state true
+                            :actions    [{:name      :dependent
+                                          :type      :custom
+                                          :selectors '{value [:inputs :source]}
+                                          :params    '[value]
+                                          :fn        'collet.runtime-test/gated-plus-two}]}]})]
+    (try
+      (reset! task-gate (promise))
+      (let [run (collet/start ctx pipeline {})]
+        (is (wait-until #(= :running (task-status ctx run :dependent))))
+        (let [source     (some #(when (= :source (:task/name %)) %)
+                               (store/get-task-runs (:store ctx) (:run/id run)))
+              output-ref (:task/output source)
+              artifact   (store/get-artifact (:store ctx) (second output-ref))
+              directory  (artifact-directory ctx artifact)]
+          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (with-redefs [artifact/delete-artifacts!
+                        (fn [_ _]
+                          (throw (ex-info "delete failed" {})))]
+            (deliver @task-gate true)
+            (is (= :done (:run/status @run))))
+          (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
+          (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
+          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))))
+      (finally
+       (deliver @task-gate true)
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest failed-run-releases-ordinary-handoff-artifacts
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name  :failed-handoff-cleanup
+                   :tasks [{:name    :source
+                            :actions [{:name :source
+                                       :type :custom
+                                       :fn   'collet.runtime-test/one}]}
+                           {:name    :explode
+                            :inputs  [:source]
+                            :actions [{:name :explode
+                                       :type :custom
+                                       :fn   'collet.runtime-test/gated-fail!}]}]})]
+    (try
+      (reset! task-gate (promise))
+      (let [run (collet/start ctx pipeline {})]
+        (is (wait-until #(= :running (task-status ctx run :explode))))
+        (let [source     (some #(when (= :source (:task/name %)) %)
+                               (store/get-task-runs (:store ctx) (:run/id run)))
+              output-ref (:task/output source)
+              artifact   (store/get-artifact (:store ctx) (second output-ref))
+              directory  (artifact-directory ctx artifact)]
+          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (deliver @task-gate true)
+          (is (= :failed (:run/status @run)))
+          (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
+          (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
+          (is (not (Files/exists directory
+                                 (make-array java.nio.file.LinkOption 0))))))
+      (finally
+       (deliver @task-gate true)
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest stopped-run-releases-ordinary-handoff-artifacts
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name  :stopped-handoff-cleanup
+                   :tasks [{:name    :source
+                            :actions [{:name :source
+                                       :type :custom
+                                       :fn   'collet.runtime-test/one}]}
+                           {:name    :dependent
+                            :inputs  [:source]
+                            :actions [{:name :dependent
+                                       :type :custom
+                                       :fn   'collet.runtime-test/gated-one}]}]})]
+    (try
+      (reset! task-gate (promise))
+      (let [run (collet/start ctx pipeline {})]
+        (is (wait-until #(= :running (task-status ctx run :dependent))))
+        (let [source     (some #(when (= :source (:task/name %)) %)
+                               (store/get-task-runs (:store ctx) (:run/id run)))
+              output-ref (:task/output source)
+              artifact   (store/get-artifact (:store ctx) (second output-ref))
+              directory  (artifact-directory ctx artifact)]
+          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (collet/stop run)
+          (is (= :stopped (:run/status @run)))
+          (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
+          (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
+          (is (not (Files/exists directory
+                                 (make-array java.nio.file.LinkOption 0))))))
+      (finally
+       (deliver @task-gate true)
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest identical-runs-publish-distinct-run-owned-dataset-artifacts
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name  :run-owned-datasets
+                   :tasks [{:name       :fetch
+                            :keep-state true
+                            :actions    [{:name :fetch
+                                          :type :custom
+                                          :fn   'collet.runtime-test/counted-rows}]}]})]
+    (try
+      (reset! task-executions 0)
+      (let [run-1       (collet/start ctx pipeline {})
+            result-1    @run-1
+            task-1      (first (store/get-task-runs (:store ctx) (:run/id result-1)))
+            output-1    (:task/output task-1)
+            artifact-1  (store/get-artifact (:store ctx) (second output-1))
+            run-2       (collet/start ctx pipeline {})
+            result-2    @run-2
+            task-2      (first (store/get-task-runs (:store ctx) (:run/id result-2)))
+            output-2    (:task/output task-2)
+            artifact-2  (store/get-artifact (:store ctx) (second output-2))
+            directory-1 (artifact-directory ctx artifact-1)
+            directory-2 (artifact-directory ctx artifact-2)]
+        (is (= 2 @task-executions))
+        (is (= :computed (:task/outcome task-1)))
+        (is (= :computed (:task/outcome task-2)))
+        (is (not= (:run/id result-1) (:run/id result-2)))
+        (is (not= output-1 output-2))
+        (is (= :artifact/id (first output-1) (first output-2)))
+        (is (not= (:artifact/id artifact-1) (:artifact/id artifact-2)))
+        (is (not (contains? artifact-1 :artifact/uri)))
+        (is (not= directory-1 directory-2))
+        (is (Files/exists directory-1 (make-array java.nio.file.LinkOption 0)))
+        (is (Files/exists directory-2 (make-array java.nio.file.LinkOption 0))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest explicitly-schematized-empty-records-publish-a-dataset-artifact
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name  :empty-records
+                   :tasks [{:name          :extract
+                            :keep-state    true
+                            :arrow-columns {:version 1
+                                            :fields  [{:key  :id
+                                                       :name "id"
+                                                       :type :int64}]}
+                            :actions       [{:name :extract
+                                             :type :custom
+                                             :fn   'collet.runtime-test/empty-rows}]}]})]
+    (try
+      (let [run      (collet/start ctx pipeline {})
+            result   @run
+            task     (first (store/get-task-runs (:store ctx) (:run/id result)))
+            artifact (store/get-artifact (:store ctx)
+                                         (second (:task/output task)))]
+        (is (= :done (:run/status result)))
+        (is (= :dataset (:artifact/kind artifact)))
+        (is (= 0 (:artifact/records artifact)))
+        (is (empty? (mapcat ds/rows (:extract run)))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest retained-records-cannot-skip-arrow-conversion
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (collet/compile-pipeline
+                  {:name      :reject-skipped-records
+                   :use-arrow false
+                   :tasks     [{:name       :records
+                                :keep-state true
+                                :actions    [{:name :records
+                                              :type :custom
+                                              :fn   'collet.runtime-test/skipped-records}]}]})]
+    (try
+      (let [result @(collet/start ctx pipeline {})
+            task   (first (store/get-task-runs (:store ctx) (:run/id result)))]
+        (is (= :failed (:run/status result)))
+        (is (= :failed (:task/status task)))
+        (is (nil? (:task/output task))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
 (deftest prepared-task-plans-are-not-expanded-again-at-runtime
   (let [path     (temporary-store-path)
         ctx      (collet/context
@@ -255,10 +719,9 @@
        (delete-store! path)))))
 
 
-(deftest runtime-only-values-are-absent-after-reopen
+(deftest keep-state-output-is-released-on-context-close
   (let [path     (temporary-store-path)
-        ctx      (collet/context
-                  {:store (datalevin/store {:dir (str path)})})
+        ctx      (collet/context {:data-dir path})
         pipeline (collet/compile-pipeline
                   {:name      :persistence-boundary
                    :use-arrow true
@@ -268,25 +731,58 @@
                                               :type :custom
                                               :fn   'collet.runtime-test/rows}]}]})]
     (try
-      (let [run    (collet/start ctx pipeline {:secret "not-persisted"})
-            result @run
-            run-id (:run/id result)]
-        (is (collet/arrow-task-result? (:extract run)))
+      (let [run       (collet/start ctx pipeline {:secret "not-persisted"})
+            result    @run
+            run-id    (:run/id result)
+            task      (first (store/get-task-runs (:store ctx) run-id))
+            output    (:task/output task)
+            artifact  (store/get-artifact (:store ctx) (second output))
+            directory (artifact-directory ctx artifact)]
+        (is (= :artifact/id (first output)))
+        (is (not (collet/arrow-task-result? (:extract run))))
+        (is (= [{:id 1} {:id 2}]
+               (mapv #(into {} %) (mapcat ds/rows (:extract run)))))
+        (is (= [{:id 1} {:id 2}]
+               (mapv #(into {} %)
+                     (mapcat ds/rows (collet/read-output ctx output)))))
+        (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
         (collet/close ctx)
-        (let [reopened (datalevin/store {:dir (str path)})]
+        (is (not (Files/exists directory
+                               (make-array java.nio.file.LinkOption 0))))
+        (let [reopened (collet/context {:data-dir path})]
           (try
-            (let [db        (d/db (:conn reopened))
-                  task-ids  (d/q '[:find [?task-id ...]
-                                   :in $ ?run-id
-                                   :where
-                                   [?run :run/id ?run-id]
-                                   [?task :task/run ?run]
-                                   [?task :task/id ?task-id]]
-                                 db
-                                 run-id)
-                  raw-run   (d/pull db '[*] [:run/id run-id])
-                  raw-tasks (mapv #(d/pull db '[*] [:task/id %]) task-ids)]
-              (is (= :done (:run/status (store/get-run reopened run-id))))
+            (let [db (d/db (:conn (:store reopened)))
+                  task-ids (d/q '[:find [?task-id ...]
+                                  :in $ ?run-id
+                                  :where
+                                  [?run :run/id ?run-id]
+                                  [?task :task/run ?run]
+                                  [?task :task/id ?task-id]]
+                                db
+                                run-id)
+                  raw-run (d/pull db '[*] [:run/id run-id])
+                  raw-tasks (mapv #(d/pull db '[*] [:task/id %]) task-ids)
+                  artifact-ids
+                  (d/q '[:find [?artifact-id ...]
+                         :in $ ?run-id
+                         :where
+                         [?run :run/id ?run-id]
+                         [?artifact :artifact/run ?run]
+                         [?artifact :artifact/id ?artifact-id]]
+                       db
+                       run-id)
+                  read-error
+                  (try
+                    (collet/read-output reopened output)
+                    nil
+                    (catch clojure.lang.ExceptionInfo error
+                      error))]
+              (is (= :done (:run/status (store/get-run (:store reopened) run-id))))
+              (is (nil? (store/get-task-output (:store reopened) (:task/id task))))
+              (is (nil? (store/get-artifact (:store reopened) (second output))))
+              (is (= :collet.error/unknown-output
+                     (:collet.error/type (ex-data read-error))))
+              (is (empty? artifact-ids))
               (is (every? #{:db/id
                             :run/id
                             :run/pipeline
@@ -303,16 +799,73 @@
                                :task/name
                                :task/key
                                :task/status
+                               :task/outcome
                                :task/inputs
                                :task/created-at
                                :task/started-at
                                :task/finished-at}
                              (keys task)))
                    raw-tasks))
+              (is (not-any? #(contains? % :task/output) raw-tasks))
               (is (not-any? #(= "not-persisted" %)
                             (tree-seq coll? seq (cons raw-run raw-tasks)))))
             (finally
-             (store/close! reopened)))))
+             (collet/close reopened)))))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
+
+
+(deftest task-lineage-survives-after-context-artifacts-are-released
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir path})
+        pipeline (basic-pipeline)]
+    (try
+      (let [run       (collet/start ctx pipeline {})
+            result    @run
+            run-id    (:run/id result)
+            by-name   (into {}
+                            (map (juxt :task/name identity))
+                            (store/get-task-runs (:store ctx) run-id))
+            source-id (get-in by-name [:fetch :task/id])
+            target-id (get-in by-name [:load :task/id])
+            source    (store/get-task-output (:store ctx)
+                                             source-id)
+            target    (store/get-task-output (:store ctx)
+                                             target-id)]
+        (is (= 3 (:load run)))
+        (is (= :scalar (:output/kind source)))
+        (is (= [source-id]
+               (mapv :task/id
+                     (store/get-lineage (:store ctx) target-id :upstream))))
+        (is (= [target-id]
+               (mapv :task/id
+                     (store/get-lineage (:store ctx) source-id :downstream))))
+        (collet/close ctx)
+        (let [reopened (collet/context {:data-dir path})]
+          (try
+            (is (nil? (store/get-task-output (:store reopened) source-id)))
+            (is (nil? (store/get-task-output (:store reopened) target-id)))
+            (is (= [source-id]
+                   (mapv :task/id
+                         (store/get-lineage (:store reopened)
+                                            target-id
+                                            :upstream))))
+            (is (= [target-id]
+                   (mapv :task/id
+                         (store/get-lineage (:store reopened)
+                                            source-id
+                                            :downstream))))
+            (is (= :collet.error/unknown-output
+                   (:collet.error/type
+                    (ex-data
+                     (try
+                       (collet/read-output reopened source)
+                       nil
+                       (catch clojure.lang.ExceptionInfo error
+                         error))))))
+            (finally
+             (collet/close reopened)))))
       (finally
        (collet/close ctx)
        (delete-store! path)))))
@@ -344,23 +897,27 @@
   (let [path              (temporary-store-path)
         persistence-error (ex-info "task write failed" {})
         db                (datalevin/store {:dir (str path)})
+        artifact-dir      (.resolve path "artifacts")
         ctx               (collet/context
                            {:store
                             (faulting-store
                              db
                              (fn [operation changes]
-                               (when (and (= :update-task operation)
+                               (when (and (= :complete-task operation)
                                           (= :completed (:task/status changes)))
-                                 persistence-error)))})
+                                 persistence-error)))
+                            :artifact-dir artifact-dir})
         pipeline          (collet/compile-pipeline
                            {:name :durable-write-failure
                             :max-parallelism 1
                             :tasks
-                            [{:name    :first
-                              :actions [{:name :first
-                                         :type :custom
-                                         :fn   'collet.runtime-test/record-execution}]}
+                            [{:name       :first
+                              :keep-state true
+                              :actions    [{:name :first
+                                            :type :custom
+                                            :fn   'collet.runtime-test/record-execution}]}
                              {:name :second
+                              :inputs [:first]
                               :actions
                               [{:name :second
                                 :type :custom
@@ -374,7 +931,16 @@
                (get-in result [:run/error :message])))
         (is (= result (store/get-run db (:run/id result))))
         (is (= 1 @task-executions))
-        (is (= #{:running :waiting} (set (map :task/status tasks)))))
+        (is (= #{:running :waiting} (set (map :task/status tasks))))
+        (is (nil? (store/get-task-output
+                   db
+                   (:task/id (some #(when (= :first (:task/name %)) %) tasks)))))
+        (with-open [paths (Files/walk artifact-dir
+                                      (make-array FileVisitOption 0))]
+          (let [entries (vec (iterator-seq (.iterator paths)))]
+            (is (= artifact-dir (:artifact-dir ctx)))
+            (is (some #(= "manifest.edn" (str (.getFileName ^Path %)))
+                      entries)))))
       (finally
        (collet/close ctx)
        (delete-store! path)))))
@@ -433,7 +999,7 @@
                              db
                              (fn [operation changes]
                                (cond
-                                 (and (= :update-task operation)
+                                 (and (= :complete-task operation)
                                       (= :completed (:task/status changes)))
                                  persistence-error
 

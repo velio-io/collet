@@ -27,7 +27,8 @@
      UInt8Vector VarCharVector VectorSchemaRoot]
     [org.apache.arrow.vector.complex FixedSizeListVector ListVector MapVector StructVector]
     [org.apache.arrow.vector.complex.impl UnionListWriter]
-    [org.apache.arrow.vector.ipc ArrowFileReader ArrowFileWriter]
+    [org.apache.arrow.vector.holders NullableDurationHolder]
+    [org.apache.arrow.vector.ipc ArrowFileReader ArrowFileWriter ArrowReader]
     [org.apache.arrow.vector.types DateUnit FloatingPointPrecision TimeUnit]
     [org.apache.arrow.vector.types.pojo
      ArrowType ArrowType$Bool ArrowType$Date ArrowType$Decimal ArrowType$Duration ArrowType$FixedSizeList ArrowType$FloatingPoint
@@ -1789,7 +1790,7 @@
         (logical-scalar descriptor value)))))
 
 
-(defn- root->dataset
+(defn- root->records
   [^VectorSchemaRoot root schema]
   (let [fields (:fields schema)
         rows   (mapv
@@ -1799,12 +1800,52 @@
                      (let [arrow-vector (.getVector root ^String (:name field))]
                        (assoc record
                          (:key field)
-                         (logical-value field (.getObject arrow-vector index)))))
+                         (logical-value
+                          field
+                          (case (:type field)
+                            :time-nanoseconds
+                            (if (instance? TimeNanoVector arrow-vector)
+                              (when-not (.isNull arrow-vector (int index))
+                                (.get ^TimeNanoVector arrow-vector (int index)))
+                              (.getObject arrow-vector index))
+
+                            :epoch-nanoseconds
+                            (if (instance? TimeStampNanoVector arrow-vector)
+                              (when-not (.isNull arrow-vector (int index))
+                                (.get ^TimeStampNanoVector arrow-vector (int index)))
+                              (.getObject arrow-vector index))
+
+                            :duration
+                            (if (instance? DurationVector arrow-vector)
+                              (let [holder (NullableDurationHolder.)]
+                                (.get ^DurationVector arrow-vector (int index) holder)
+                                (when (= 1 (.-isSet holder))
+                                  (.-value holder)))
+                              (.getObject arrow-vector index))
+
+                            (.getObject arrow-vector index))))))
                    {}
                    fields))
                 (range (.getRowCount root)))]
-    (with-meta (ds/->dataset rows)
-               {:arrow-columns schema})))
+    rows))
+
+
+(defn- root->dataset
+  [^VectorSchemaRoot root schema]
+  (let [precision-sensitive-columns
+        (into {}
+              (keep (fn [field]
+                      ;; TMD's packed temporal columns have microsecond precision.
+                      (when (contains? #{:time-nanoseconds :epoch-nanoseconds}
+                                       (:type field))
+                        [(:key field) :object])))
+              (:fields schema))
+        dataset
+        (if (seq precision-sensitive-columns)
+          (ds/->dataset (root->records root schema)
+                        {:parser-fn precision-sensitive-columns})
+          (ds/->dataset (root->records root schema)))]
+    (with-meta dataset {:arrow-columns schema})))
 
 
 (defn- close-quietly!
@@ -1815,33 +1856,86 @@
       nil)))
 
 
+(defn- reader-batch-seq
+  "Lazily load and detach one Arrow record batch per sequence element."
+  [^ArrowReader reader close! root->batch]
+  (let [closed?       (atom false)
+        close-reader! (fn []
+                        (when (compare-and-set! closed? false true)
+                          (close!)))
+        step          (fn step []
+                        (lazy-seq
+                         (try
+                           (if (.loadNextBatch reader)
+                             (cons (root->batch (.getVectorSchemaRoot reader))
+                                   (step))
+                             (do
+                               (close-reader!)
+                               nil))
+                           (catch Throwable error
+                             (close-reader!)
+                             (throw error)))))]
+    (resource/track
+     (step)
+     {:track-type :gc
+      :dispose-fn close-reader!})))
+
+
 (defn- nested-dataset-seq
   [path schema]
   (let [allocator (RootAllocator.)
         channel   (read-channel path)
-        reader    (ArrowFileReader. ^SeekableByteChannel channel allocator)
-        closed?   (atom false)
-        close!    (fn []
-                    (when (compare-and-set! closed? false true)
-                      (close-quietly! reader)
-                      (close-quietly! channel)
-                      (close-quietly! allocator)))
-        step      (fn step []
-                    (lazy-seq
-                     (try
-                       (if (.loadNextBatch reader)
-                         (cons (root->dataset (.getVectorSchemaRoot reader) schema)
-                               (step))
-                         (do
-                           (close!)
-                           nil))
-                       (catch Throwable error
-                         (close!)
-                         (throw error)))))]
-    (resource/track
-     (step)
-     {:track-type :gc
-      :dispose-fn close!})))
+        reader    (ArrowFileReader. ^SeekableByteChannel channel allocator)]
+    (reader-batch-seq
+     reader
+     #(do
+        (close-quietly! reader)
+        (close-quietly! channel)
+        (close-quietly! allocator))
+     #(root->dataset % schema))))
+
+
+(defn reader->dataset-seq
+  "Read bounded Arrow batches from an open reader using a declared logical schema.
+
+  The caller owns the reader resources and supplies their close function.
+  This is used by format adapters whose physical Arrow schema differs from Collet's
+  logical schema, such as Parquet fixed-size embeddings."
+  [^ArrowReader reader columns close!]
+  (let [schema (normalize-schema columns)]
+    (with-meta
+      (reader-batch-seq reader close! #(root->dataset % schema))
+      {:ds-seq        true
+       :arrow-columns schema})))
+
+
+(defn reader->record-batches
+  "Read bounded batches as logical Clojure records without dataset coercion.
+
+  This preserves values such as nanosecond time and instant fields while a
+  format adapter rewrites their physical representation."
+  [^ArrowReader reader columns close!]
+  (let [schema (normalize-schema columns)]
+    (reader-batch-seq reader close! #(root->records % schema))))
+
+
+(defn read-arrow-record-batches
+  "Read bounded IPC record batches through the logical Arrow schema adapter."
+  [file-or-path columns]
+  (let [schema       (normalize-schema columns)
+        arrow-schema (create-schema schema)
+        path         (file-path file-or-path)]
+    (validate-file-schema! path arrow-schema)
+    (let [allocator (RootAllocator.)
+          channel   (read-channel path)
+          reader    (ArrowFileReader. ^SeekableByteChannel channel allocator)]
+      (reader->record-batches
+       reader
+       schema
+       #(do
+          (close-quietly! reader)
+          (close-quietly! channel)
+          (close-quietly! allocator))))))
 
 
 (defn read-dataset

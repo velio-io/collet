@@ -180,7 +180,7 @@
          pipeline (collet/compile-pipeline pipeline-spec)
          run (tf/run-pipeline! pipeline {:artists @artists})
          {:keys [best-events]} run
-         best-events-ds (first (collet/arrow->dataset best-events))]
+         best-events-ds (first best-events)]
         (is (every? #(contains? % :rating) (ds/rows best-events-ds))
             "All events should have a rating")
 

@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.version="${COLLET_VERSION}" \
 ENV JMX_PORT=8080
 ENV PIPELINE_SPEC="{}"
 ENV PIPELINE_CONFIG="{}"
-ENV COLLET_DATA_DIR="./.collet/db"
+ENV COLLET_DATA_DIR="./.collet"
 ENV TINI_VERSION=v0.19.0
 
 # for local builds
