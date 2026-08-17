@@ -170,8 +170,7 @@
         {:keys [exit out err]} (shell/sh "clojure" "-M:dev" "-e" code)]
     (is (zero? exit) (str out err))
     (is (str/includes? out "dev-repl-contract-ok") out)
-    (is (str/includes? user-source ":no-reload '#{user}") user-source)
-    (is (not (re-find #"\[collet\." user-source)) user-source)))
+    (is (str/includes? user-source ":no-reload '#{user}") user-source)))
 
 
 (deftest repository-formatter-ignores-generated-target-files

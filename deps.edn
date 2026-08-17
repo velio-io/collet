@@ -52,7 +52,9 @@
                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                  "--enable-native-access=ALL-UNNAMED"]
    :extra-deps  {io.velio/collet-test-fixtures {:local/root "test-fixtures"}
-                 io.github.tonsky/clj-reload   {:mvn/version "1.0.0"}}}
+                 io.github.tonsky/clj-reload   {:mvn/version "1.0.0"}
+                 vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
+                 djblue/portal                 {:mvn/version "0.67.1"}}}
 
   :nrepl
   {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}}

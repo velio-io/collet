@@ -26,13 +26,15 @@
    [collet.select :as collet.select]
    [collet.deps :as collet.deps]
    [collet.arrow :as collet.arrow]
+   [collet.artifact :as artifact]
+   [collet.durable :as durable]
    [collet.store :as store]
    [collet.store.datalevin :as datalevin])
   (:import
     [clojure.lang IDeref ILookup]
     [java.io File]
     [java.util.regex Pattern]
-    [java.util.concurrent Callable ExecutorService Executors Future Semaphore
+    [java.util.concurrent Callable ExecutorService Executors Future FutureTask Semaphore
      TimeUnit]
     [weavejester.dependency MapDependencyGraph]))
 
@@ -244,6 +246,7 @@
       [:backoff-ms {:optional true} [:vector :int]]]]
     [:skip-on-error {:optional true} :boolean]
     [:keep-state {:optional true} :boolean]
+    [:arrow-columns {:optional true} [:or map? vector?]]
     [:state-format {:optional true} [:enum :latest :flatten]]
     [:setup {:optional true}
      [:vector action-spec]]
@@ -841,6 +844,7 @@
 
 (defrecord Context
   [store
+   artifact-dir
    executor
    runs
    closed?
@@ -850,7 +854,7 @@
    on-task-skipped])
 
 
-(declare deref-run)
+(declare deref-run read-output)
 
 
 (deftype Run [ctx id]
@@ -869,7 +873,22 @@
 
       :else
       (if-let [runtime (get @(:runs ctx) id)]
-        (get @(:results runtime) key not-found)
+        (if (contains? @(:results runtime) key)
+          (let [output (get @(:results runtime) key)]
+            (cond
+              (and (map? output) (contains? output :output/value))
+              (:output/value output)
+
+              (and (map? output) (:output/artifact output))
+              (artifact/read-artifact (:artifact-dir ctx)
+                                      (:output/artifact output))
+
+              (and (map? output) (:output/ref output))
+              (read-output ctx output)
+
+              :else
+              not-found))
+          not-found)
         not-found))))
 
 
@@ -911,15 +930,28 @@
   "Creates a process-lifetime runtime context."
   ([]
    (context {}))
-  ([{:keys [store on-task-start on-task-complete on-task-error on-task-skipped]}]
-   (->Context (or store (datalevin/store))
-              (Executors/newVirtualThreadPerTaskExecutor)
-              (atom {})
-              (atom false)
-              on-task-start
-              on-task-complete
-              on-task-error
-              on-task-skipped)))
+  ([{:keys [store data-dir artifact-dir
+            on-task-start on-task-complete on-task-error on-task-skipped]}]
+   (let [explicit-store? (some? store)
+         layout          (when data-dir
+                           (artifact/data-layout data-dir))
+         artifact-dir    (artifact/ensure-artifact-dir!
+                          (or artifact-dir
+                              (:artifact-dir layout)
+                              (when explicit-store?
+                                "./.collet/artifacts")
+                              (:artifact-dir (artifact/data-layout "./.collet"))))]
+     (->Context (or store
+                    (let [layout (or layout (artifact/data-layout "./.collet"))]
+                      (datalevin/store {:dir (str (:db-dir layout))})))
+                artifact-dir
+                (Executors/newVirtualThreadPerTaskExecutor)
+                (atom {})
+                (atom false)
+                on-task-start
+                on-task-complete
+                on-task-error
+                on-task-skipped))))
 
 
 (defn- ensure-open-context!
@@ -939,6 +971,33 @@
   ([ctx name version]
    (ensure-open-context! ctx)
    (store/load-pipeline (:store ctx) name version)))
+
+
+(defn read-output
+  "Resolve an active task output reference to its decoded value or dataset view.
+
+  Task inputs and run lookup perform this resolution automatically. This function
+  is the explicit API for output references obtained from the Store while their
+  owning Context remains open."
+  [ctx output]
+  (ensure-open-context! ctx)
+  (let [output-ref (or (:output/ref output) output)]
+    (when output-ref
+      (let [[attribute id] output-ref
+            artifact       (if (= :artifact/id attribute)
+                             (store/get-artifact (:store ctx) id)
+                             (throw (ex-info "Unsupported task output reference."
+                                             {:collet.error/type :collet.error/unknown-output
+                                              :output-ref        output-ref})))]
+        (when-not artifact
+          (throw (ex-info "Output artifact metadata is missing."
+                          {:collet.error/type :collet.error/unknown-output
+                           :output-ref        output-ref})))
+        (when-not (contains? @(:runs ctx) (:artifact/run-id artifact))
+          (throw (ex-info "Output artifact is not active in this Context."
+                          {:collet.error/type :collet.error/unknown-output
+                           :output-ref        output-ref})))
+        (artifact/read-artifact (:artifact-dir ctx) artifact)))))
 
 
 (defn- root-cause
@@ -975,6 +1034,26 @@
   [:completion :results])
 
 
+(defn- keep-state-task-names
+  [runtime]
+  (into #{}
+        (keep (fn [[task-name task]]
+                (when (:keep-state task)
+                  task-name)))
+        (:tasks runtime)))
+
+
+(defn- delete-released-artifacts!
+  [ctx run-id artifacts]
+  (when (seq artifacts)
+    (try
+      (artifact/delete-artifacts! (:artifact-dir ctx) artifacts)
+      (catch Throwable error
+        (ml/log :collet/artifact-cleanup-failed
+                :run-id run-id
+                :message (ex-message error))))))
+
+
 (defn- deliver-run!
   [ctx run-id run]
   (when-let [runtime (get @(:runs ctx) run-id)]
@@ -983,6 +1062,37 @@
       run-id
       #(select-keys % completed-runtime-keys))
     (deliver (:completion runtime) {:run run})))
+
+
+(defn- finalize-terminal-run!
+  [ctx run-id run-changes]
+  (let [runtime             (get @(:runs ctx) run-id)
+        retained-task-names (keep-state-task-names runtime)
+        retained-task-ids   (into #{}
+                                  (keep (fn [task]
+                                          (when (contains? retained-task-names
+                                                           (:task/name task))
+                                            (:task/id task))))
+                                  (store/get-task-runs (:store ctx) run-id))
+        {:keys [run released-artifacts]}
+        (store/finalize-run! (:store ctx)
+                             run-id
+                             run-changes
+                             retained-task-ids)]
+    (swap! (:results runtime) select-keys retained-task-names)
+    (delete-released-artifacts! ctx run-id released-artifacts)
+    (deliver-run! ctx run-id run)))
+
+
+(defn- release-context-artifacts!
+  [ctx run-id runtime]
+  (when (or (nil? (:task-futures runtime))
+            (empty? @(:task-futures runtime)))
+    (let [{:keys [released-artifacts]}
+          (store/finalize-run! (:store ctx) run-id {} #{})]
+      (when-let [results (:results runtime)]
+        (reset! results {}))
+      (delete-released-artifacts! ctx run-id released-artifacts))))
 
 
 (defn- infrastructure-failure!
@@ -1029,43 +1139,125 @@
         (safe-callback (:on-task-skipped ctx) task')))))
 
 
+(defn- input-output-refs
+  [ctx run-id task]
+  (let [tasks-by-name (durable-tasks-by-name ctx run-id)]
+    (mapv
+     (fn [input]
+       (let [source-task (get tasks-by-name input)
+             output-ref  (:task/output source-task)
+             output      (when output-ref
+                           {:output/ref output-ref})]
+         (when-not source-task
+           (throw (ex-info "Missing durable task input."
+                           {:collet.error/type :collet.error/missing-task-input
+                            :task              (:name task)
+                            :input             input})))
+         (when-not output
+           (throw (ex-info "Completed task has no durable output."
+                           {:collet.error/type :collet.error/missing-task-output
+                            :task              (:name task)
+                            :input             input})))
+         output))
+     (:inputs task))))
+
+
 (defn- task-inputs
-  [runtime task]
-  (reduce
-   (fn [inputs input]
-     (let [value (get @(:results runtime) input)
-           value (if (arrow-task-result? value)
-                   (arrow->dataset value)
-                   value)]
-       (assoc inputs input value)))
-   {}
-   (:inputs task)))
+  [ctx task output-refs]
+  (zipmap (:inputs task)
+          (map #(read-output ctx %)
+               output-refs)))
 
 
-(defn- format-task-result
+(defn- record-sequence?
+  [data schema-override]
+  (or schema-override
+      (-> data meta :arrow-columns)
+      (ds/dataset? data)
+      (let [sampled-item (first (drop-while nil? (take 200 data)))]
+        (or (ds/dataset? sampled-item)
+            (map? sampled-item)))))
+
+
+(defn- non-durable-output!
+  [message data]
+  (throw (ex-info message
+                  (assoc data :collet.error/type :collet.error/non-durable-output))))
+
+
+(defn- write-dataset-output!
+  [task-name data schema-override]
+  (let [source data
+        data   (if (ds/dataset? data) [data] data)
+        {:keys [batches? first-batch]} (result-layout data)
+        schema (or (some-> schema-override
+                           collet.arrow/normalize-schema)
+                   (result-schema data batches? first-batch))]
+    (when (skip-arrow-conversion? source)
+      (non-durable-output!
+       "A retained record dataset cannot skip Arrow conversion."
+       {:task task-name}))
+    (when-not schema
+      (non-durable-output!
+       "A retained record dataset needs an explicit :arrow-columns schema."
+       {:task task-name}))
+    (write-arrow-result! task-name data schema batches?)))
+
+
+(defn- format-task-output
   [runtime task result]
-  (let [result       (if (-> result
-                             meta
-                             :iteration)
-                       (seq result)
-                       result)
-        sequential?  (sequential? result)
-        state-format (:state-format task)
-        formatted    (cond
-                       (and sequential? (= state-format :latest))
-                       (last result)
+  (let [result             (if (-> result
+                                   meta
+                                   :iteration)
+                             (seq result)
+                             result)
+        sequential-result? (sequential? result)
+        state-format       (:state-format task)
+        formatted          (cond
+                             (and sequential-result? (= state-format :latest))
+                             (last result)
 
-                       (and sequential? (= state-format :flatten))
-                       (flatten result)
+                             (and sequential-result? (= state-format :flatten))
+                             (flatten result)
 
-                       :else
-                       result)
-        keep-result  (or (:keep-state task)
-                         (has-dependants? (:name task) (:graph runtime)))]
-    (handle-task-result (:name task)
-                        formatted
-                        {:use-arrow   (get-in runtime [:pipeline :use-arrow])
-                         :keep-result keep-result})))
+                             :else
+                             result)
+        keep-result        (or (:keep-state task)
+                               (has-dependants? (:name task) (:graph runtime)))
+        schema-override    (get-in task [:spec :arrow-columns])
+        record-dataset?    (and (or (sequential? formatted)
+                                    (ds/dataset? formatted))
+                                (record-sequence? formatted schema-override))]
+    (if keep-result
+      (do
+        (when (and record-dataset?
+                   (skip-arrow-conversion? formatted))
+          (non-durable-output!
+           "A retained record dataset cannot skip Arrow conversion."
+           {:task (:name task)}))
+        (if (and (get-in runtime [:pipeline :use-arrow])
+                 record-dataset?)
+          (let [arrow-result (write-dataset-output! (:name task)
+                                                    formatted
+                                                    schema-override)]
+            (cond-> {:output/kind   :dataset
+                     :output/file   (.-file ^ArrowTaskResult arrow-result)
+                     :output/schema (.-columns ^ArrowTaskResult arrow-result)}
+              ;; Preserve the existing in-process surface for actions that
+              ;; naturally return one TMD dataset. It is cached only after the
+              ;; durable completion transaction below; task inputs always read
+              ;; the artifact instead.
+              (ds/dataset? formatted)
+              (assoc :output/live-value formatted)))
+          {:output/kind  :scalar
+           :output/value (handle-task-result (:name task)
+                                             formatted
+                                             {:use-arrow   false
+                                              :keep-result true})}))
+      {:output/kind  :transient
+       :output/value (if sequential-result?
+                       (doall formatted)
+                       formatted)})))
 
 
 (defn- handle-task-error!
@@ -1106,31 +1298,57 @@
   (let [runtime   (get @(:runs ctx) run-id)
         task-name (:name task)
         config    (:config runtime)
-        task-ctx  (-> (->context config)
-                      (assoc :inputs (task-inputs runtime task)
-                             :store (:store ctx)))
         outcome   (try
-                    {:result (->> ((:task-fn task) task-ctx)
-                                  (format-task-result runtime task))}
+                    (let [input-refs (input-output-refs ctx run-id task)
+                          task-ctx   (-> (->context config)
+                                         (assoc :inputs (task-inputs ctx
+                                                                     task
+                                                                     input-refs)
+                                                :store (:store ctx)))]
+                      {:output (->> ((:task-fn task) task-ctx)
+                                    (format-task-output runtime task))})
                     (catch Throwable error
                       {:error error}))]
     (try
       (if-let [error (:error outcome)]
         (handle-task-error! ctx run-id task error)
-        (let [result (:result outcome)]
-          ;; Results become available to dependent tasks before the durable
-          ;; transition.
-          (swap! (:results runtime) assoc task-name result)
+        (let [output (:output outcome)]
           (if (= :stopped (:run/status (store/get-run (:store ctx) run-id)))
             (store/update-task! (:store ctx)
                                 (:task/id task)
                                 {:task/status      :interrupted
                                  :task/finished-at (System/currentTimeMillis)})
-            (let [task' (store/update-task! (:store ctx)
-                                            (:task/id task)
-                                            {:task/status :completed
-                                             :task/finished-at
-                                             (System/currentTimeMillis)})]
+            (let [publication (when (#{:dataset :scalar} (:output/kind output))
+                                (artifact/publish-output! (:artifact-dir ctx)
+                                                          run-id
+                                                          (:task/id task)
+                                                          output))
+                  task'       (store/complete-task!
+                               (:store ctx)
+                               (:task/id task)
+                               (cond-> {:task/status      :completed
+                                        :task/outcome     :computed
+                                        :task/finished-at (System/currentTimeMillis)}
+                                 publication
+                                 (merge publication)))]
+              ;; A dependant can only resolve this after the completion
+              ;; transaction has made its output reference durable. Terminal
+              ;; results without dependants remain process-local and create no
+              ;; artifact.
+              (swap! (:results runtime)
+                assoc
+                task-name
+                (if publication
+                  (if (= :scalar (:output/kind output))
+                    (assoc (:output publication)
+                      :output/value
+                      (:output/value output))
+                    (cond-> (assoc (:output publication)
+                              :output/artifact
+                              (:artifact publication))
+                      (:output/live-value output)
+                      (assoc :output/value (:output/live-value output))))
+                  output))
               (safe-callback (:on-task-complete ctx) task')))))
       (catch Throwable error
         (infrastructure-failure! ctx run-id error))
@@ -1147,13 +1365,20 @@
                                      :task/started-at
                                      (System/currentTimeMillis)})]
     (safe-callback (:on-task-start ctx) task')
-    (let [future (.submit ^ExecutorService (:executor ctx)
-                          ^Runnable
-                          #(execute-run-task! ctx
-                                              run-id
-                                              (assoc (get (:tasks runtime) (:task/name task))
-                                                :task/id (:task/id task))))]
-      (swap! (:task-futures runtime) assoc (:task/name task) future))))
+    (let [task-name (:task/name task)
+          future    (FutureTask.
+                     ^Runnable
+                     #(execute-run-task! ctx
+                                         run-id
+                                         (assoc (get (:tasks runtime) task-name)
+                                           :task/id (:task/id task)))
+                     nil)]
+      (swap! (:task-futures runtime) assoc task-name future)
+      (try
+        (.execute ^ExecutorService (:executor ctx) future)
+        (catch Throwable error
+          (swap! (:task-futures runtime) dissoc task-name)
+          (throw error))))))
 
 
 (defn- aborting-task-failure?
@@ -1188,37 +1413,46 @@
   (let [runtime (get @(:runs ctx) run-id)]
     (try
       (loop []
-        (when-not @(:halted? runtime)
-          (let [run (store/get-run (:store ctx) run-id)]
-            (cond
-              (contains? terminal-run-statuses (:run/status run))
-              (deliver-run! ctx run-id run)
-
-              (= :paused (:run/status run))
+        (let [run (store/get-run (:store ctx) run-id)]
+          (cond
+            (contains? terminal-run-statuses (:run/status run))
+            (if (seq @(:task-futures runtime))
               (do
+                (when (#{:failed :stopped} (:run/status run))
+                  (doseq [[_ ^Future future] @(:task-futures runtime)]
+                    (.cancel future true)))
                 (Thread/sleep 50)
                 (recur))
+              (finalize-terminal-run! ctx run-id {}))
 
-              :else
-              (let [tasks (schedule-ready-tasks! ctx run-id)]
-                (cond
-                  (aborting-task-failure? runtime tasks)
-                  (do
-                    (Thread/sleep 50)
-                    (recur))
+            @(:halted? runtime)
+            nil
 
-                  (all-completed? tasks)
-                  (let [run' (store/update-run!
-                              (:store ctx)
-                              run-id
-                              {:run/status      :done
-                               :run/finished-at (System/currentTimeMillis)})]
-                    (deliver-run! ctx run-id run'))
+            (= :paused (:run/status run))
+            (do
+              (Thread/sleep 50)
+              (recur))
 
-                  :else
-                  (do
-                    (Thread/sleep 50)
-                    (recur))))))))
+            :else
+            (let [tasks (schedule-ready-tasks! ctx run-id)]
+              (cond
+                (aborting-task-failure? runtime tasks)
+                (do
+                  (Thread/sleep 50)
+                  (recur))
+
+                (and (all-completed? tasks)
+                     (empty? @(:task-futures runtime)))
+                (finalize-terminal-run!
+                 ctx
+                 run-id
+                 {:run/status      :done
+                  :run/finished-at (System/currentTimeMillis)})
+
+                :else
+                (do
+                  (Thread/sleep 50)
+                  (recur)))))))
       (catch InterruptedException _)
       (catch Throwable error
         (infrastructure-failure! ctx run-id error)))))
@@ -1336,9 +1570,6 @@
                                       id
                                       {:run/status      :stopped
                                        :run/finished-at now})]
-          (reset! (:halted? runtime) true)
-          (when-let [^Future scheduler @(:scheduler runtime)]
-            (.cancel scheduler true))
           (doseq [[_ ^Future future] @(:task-futures runtime)]
             (.cancel future true))
           (doseq [task (store/get-task-runs (:store ctx) id)]
@@ -1357,7 +1588,7 @@
                 (safe-callback (:on-task-skipped ctx) task'))
 
               nil))
-          (deliver-run! ctx id run'))
+          run')
         (catch Throwable error
           (infrastructure-failure! ctx id error))))
     run))
@@ -1377,7 +1608,23 @@
          (.shutdownNow ^ExecutorService (:executor ctx))
          (.awaitTermination ^ExecutorService (:executor ctx)
                             5
-                            TimeUnit/SECONDS)))
+                            TimeUnit/SECONDS)
+         (doseq [[run-id runtime] @(:runs ctx)
+                 :let             [run (store/get-run (:store ctx) run-id)]]
+           (when (and (contains? terminal-run-statuses (:run/status run))
+                      (or (nil? (:task-futures runtime))
+                          (empty? @(:task-futures runtime))))
+             (try
+               (release-context-artifacts! ctx run-id runtime)
+               (catch Throwable error
+                 (ml/log :collet/artifact-cleanup-failed
+                         :run-id run-id
+                         :message (ex-message error)))))
+           (when-let [results (:results runtime)]
+             (reset! results {}))
+           (when (and (:completion runtime)
+                      (not (realized? (:completion runtime))))
+             (deliver-run! ctx run-id run)))))
       (finally
        (store/close! (:store ctx)))))
   nil)
@@ -1446,55 +1693,19 @@
    (durable-value [] value))
 
   ([path value]
-   (cond
-     (var? value)
-     (let [{:keys [ns name]} (meta value)]
-       (symbol (str (ns-name ns)) (str name)))
-
-     (instance? Pattern value)
-     {:collet.runtime/type :regex
-      :pattern             (.pattern ^Pattern value)
-      :flags               (.flags ^Pattern value)}
-
-     (or (nil? value)
-         (boolean? value)
-         (char? value)
-         (string? value)
-         (keyword? value)
-         (symbol? value)
-         (number? value))
-     value
-
-     (record? value)
-     (non-durable-value! path value)
-
-     (map? value)
-     (reduce-kv
-      (fn [result key item]
-        (assoc result
-          (durable-value (conj path :key) key)
-          (durable-value (conj path key) item)))
-      {}
-      value)
-
-     (vector? value)
-     (mapv (fn [index item]
-             (durable-value (conj path index) item))
-           (range)
-           value)
-
-     (list? value)
-     (->> value
-          (map-indexed
-           (fn [index item]
-             (durable-value (conj path index) item)))
-          (apply list))
-
-     (set? value)
-     (into #{} (map #(durable-value (conj path :member) %)) value)
-
-     :else
-     (non-durable-value! path value))))
+   (durable/value
+    path
+    value
+    {:extension?       #(or (var? %)
+                            (instance? Pattern %))
+     :encode-extension (fn [_ value]
+                         (if (var? value)
+                           (let [{:keys [ns name]} (meta value)]
+                             (symbol (str (ns-name ns)) (str name)))
+                           {:collet.runtime/type :regex
+                            :pattern             (.pattern ^Pattern value)
+                            :flags               (.flags ^Pattern value)}))
+     :unsupported!     non-durable-value!})))
 
 
 (defn- validate-code-value!

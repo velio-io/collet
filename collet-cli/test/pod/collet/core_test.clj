@@ -7,8 +7,11 @@
    [collet.main :as main]
    [pod.collet.core :as sut])
   (:import
-   (java.io PushbackInputStream)
-   (java.util.concurrent TimeUnit)))
+    (java.io PushbackInputStream)
+    [java.nio.file FileVisitOption Files LinkOption Path]
+    [java.nio.file.attribute FileAttribute]
+    (java.util.concurrent TimeUnit)))
+
 
 (def jvm-options
   ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
@@ -24,6 +27,7 @@
    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
    "--enable-native-access=ALL-UNNAMED"])
 
+
 (defn- bytes->strings [value]
   (walk/postwalk
    (fn [item]
@@ -33,13 +37,31 @@
    value))
 
 
+(defn- delete-tree!
+  [^Path path]
+  (when (Files/exists path (make-array LinkOption 0))
+    (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
+      (doseq [entry (sort-by str
+                             #(compare %2 %1)
+                             (iterator-seq (.iterator paths)))]
+        (Files/deleteIfExists ^Path entry)))))
+
+
 (deftest runtime-context-uses-the-configured-data-directory
-  (binding [main/*env* {"COLLET_DATA_DIR" "/tmp/collet-pod-data"}]
-    (let [ctx (sut/create-runtime-context)]
-      (try
-        (is (= "/tmp/collet-pod-data" (get-in ctx [:store :dir])))
-        (finally
-          (collet/close ctx))))))
+  (let [data-dir (Files/createTempDirectory
+                  "collet-pod-data-"
+                  (make-array FileAttribute 0))]
+    (try
+      (binding [main/*env* {"COLLET_DATA_DIR" (str data-dir)}]
+        (let [ctx (sut/create-runtime-context)]
+          (try
+            (is (= (str (.resolve data-dir "db")) (get-in ctx [:store :dir])))
+            (is (= (str (.resolve data-dir "artifacts"))
+                   (str (:artifact-dir ctx))))
+            (finally
+             (collet/close ctx)))))
+      (finally
+       (delete-tree! data-dir)))))
 
 
 (deftest ^:integration pod-artifact-startup-test
@@ -49,7 +71,7 @@
                        "collet-pod-test-"
                        (make-array java.nio.file.attribute.FileAttribute 0)))
         builder  (ProcessBuilder. ^java.util.List command)
-        _        (.put (.environment builder) "COLLET_DATA_DIR" data-dir)
+        _ (.put (.environment builder) "COLLET_DATA_DIR" data-dir)
         process  (.start builder)]
     (try
       (let [stdin  (.getOutputStream process)
@@ -66,5 +88,5 @@
         (is (.waitFor process 10 TimeUnit/SECONDS))
         (is (zero? (.exitValue process))))
       (finally
-        (when (.isAlive process)
-          (.destroyForcibly process))))))
+       (when (.isAlive process)
+         (.destroyForcibly process))))))

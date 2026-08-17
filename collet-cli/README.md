@@ -32,8 +32,12 @@ collet.bb -s "path/to/pipeline-spec.edn" -c "path/to/config.edn" -x "path/to/con
 
 This command will show the prompt to select the action you want to perform.
 Full pipeline runs persist pipeline revisions and run/task lifecycle state under
-`COLLET_DATA_DIR`, which defaults to `./.collet/db`. Configuration, secrets, task
-results, and Arrow datasets are not persisted.
+`COLLET_DATA_DIR`, which defaults to `./.collet`. It contains `db/` for
+Datalevin metadata and `artifacts/` for temporary run-owned handoff files.
+Configuration and secrets are never persisted. Required dataset and scalar
+outputs are published as Parquet and strict EDN Artifacts respectively, then
+removed at terminal run cleanup. Use an explicit file or S3 action for output
+that must outlive the run.
 
 `collet.bb` options:
 

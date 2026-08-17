@@ -1,11 +1,11 @@
 (ns collet.actions.switch-test
   (:require
    [clojure.test :refer :all]
-   [collet.test-fixtures :as tf]
    [collet.actions.switch :as sut]
    [collet.core :as collet]
-   [collet.utils :as utils]
-   [collet.store.datalevin :as datalevin]))
+   [collet.store.datalevin :as datalevin]
+   [collet.test-fixtures :as tf]
+   [collet.utils :as utils]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.switch))
@@ -13,15 +13,25 @@
 
 (defn- run-durable-pipeline
   [pipeline config]
-  (let [ctx (collet/context
-             {:store (datalevin/store
-                      {:dir (str "tmp/" (random-uuid))})})
-        run (collet/start ctx (collet/compile-pipeline pipeline) config)]
+  (let [results   (atom {})
+        run-ready (promise)
+        ctx       (collet/context
+                   {:store            (datalevin/store
+                                       {:dir (str "tmp/" (random-uuid))})
+                    :on-task-complete (fn [task]
+                                        (let [run  @run-ready
+                                              name (:task/name task)]
+                                          (swap! results assoc name (get run name))))})
+        pipeline  (collet/compile-pipeline pipeline)
+        run       (collet/start ctx pipeline config)]
     (try
-      @run
-      run
+      (deliver run-ready run)
+      (let [result @run]
+        (when-not (= :done (:run/status result))
+          (throw (ex-info "Durable test pipeline failed." {:run result})))
+        @results)
       (finally
-        (collet/close ctx)))))
+       (collet/close ctx)))))
 
 
 (deftest switch-functionality-test

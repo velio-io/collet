@@ -238,10 +238,10 @@ uploaded.
   fixed-size floats, exact decimals, and Java Time values without JSON
   coercion. Issue #48 consumes this schema to restore Parquet's
   manifest-driven FLOAT[n] logical cast.
-- **#48:** implement format-neutral artifact and snapshot identities with a
-  Parquet/DuckDB storage adapter, immutable publication, checksums, recovery,
-  and object-store behavior. Do not copy Lance's internal version model into
-  the public contract.
+- **#48:** implement one direct run-owned Artifact per required task output with
+  a Parquet/DuckDB storage adapter, immutable publication, checksums, and
+  terminal cleanup. Snapshot and partition identities are not part of the
+  internal handoff contract.
 - **#47:** add task-local DuckDB SQL over the #48 Parquet artifacts with
   projection/predicate pushdown, configurable bounded memory and spill, and
   JDBC Arrow output.

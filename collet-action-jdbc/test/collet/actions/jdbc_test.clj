@@ -214,7 +214,7 @@
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
                        :tasks [{:name       :query
-                                :keep-state true
+                                :keep-state false
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
@@ -256,7 +256,7 @@
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]
                                               [next.jdbc.types :as types]]}
                        :tasks [{:name       :query
-                                :keep-state true
+                                :keep-state false
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors '{connection [:config :connection]
@@ -278,7 +278,7 @@
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
                        :tasks [{:name       :query
-                                :keep-state true
+                                :keep-state false
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors {'connection [:config :connection]}
@@ -330,13 +330,11 @@
                                                                                     :date_col :time_col :timestamp_col]
                                                                            :from   :data-types}}}]}]})
             run      (tf/run-pipeline! pipeline {:connection connection-map})
-            result   (:query run)
-            datasets (collet/arrow->dataset result)
+            datasets (:query run)
             columns  (-> datasets meta :arrow-columns)]
-        (is (collet/arrow-task-result? result))
-        (is (= 3 (count datasets)))
+        (is (= 1 (count datasets)))
         (is (utils/ds-seq? datasets))
-        (is (= [10 10 2] (map ds/row-count datasets)))
+        (is (= [22] (map ds/row-count datasets)))
         (is (= {:id            1
                 :bool_col      true
                 :mood_col      "happy"
@@ -354,7 +352,7 @@
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
                        :tasks [{:name       :query
-                                :keep-state true
+                                :keep-state false
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors '{connection [:config :connection]}
@@ -388,7 +386,7 @@
                        :deps  {:coordinates '[[org.postgresql/postgresql "42.7.3"]]
                                :requires    '[[collet.actions.jdbc-pg :as jdbc-pg]]}
                        :tasks [{:name       :query
-                                :keep-state true
+                                :keep-state false
                                 :actions    [{:name      :query-action
                                               :type      :collet.actions.jdbc/query
                                               :selectors '{connection [:config :connection]}
@@ -514,7 +512,7 @@
                        :deps      {:coordinates '[[com.mysql/mysql-connector-j "9.7.0"]]}
                        :use-arrow false
                        :tasks     [{:name       :query
-                                    :keep-state true
+                                    :keep-state false
                                     :actions    [{:name      :query-action
                                                   :type      :collet.actions.jdbc/query
                                                   :selectors {'connection [:config :connection]}

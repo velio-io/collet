@@ -192,19 +192,24 @@ The basic structure of pipeline spec can be represented as follows:
 - `:max-parallelism` (optional): The maximum number of tasks from one run that may execute concurrently. It defaults
   to `10`.
 
-The compiled pipeline is immutable data. Starting it creates a separate run whose task results and configuration are
-kept in its runtime context. Every completed task contributes to that run's process-local result state. If a task is
-executed multiple times, its result contains the iteration data as a sequence of discrete results (this can be changed
-with the `:state-format` option).
-Tasks can also refer to each other's data using the `:inputs` key (fulfilled for each task individually).
+The compiled pipeline is immutable data. Starting it creates a separate run; its
+active process keeps runtime handles and bounded views. An output needed by a
+dependant task, or retained with `:keep-state`, is published under that run's
+artifact directory before its task reaches the terminal state. `:inputs`
+resolves that Artifact transparently. If a task is executed multiple times, its
+result contains the iteration data as a sequence of discrete results (this can
+be changed with `:state-format`).
 
-Collet stores compiled pipeline revisions and run/task lifecycle state in Datalevin. It deliberately does not persist
-runtime configuration, secrets, task results, Arrow datasets, callbacks, futures, or exceptions.
+Collet stores compiled pipeline revisions, run/task lifecycle state, task input
+references, and active Artifact metadata in Datalevin. It does not create
+snapshot or lineage-edge entities, and never stores runtime configuration,
+secrets, payload values, callbacks, futures, or exceptions.
 
-Collet is designed to work with large datasets, so keeping all task data in memory is not a good idea.
-By default, data returned from tasks will be offloaded to Arrow files. These files will be memory-mapped (not loaded
-into the JVM heap) and represented as [TMD datasets](https://github.com/techascent/tech.ml.dataset?tab=readme-ov-file)
-or dataset sequences when data is required for processing.
+Collet is designed to work with large datasets. Dataset handoff converts the
+task's Arrow IPC output to ZSTD Parquet in bounded batches rather than loading
+the complete dataset into the JVM heap. Readers expose bounded Arrow batches as
+[TMD datasets](https://github.com/techascent/tech.ml.dataset?tab=readme-ov-file)
+when data is required for processing.
 
 Nested values can be offloaded through Arrow when task-result metadata supplies
 an explicit :arrow-columns schema. Supported shapes include fixed Structs,
@@ -213,10 +218,11 @@ and exact decimals. Arrow remains the schema authority; ambiguous values such
 as an ordinary Clojure map require that metadata rather than guessing whether
 they are a Struct or Map.
 
-Scalar-only results remain memory-mapped. Nested values are exposed as TMD
-object columns one Arrow record batch at a time, so only the requested bounded
-batch is copied to JVM heap. See [the Arrow boundary guide](./docs/arrow.md)
-for the schema grammar, batching, decimal, Java Time, and error rules.
+Scalar Artifact reads materialize one complete strict EDN value. Nested dataset
+values are exposed as TMD object columns one Arrow record batch at a time, so
+only the requested bounded batch is copied to JVM heap. See
+[the Arrow boundary guide](./docs/arrow.md) for the schema grammar, batching,
+decimal, Java Time, and error rules.
 
 You can disable this feature by setting the `:use-arrow` key to false in the pipeline specification.
 
@@ -500,9 +506,41 @@ docker run \
 
 ### Options for Docker container
 
-Pipeline revisions and run/task lifecycle state are stored under `COLLET_DATA_DIR`, which defaults to
-`./.collet/db`. Mount that directory to retain the data when a container is replaced. Pipeline configuration, secrets,
-and task results are never written to this store.
+`COLLET_DATA_DIR` is a parent directory, defaulting to `./.collet`. Collet stores
+Datalevin metadata under `db/` and temporary run-owned handoff under
+`artifacts/`. Mount the parent directory to preserve coordination state and any
+active handoff across container replacement. Pipeline configuration and secrets
+are never written to Datalevin; payloads exist only in Artifact files. Local
+paths are derived from the configured artifact directory plus run, task, and
+Artifact IDs; Datalevin does not store a separate filesystem URI.
+
+Each required output is computed again for every run. Dataset outputs are ZSTD
+Parquet Artifacts and scalar outputs are strict, versioned EDN. Checksums verify
+integrity but never select a reusable result. Nippy is intentionally not used:
+durable handoff needs [portable EDN values](https://github.com/edn-format/edn#rationale)
+rather than [a JVM-private cache format](https://github.com/taoensso/nippy#operational-considerations).
+There is no encoded-size limit for a scalar artifact, but decoding it necessarily
+materializes the complete value; use a dataset for large results.
+
+Scalar payloads have the envelope:
+
+```clojure
+{:collet.scalar/version 1
+ :collet.scalar/value   value}
+```
+
+Plain recursive EDN is accepted. UUIDs and `Instant` use the standard `#uuid`
+and `#inst` tags. Byte arrays, regular expressions, `LocalDate`, `LocalTime`,
+`LocalDateTime`, and `Duration` use the fixed readers `#collet/bytes`,
+`#collet/regex`, `#collet/local-date`, `#collet/local-time`,
+`#collet/local-date-time`, and `#collet/duration`. Unknown tags and JVM runtime
+objects such as records, functions, Vars, streams, and connections are rejected.
+
+After all task futures stop reading, terminal run cleanup removes ordinary
+Artifact metadata and directories. `:keep-state` delays cleanup only until the
+owning Context closes. Reopening a Context restores run and task state, not task
+payloads. To keep data, write it explicitly with a local-file or S3 sink; those
+destinations are user-owned and internal cleanup never deletes them.
 
 Collet uses the mulog library for logging and tracing. When running as a Docker container,
 you can configure various publishers using environment variables:
@@ -537,13 +575,11 @@ After adding Collet to your project dependencies, you can use it as follows:
 
 ```clojure
 (ns my-namespace
-  (:require [collet.core :as collet]
-            [collet.store.datalevin :as datalevin]))
+  (:require [collet.core :as collet]))
 
 ;; stateful resources belong to one process-lifetime context
 (def ctx
-  (collet/context
-   {:store (datalevin/store {:dir "./.collet/db"})}))
+  (collet/context {:data-dir "./.collet"}))
 
 ;; pipeline specifications compile to immutable, persistable data
 (def my-pipeline-spec

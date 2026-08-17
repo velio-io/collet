@@ -6,8 +6,9 @@ artifacts in issue #48 and optional DuckDB/DuckTape execution in issue #47.
 
 ## Explicit schema metadata
 
-Attach the schema as :arrow-columns metadata to a sequential task result. The
-schema is EDN-safe, versioned, and ordered:
+Attach the schema as :arrow-columns metadata to a sequential task result, or
+declare it as the task's :arrow-columns option when an action produces the
+dataset. The schema is EDN-safe, versioned, and ordered:
 
 ~~~clojure
 {:version 1

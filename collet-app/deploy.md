@@ -16,7 +16,9 @@ java \
 ```
 
 `COLLET_DATA_DIR` is an environment variable, not a JVM system property. Its default is
-`./.collet/db`; set it in the environment when another location is required:
+`./.collet`; it contains `db/` for Datalevin metadata and `artifacts/` for
+temporary run-owned handoff files. Set the parent directory in the environment
+when another location is required:
 
 ```shell
 COLLET_DATA_DIR=/var/lib/collet java \
@@ -54,10 +56,13 @@ The builder uses Clojure CLI with JDK 25 and the runtime image uses Java 25. The
 runtime image preserves the existing JVM options, JMX agent on port 8080, `/tini`
 entrypoint, environment variables, and startup command.
 
-The application persists compiled pipeline revisions and run/task lifecycle state under
-`COLLET_DATA_DIR`. The default is `./.collet/db`; mount the directory as shown above
-to retain it across container replacement. Runtime configuration, secrets, task
-results, and Arrow datasets are not persisted.
+The application persists compiled pipeline revisions and run/task lifecycle
+state under `COLLET_DATA_DIR`. Its `artifacts/` child holds temporary handoff for
+active runs. The default parent is `./.collet`; mount it as shown above to retain
+coordination state and active handoff across container replacement. Terminal
+cleanup removes internal output files. Runtime configuration and secrets are not
+persisted in either location; durable output belongs in an explicit file or S3
+sink.
 
 Docker is required for this workflow. The repository release command creates the app
 package tag but never builds or pushes a registry image; image publication is a
