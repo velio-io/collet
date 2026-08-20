@@ -43,6 +43,8 @@ Run repository-level commands from the repository root.
 | Discover nREPL ports | `clj-nrepl-eval --discover-ports` |
 | Discover ports with the fallback client | `bb scripts/agent/nrepl-eval.bb --discover` |
 | Reload changed project code | `clj-nrepl-eval -p <port> "(user/reload)"` |
+| Inspect semantic code index | `jbcontext status` |
+| Semantically search repository code | `jbcontext search "<query>"` |
 | Repair Clojure delimiters | `clj-paren-repair path/to/file.clj` |
 | Check Clojure formatting | `bb fmt:check --file path/to/file.clj` |
 | Format Clojure files | `bb fmt:fix --file path/to/file.clj` |
@@ -130,6 +132,30 @@ available on the development classpath.
 
 Repository source files may be read normally. Use `:reload` for manual
 namespace investigation so an earlier require does not hide recent edits.
+
+## Semantic Code Discovery
+
+Use the repository's JetBrains Context (`jbcontext`) index to find relevant
+repository code by meaning before doing broad text searches. Run these commands
+from the repository root:
+
+```shell
+jbcontext status
+jbcontext search "where pipeline runs persist task state"
+jbcontext search --path-filter collet-core "artifact cleanup"
+```
+
+- Start with `jbcontext status` to confirm a snapshot exists for the current
+  repository and branch.
+- Write searches as a focused natural-language question. Use
+  `--path-filter <path>` to constrain a result set and `--limit <n>` when a
+  smaller result set is useful. `--revision <sha>` and `--branch <name>` select
+  a specific indexed snapshot when needed.
+- Treat results as discovery aids: open the returned repository files and use
+  their current contents as the authority. The index can be older than the
+  worktree and does not replace nREPL inspection of dependency APIs.
+- Do not run `jbcontext index`, `remove-index`, `login`, or `logout` unless the
+  user explicitly asks. `index` creates or updates the remote snapshot.
 
 ## Formatting
 
