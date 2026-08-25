@@ -2,7 +2,6 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [collet.action :as action]
-   [collet.core :as collet]
    [collet.actions.file]
    [collet.actions.http]
    [collet.actions.jdbc]
@@ -14,7 +13,9 @@
    [collet.actions.queue]
    [collet.actions.s3]
    [collet.actions.vega]
+   [collet.core :as collet]
    [collet.test-fixtures :as tf]))
+
 
 (def legacy-action-types
   [:collet.actions.http/request
@@ -31,11 +32,13 @@
    :collet.actions.lucene/index
    :collet.actions.lucene/query])
 
+
 (deftest legacy-action-registration-test
   (testing "all legacy action keywords still dispatch"
     (doseq [action-type legacy-action-types]
       (is (fn? (action/action-fn {:type action-type}))
           (str action-type " is registered")))))
+
 
 (deftest unchanged-pipeline-spec-test
   (let [spec     {:name  :aggregate-compatibility

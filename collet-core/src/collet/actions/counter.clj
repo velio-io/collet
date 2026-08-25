@@ -15,9 +15,11 @@
     (min (+ prev-state step) end)))
 
 
-(defmethod action/action-fn :counter [_]
+(defmethod action/action-fn :counter
+  [_]
   do-count)
 
 
-(defmethod action/prep :counter [action-spec]
+(defmethod action/prep :counter
+  [action-spec]
   (common/prep-stateful-action action-spec))

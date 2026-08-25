@@ -3,8 +3,8 @@
    [clojure.java.io :as io]
    [malli.instrument :as mi])
   (:import
-    [java.nio.file Files]
-    [java.nio.file.attribute FileAttribute]))
+   [java.nio.file Files]
+   [java.nio.file.attribute FileAttribute]))
 
 
 (defn resource-path [resource-name]

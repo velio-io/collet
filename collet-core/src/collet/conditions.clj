@@ -105,13 +105,14 @@
   (memoize
    (fn [conditions]
      (let [compile-conditions-fn
-           (fn [cd] (reduce
-                     (fn [state [operation :as condition]]
-                       (if (or (= :and operation) (= :or operation))
-                         (conj state (compile-conditions condition))
-                         (conj state (compile-condition condition))))
-                     []
-                     cd))]
+           (fn [cd]
+             (reduce
+              (fn [state [operation :as condition]]
+                (if (or (= :and operation) (= :or operation))
+                  (conj state (compile-conditions condition))
+                  (conj state (compile-condition condition))))
+              []
+              cd))]
        (cond
          (= :or (first conditions))
          (let [cond-fns (compile-conditions-fn (rest conditions))]

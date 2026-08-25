@@ -44,8 +44,9 @@
                              {:a {:b {:c 1 :d 2}}})]
       (is (= {:c-val 1 :d-val 2} actual)))
 
-    (let [actual (sut/select [:a {:c-val [:b :c]
-                                  :e-val [:d :e]}]
+    (let [actual (sut/select [:a
+                              {:c-val [:b :c]
+                               :e-val [:d :e]}]
                              {:a {:b {:c 1 :f 3}
                                   :d {:e 2 :f 4}}})]
       (is (= {:c-val 1 :e-val 2} actual))))
@@ -72,9 +73,11 @@
       (is (= [1 2 3] actual)))
 
     (testing "Select from collection with join"
-      (let [actual (sut/select [:a [:$/cat :b {:c-val :c
-                                               :d-val :d
-                                               :e-val :e}]]
+      (let [actual (sut/select [:a
+                                [:$/cat :b
+                                 {:c-val :c
+                                  :d-val :d
+                                  :e-val :e}]]
                                {:a [{:b {:c 1 :e 4}}
                                     {:b {:c 2}}
                                     {:b {:c 3 :d 5}}]})]

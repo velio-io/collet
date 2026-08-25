@@ -1,182 +1,208 @@
-{:name  :devs-productivity-pipeline
+{:name :devs-productivity-pipeline
  ;; add extra dependencies
- :deps  {:coordinates [[io.velio/collet-actions "0.2.9"]]
-         :imports     [java.lang.Math
-                       java.time.LocalDate
-                       java.time.LocalDateTime
-                       java.time.format.DateTimeFormatter
-                       java.time.temporal.ChronoUnit]}
+ :deps {:coordinates [[io.velio/collet-actions "0.2.9"]]
+        :imports     [java.lang.Math
+                      java.time.LocalDate
+                      java.time.LocalDateTime
+                      java.time.format.DateTimeFormatter
+                      java.time.temporal.ChronoUnit]}
  ;; specify the list of tasks
- :tasks [;; get the list of repositories for the organization
-         {:name     :repositories
-          :actions  [{:name :paginate-or-request
-                      :type :switch
-                      :case [{:condition [:not-nil? [:state :next-page-link]]
-                              ;; request the next page
-                              :actions   [{:name      :repositories-request
-                                           :type      :collet.actions.http/request
-                                           :selectors {next-page [:state :next-page-link]
-                                                       gh-token  [:config :gh-token]}
-                                           :params    #include ["./gh-request.edn" {:url next-page}]
-                                           :return    [{:repos [:body]
-                                                        :link  [:headers :link]}]}]}
-                             {:condition :default
-                              ;; do initial request
-                              :actions   [{:name      :repositories-request
-                                           :type      :collet.actions.http/request
-                                           :selectors {gh-token [:config :gh-token]
-                                                       org-name [:config :org-name]}
-                                           :params    #include ["./gh-request.edn"
-                                                                {:url          ["https://api.github.com/orgs/%s/repos" org-name]
-                                                                 :query-params {:per_page 100}}]
-                                           :return    [{:repos [:body]
-                                                        :link  [:headers :link]}]}]}]}
-                     ;; parse the next page link from previous request
-                     {:name      :next-page-link
-                      :type      :clj/re-find
-                      :when      [:not-nil? [:state :repositories-request :link]]
-                      :selectors {next-link [:state :repositories-request :link]}
-                      :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
-                      :return    [[:$/op :first]]}]
-          ;; proceed while there is a next page link
-          :iterator {:next [:not-nil? [:state :next-page-link]]}
-          :return   [:state :repositories-request :repos [:$/cat #include "./repo-keys.edn"]]}
+ :tasks
+ [;; get the list of repositories for the organization
+  {:name :repositories
+   :actions
+   [{:name :paginate-or-request
+     :type :switch
+     :case
+     [{:condition [:not-nil? [:state :next-page-link]]
+       ;; request the next page
+       :actions
+       [{:name      :repositories-request
+         :type      :collet.actions.http/request
+         :selectors {next-page [:state :next-page-link]
+                     gh-token  [:config :gh-token]}
+         :params    #include ["./gh-request.edn" {:url next-page}]
+         :return    [{:repos [:body]
+                      :link  [:headers :link]}]}]}
+      {:condition :default
+       ;; do initial request
+       :actions
+       [{:name      :repositories-request
+         :type      :collet.actions.http/request
+         :selectors {gh-token [:config :gh-token]
+                     org-name [:config :org-name]}
+         :params    #include ["./gh-request.edn"
+                              {:url          ["https://api.github.com/orgs/%s/repos" org-name]
+                               :query-params {:per_page 100}}]
+         :return    [{:repos [:body]
+                      :link  [:headers :link]}]}]}]}
+    ;; parse the next page link from previous request
+    {:name      :next-page-link
+     :type      :clj/re-find
+     :when      [:not-nil? [:state :repositories-request :link]]
+     :selectors {next-link [:state :repositories-request :link]}
+     :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
+     :return    [[:$/op :first]]}]
+   ;; proceed while there is a next page link
+   :iterator {:next [:not-nil? [:state :next-page-link]]}
+   :return [:state :repositories-request :repos [:$/cat #include "./repo-keys.edn"]]}
 
-         ;; get the list of pull requests for each repository
-         {:name     :pull-requests
-          :inputs   [:repositories]
-          :actions  [{:name :paginate-or-request
-                      :type :switch
-                      :case [{:condition [:nil? [:state :repository-prs :link]]
-                              ;; take the repo from list and make initial request for PRs
-                              :actions   [{:name      :repository
-                                           :type      :mapper
-                                           :selectors {repos [:inputs :repositories]}
-                                           :params    {:sequence repos}}
-                                          {:name      :repository-prs
-                                           :type      :collet.actions.http/request
-                                           :selectors {gh-token [:config :gh-token]
-                                                       org-name [:config :org-name]
-                                                       repo     [:$mapper/item :name]}
-                                           :params    #include ["./gh-request.edn"
-                                                                {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
-                                                                 :query-params {:per_page 100 :state "closed"}}]
-                                           :return    [{:prs  [:body]
-                                                        :link [:headers :link]}]}]}
-                             {:condition [:regex [:state :repository-prs :link] ".*rel=\"next\".*"]
-                              ;; get the next page of PRs
-                              :actions   [{:name      :next-page-link
-                                           :type      :clj/re-find
-                                           :selectors {next-link [:state :repository-prs :link]}
-                                           :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
-                                           :return    [[:$/op :first]]}
-                                          {:name      :repository-prs
-                                           :type      :collet.actions.http/request
-                                           :selectors {next-page [:state :next-page-link]
-                                                       gh-token  [:config :gh-token]}
-                                           :params    #include ["./gh-request.edn"
-                                                                {:url next-page}]
-                                           :return    [{:prs  [:body]
-                                                        :link [:headers :link]}]}]}
-                             {:condition :default
-                              ;; no more PRs for the particular repo, clear the state and proceed to the next repo
-                              :actions   [{:name   :repository-prs
-                                           :type   :clj/identity
-                                           :params {:prs [] :link nil}}]}]}]
-          ;; proceed while there is a next page link or there are more repositories
-          :iterator {:next [:or [:not-nil? [:state :repository-prs :link]]
-                            [:true? [:$mapper/has-next-item]]]}
-          :return   [:state :repository-prs :prs [:$/cat #include "./pr-keys.edn"]]}
+  ;; get the list of pull requests for each repository
+  {:name :pull-requests
+   :inputs [:repositories]
+   :actions
+   [{:name :paginate-or-request
+     :type :switch
+     :case
+     [{:condition [:nil? [:state :repository-prs :link]]
+       ;; take the repo from list and make initial request for PRs
+       :actions
+       [{:name      :repository
+         :type      :mapper
+         :selectors {repos [:inputs :repositories]}
+         :params    {:sequence repos}}
+        {:name      :repository-prs
+         :type      :collet.actions.http/request
+         :selectors {gh-token [:config :gh-token]
+                     org-name [:config :org-name]
+                     repo     [:$mapper/item :name]}
+         :params    #include ["./gh-request.edn"
+                              {:url          ["https://api.github.com/repos/%s/%s/pulls" org-name repo]
+                               :query-params {:per_page 100 :state "closed"}}]
+         :return    [{:prs  [:body]
+                      :link [:headers :link]}]}]}
+      {:condition [:regex [:state :repository-prs :link] ".*rel=\"next\".*"]
+       ;; get the next page of PRs
+       :actions
+       [{:name      :next-page-link
+         :type      :clj/re-find
+         :selectors {next-link [:state :repository-prs :link]}
+         :params    [#rgx "(?<=<)([\\S]*)(?=>; rel=\"next\")" next-link]
+         :return    [[:$/op :first]]}
+        {:name      :repository-prs
+         :type      :collet.actions.http/request
+         :selectors {next-page [:state :next-page-link]
+                     gh-token  [:config :gh-token]}
+         :params    #include ["./gh-request.edn"
+                              {:url next-page}]
+         :return    [{:prs  [:body]
+                      :link [:headers :link]}]}]}
+      {:condition :default
+       ;; no more PRs for the particular repo, clear the state and proceed to the next repo
+       :actions   [{:name   :repository-prs
+                    :type   :clj/identity
+                    :params {:prs [] :link nil}}]}]}]
+   ;; proceed while there is a next page link or there are more repositories
+   :iterator {:next [:or [:not-nil? [:state :repository-prs :link]]
+                     [:true? [:$mapper/has-next-item]]]}
+   :return [:state :repository-prs :prs [:$/cat #include "./pr-keys.edn"]]}
 
-         ;; generate productivity reports
-         ;; calculate the total number of PRs for each member across all repositories
-         {:name    :total-prs-by-member
-          :inputs  [:pull-requests]
-          :actions [{:name      :prs-by-member
-                     :type      :slicer
-                     :selectors {pulls [:inputs :pull-requests]}
-                     :params    {:sequence pulls
-                                 :apply    [[:fold {:by      :user-id
-                                                    :columns {:pulls-count [:count-distinct :id]}}]
-                                            [:select {:columns [:user-id :pulls-count]}]]}}
-                    {:name      :save-total-report
-                     :type      :collet.actions.file/sink
-                     :selectors {data [:state :prs-by-member]}
-                     :params    {:input       data
-                                 :format      :csv
-                                 :csv-header? true
-                                 :file-name   "./reports/total-prs-by-member.csv"}}]}
+  ;; generate productivity reports
+  ;; calculate the total number of PRs for each member across all repositories
+  {:name :total-prs-by-member
+   :inputs [:pull-requests]
+   :actions
+   [{:name      :prs-by-member
+     :type      :slicer
+     :selectors {pulls [:inputs :pull-requests]}
+     :params    {:sequence pulls
+                 :apply    [[:fold
+                             {:by      :user-id
+                              :columns {:pulls-count [:count-distinct :id]}}]
+                            [:select {:columns [:user-id :pulls-count]}]]}}
+    {:name      :save-total-report
+     :type      :collet.actions.file/sink
+     :selectors {data [:state :prs-by-member]}
+     :params    {:input       data
+                 :format      :csv
+                 :csv-header? true
+                 :file-name   "./reports/total-prs-by-member.csv"}}]}
 
-         ;; calculate the merge ratio for each member
-         {:name    :merge-ratio-by-member
-          :inputs  [:pull-requests]
-          :actions [{:name      :merge-ratios
-                     :type      :slicer
-                     :selectors {pulls [:inputs :pull-requests]}
-                     :params    {:sequence pulls
-                                 :apply    [[:fold {:by      :user-id
-                                                    :columns {:merged-count [:count-distinct :merged_at]
-                                                              :total-count  [:count-distinct :id]}}]
-                                            [:map {:with (fn [{:keys [merged-count total-count]}]
-                                                           {:merge-ratio (Math/round
-                                                                           (* (double (/ merged-count total-count))
-                                                                             100))})}]
-                                            [:select {:columns [:user-id :merge-ratio]}]]}}
-                    {:name      :save-merge-ratio-report
-                     :type      :collet.actions.file/sink
-                     :selectors {data [:state :merge-ratios]}
-                     :params    {:input       data
-                                 :format      :csv
-                                 :csv-header? true
-                                 :file-name   "./reports/merge-ratio-by-member.csv"}}]}
+  ;; calculate the merge ratio for each member
+  {:name :merge-ratio-by-member
+   :inputs [:pull-requests]
+   :actions
+   [{:name :merge-ratios
+     :type :slicer
+     :selectors {pulls [:inputs :pull-requests]}
+     :params
+     {:sequence pulls
+      :apply
+      [[:fold
+        {:by      :user-id
+         :columns {:merged-count [:count-distinct :merged_at]
+                   :total-count  [:count-distinct :id]}}]
+       [:map
+        {:with (fn [{:keys [merged-count total-count]}]
+                 {:merge-ratio (Math/round
+                                (* (double (/ merged-count total-count))
+                                   100))})}]
+       [:select {:columns [:user-id :merge-ratio]}]]}}
+    {:name      :save-merge-ratio-report
+     :type      :collet.actions.file/sink
+     :selectors {data [:state :merge-ratios]}
+     :params    {:input       data
+                 :format      :csv
+                 :csv-header? true
+                 :file-name   "./reports/merge-ratio-by-member.csv"}}]}
 
-         ;; calculate the number of PRs for each member per month
-         {:name    :monthly-prs-by-member
-          :inputs  [:pull-requests]
-          :actions [{:name      :prs-by-member
-                     :type      :slicer
-                     :selectors {pulls [:inputs :pull-requests]}
-                     :params    {:sequence pulls
-                                 :apply    [[:map {:with (fn [{:keys [^String closed_at]}]
-                                                           (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
-                                                                 dt ^LocalDate (LocalDate/parse closed_at formatter)]
-                                                             {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
-                                            [:fold {:by      [:user-id :year-month]
-                                                    :columns {:pulls-count [:count-distinct :id]}}]
-                                            [:select {:columns [:user-id :pulls-count :year-month]}]]}}
-                    {:name      :save-monthly-report
-                     :type      :collet.actions.file/sink
-                     :selectors {data [:state :prs-by-member]}
-                     :params    {:input       data
-                                 :format      :csv
-                                 :csv-header? true
-                                 :file-name   "./reports/monthly-prs-by-member.csv"}}]}
+  ;; calculate the number of PRs for each member per month
+  {:name :monthly-prs-by-member
+   :inputs [:pull-requests]
+   :actions
+   [{:name :prs-by-member
+     :type :slicer
+     :selectors {pulls [:inputs :pull-requests]}
+     :params
+     {:sequence pulls
+      :apply    [[:map
+                  {:with (fn [{:keys [^String closed_at]}]
+                           (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                                 dt        ^LocalDate (LocalDate/parse closed_at formatter)]
+                             {:year-month (str (.getYear dt) "-" (.getMonthValue dt))}))}]
+                 [:fold
+                  {:by      [:user-id :year-month]
+                   :columns {:pulls-count [:count-distinct :id]}}]
+                 [:select {:columns [:user-id :pulls-count :year-month]}]]}}
+    {:name      :save-monthly-report
+     :type      :collet.actions.file/sink
+     :selectors {data [:state :prs-by-member]}
+     :params    {:input       data
+                 :format      :csv
+                 :csv-header? true
+                 :file-name   "./reports/monthly-prs-by-member.csv"}}]}
 
-         ;; calculate average time to merge
-         {:name    :average-time-to-merge
-          :inputs  [:pull-requests]
-          :actions [{:name      :time-to-merge
-                     :type      :slicer
-                     :selectors {pulls [:inputs :pull-requests]}
-                     :params    {:sequence pulls
-                                 :apply    [[:map {:with (fn [{:keys [^String created_at ^String merged_at]}]
-                                                           (if (and (not-empty created_at) (not-empty merged_at))
-                                                             (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
-                                                                   created ^LocalDateTime (LocalDateTime/parse created_at formatter)
-                                                                   merged ^LocalDateTime (LocalDateTime/parse merged_at formatter)]
-                                                               {:time-to-merge (.until created merged ChronoUnit/SECONDS)})
-                                                             {:time-to-merge 0}))}]
-                                            [:filter {:by [:not= :time-to-merge 0]}]
-                                            [:fold {:by      :user-id
-                                                    :columns {:time-to-merge :sum
-                                                              :total-prs     [:count-distinct :id]}}]
-                                            [:map {:with (fn [{:keys [time-to-merge total-prs]}]
-                                                           {:average-ttm (int (/ time-to-merge total-prs))})}]
-                                            [:select {:columns [:user-id :average-ttm]}]]}}
-                    {:name      :save-average-time
-                     :type      :collet.actions.file/sink
-                     :selectors {data [:state :time-to-merge]}
-                     :params    {:input       data
-                                 :format      :csv
-                                 :csv-header? true
-                                 :file-name   "./reports/average-time-to-merge.csv"}}]}]}
+  ;; calculate average time to merge
+  {:name :average-time-to-merge
+   :inputs [:pull-requests]
+   :actions
+   [{:name :time-to-merge
+     :type :slicer
+     :selectors {pulls [:inputs :pull-requests]}
+     :params
+     {:sequence pulls
+      :apply
+      [[:map
+        {:with (fn [{:keys [^String created_at ^String merged_at]}]
+                 (if (and (not-empty created_at) (not-empty merged_at))
+                   (let [formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                         created   ^LocalDateTime (LocalDateTime/parse created_at formatter)
+                         merged    ^LocalDateTime (LocalDateTime/parse merged_at formatter)]
+                     {:time-to-merge (.until created merged ChronoUnit/SECONDS)})
+                   {:time-to-merge 0}))}]
+       [:filter {:by [:not= :time-to-merge 0]}]
+       [:fold
+        {:by      :user-id
+         :columns {:time-to-merge :sum
+                   :total-prs     [:count-distinct :id]}}]
+       [:map
+        {:with (fn [{:keys [time-to-merge total-prs]}]
+                 {:average-ttm (int (/ time-to-merge total-prs))})}]
+       [:select {:columns [:user-id :average-ttm]}]]}}
+    {:name      :save-average-time
+     :type      :collet.actions.file/sink
+     :selectors {data [:state :time-to-merge]}
+     :params    {:input       data
+                 :format      :csv
+                 :csv-header? true
+                 :file-name   "./reports/average-time-to-merge.csv"}}]}]}

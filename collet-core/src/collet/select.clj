@@ -4,16 +4,18 @@
 
 
 (def select-path
-  [:schema {:registry
-            {::select-element [:or
-                               :keyword
-                               :string
-                               :int
-                               [:cat [:= :$/cond] collet.conds/condition?]
-                               [:cat [:= :$/op] :keyword]
-                               [:cat [:= :$/cat] [:* [:schema [:ref ::select-element]]]]
-                               [:map-of :keyword [:or [:ref ::select-element]
-                                                  [:vector [:ref ::select-element]]]]]}}
+  [:schema
+   {:registry
+    {::select-element [:or
+                       :keyword
+                       :string
+                       :int
+                       [:cat [:= :$/cond] collet.conds/condition?]
+                       [:cat [:= :$/op] :keyword]
+                       [:cat [:= :$/cat] [:* [:schema [:ref ::select-element]]]]
+                       [:map-of :keyword
+                        [:or [:ref ::select-element]
+                         [:vector [:ref ::select-element]]]]]}}
    [:sequential [:ref ::select-element]]])
 
 
@@ -53,7 +55,8 @@
            (let [sub-path (if (vector? v) v [v])
                  value    (select sub-path result)]
              (assoc r k value)))
-         {} step)
+         {}
+         step)
 
         ;; special case for executing operations on the result
         (vector? step)
@@ -67,7 +70,8 @@
                    (if (some? value)
                      (conj r value)
                      r)))
-               [] result))
+               []
+               result))
 
             :$/cond
             (let [condition (collet.conds/compile-conditions (first args))]

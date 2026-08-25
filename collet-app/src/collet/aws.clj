@@ -10,12 +10,12 @@
   [api {:keys [aws-region aws-key aws-secret endpoint-override]}]
   (aws/client
    (utils/assoc-some {:api api}
-     :region aws-region
-     :credentials-provider (when (and (some? aws-key) (some? aws-secret))
-                             (credentials/basic-credentials-provider
-                              {:access-key-id     aws-key
-                               :secret-access-key aws-secret}))
-     :endpoint-override endpoint-override)))
+    :region aws-region
+    :credentials-provider (when (and (some? aws-key) (some? aws-secret))
+                            (credentials/basic-credentials-provider
+                             {:access-key-id     aws-key
+                              :secret-access-key aws-secret}))
+    :endpoint-override endpoint-override)))
 
 
 (defn invoke!

@@ -19,6 +19,7 @@
 ;; Test Helpers
 ;;-----------------------------------------------------------------------------
 
+
 (defn- create-temp-index
   "Creates a temporary directory for Lucene index and returns its path."
   []
@@ -43,11 +44,10 @@
     (.getAbsolutePath f)))
 
 
-
-
 ;;-----------------------------------------------------------------------------
 ;; Normalization Tests (existing)
 ;;-----------------------------------------------------------------------------
+
 
 (deftest normalize-column-name-test
   (testing "Basic normalization"
@@ -101,10 +101,11 @@
 ;; load-dataset Tests (existing)
 ;;-----------------------------------------------------------------------------
 
+
 (deftest load-dataset-default-normalization-test
   (testing "Default normalization applied"
     (let [temp-file (File/createTempFile "test" ".csv")
-          _         (spit temp-file "Customer Id,First Name,Phone 1\n1,John,555-1234\n")
+          _ (spit temp-file "Customer Id,First Name,Phone 1\n1,John,555-1234\n")
           dataset   (#'sut/load-dataset
                      (.getAbsolutePath temp-file)
                      {:format :csv :compressed? false}
@@ -119,13 +120,13 @@
         (is (= "John" (:first_name row)))
         (is (= "555-1234" (:phone_1 row)))
         (finally
-          (.delete temp-file))))))
+         (.delete temp-file))))))
 
 
 (deftest load-dataset-custom-key-fn-test
   (testing "Custom :key-fn overrides default"
     (let [temp-file (File/createTempFile "test" ".csv")
-          _         (spit temp-file "First Name,Last Name\nJohn,Doe\n")
+          _ (spit temp-file "First Name,Last Name\nJohn,Doe\n")
           dataset   (#'sut/load-dataset
                      (.getAbsolutePath temp-file)
                      {:format :csv :compressed? false}
@@ -136,13 +137,13 @@
         (is (some #(= "First Name" (name %)) row-keys))
         (is (some #(= "Last Name" (name %)) row-keys))
         (finally
-          (.delete temp-file))))))
+         (.delete temp-file))))))
 
 
 (deftest load-dataset-identity-key-fn-test
   (testing "identity :key-fn disables normalization"
     (let [temp-file (File/createTempFile "test" ".csv")
-          _         (spit temp-file "First Name,Last Name\nJohn,Doe\n")
+          _ (spit temp-file "First Name,Last Name\nJohn,Doe\n")
           dataset   (#'sut/load-dataset
                      (.getAbsolutePath temp-file)
                      {:format :csv :compressed? false}
@@ -153,12 +154,13 @@
         (is (contains? row-keys "First Name"))
         (is (contains? row-keys "Last Name"))
         (finally
-          (.delete temp-file))))))
+         (.delete temp-file))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; create-index Tests
 ;;-----------------------------------------------------------------------------
+
 
 (deftest create-index-simple-path-test
   (testing "create-index with simple string path (backward compatible)"
@@ -168,7 +170,7 @@
           (is (some? writer))
           (.close writer))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest create-index-options-test
@@ -192,12 +194,13 @@
           (is (some? writer))
           (.close writer))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; index-files! Tests
 ;;-----------------------------------------------------------------------------
+
 
 (deftest index-files-return-stats-test
   (testing "index-files! returns statistics map"
@@ -214,8 +217,8 @@
           (is (contains? result :skipped))
           (is (contains? result :errors)))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest index-files-progress-fn-test
@@ -237,16 +240,16 @@
         (doseq [update @progress-log]
           (is (contains? update :indexed)))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest index-files-extensions-filter-test
   (testing "index-files! filters by extensions"
     (let [index-path (create-temp-index)
           temp-dir   (File/createTempFile "test-dir" "")
-          _          (.delete temp-dir)
-          _          (.mkdir temp-dir)
+          _ (.delete temp-dir)
+          _ (.mkdir temp-dir)
           csv-file   (io/file temp-dir "data.csv")
           json-file  (io/file temp-dir "data.json")]
       (try
@@ -262,18 +265,18 @@
           ;; Should only index CSV (1 row)
           (is (= 1 (:indexed result))))
         (finally
-          (cleanup-dir index-path)
-          (.delete csv-file)
-          (.delete json-file)
-          (.delete temp-dir))))))
+         (cleanup-dir index-path)
+         (.delete csv-file)
+         (.delete json-file)
+         (.delete temp-dir))))))
 
 
 (deftest index-files-exclude-patterns-test
   (testing "index-files! excludes files matching patterns"
     (let [index-path (create-temp-index)
           temp-dir   (File/createTempFile "test-dir" "")
-          _          (.delete temp-dir)
-          _          (.mkdir temp-dir)
+          _ (.delete temp-dir)
+          _ (.mkdir temp-dir)
           main-file  (io/file temp-dir "data.csv")
           test-file  (io/file temp-dir "test_data.csv")]
       (try
@@ -287,10 +290,10 @@
                        :exclude-patterns #{#"test.*"}})]
           (is (= 1 (:indexed result))))
         (finally
-          (cleanup-dir index-path)
-          (.delete main-file)
-          (.delete test-file)
-          (.delete temp-dir))))))
+         (cleanup-dir index-path)
+         (.delete main-file)
+         (.delete test-file)
+         (.delete temp-dir))))))
 
 
 (deftest index-files-dataset-opts-test
@@ -313,8 +316,8 @@
             (is (contains? first-row :id))
             (is (contains? first-row :name))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path)))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path)))))
 
   (testing "index-files! with custom separator (tab-separated CSV)"
     (let [index-path (create-temp-index)
@@ -332,13 +335,14 @@
                                    :query      "name:Bob"})]
           (is (= 1 (ds/row-count results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; search Tests
 ;;-----------------------------------------------------------------------------
+
 
 (deftest search-wildcard-test
   (testing "search with wildcard query"
@@ -353,8 +357,8 @@
           (is (every? #(str/starts-with? (:name %) "Al")
                       (ds/mapseq-reader results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-fuzzy-test
@@ -370,8 +374,8 @@
           (is (= 1 (ds/row-count results)))
           (is (= "Alice" (-> results ds/mapseq-reader first :name))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-phrase-test
@@ -388,8 +392,8 @@
           (is (= "high quality laptop"
                  (-> results ds/mapseq-reader first :description))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-range-test
@@ -405,8 +409,8 @@
           ;; Should match 150 and 250
           (is (= 2 (ds/row-count results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-boolean-test
@@ -426,14 +430,15 @@
                                    :query      "city:London OR city:Paris"})]
           (is (= 2 (ds/row-count results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-pagination-test
   (testing "search with offset and limit"
     (let [index-path (create-temp-index)
-          csv-data   (apply str "id,name\n"
+          csv-data   (apply str
+                            "id,name\n"
                             (map #(str % ",Name" % "\n") (range 1 21)))
           csv-path   (create-test-csv csv-data)]
       (try
@@ -458,8 +463,8 @@
                                        :limit      100})]
           (is (= 20 (ds/row-count all-results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-fields-selection-test
@@ -480,8 +485,8 @@
             ;; phone should not be in the selected fields
             (is (not (contains? row :phone)))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-no-score-test
@@ -493,7 +498,7 @@
 
         ;; With score (default)
         (let [results-with-score (sut/search {:index-path index-path
-                                               :query      "name:Alice"})]
+                                              :query      "name:Alice"})]
           (is (contains? (first (ds/mapseq-reader results-with-score)) :score)))
 
         ;; Without score
@@ -502,8 +507,8 @@
                                             :include-score? false})]
           (is (not (contains? (first (ds/mapseq-reader results-no-score)) :score))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-custom-analyzer-test
@@ -522,8 +527,8 @@
                                    :analyzer   :whitespace})]
           (is (= 1 (ds/row-count results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest search-source-metadata-test
@@ -542,24 +547,25 @@
           (is (string? (:source-path row)))
           (is (number? (:row-number row))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; End-to-end Index and Search Tests (existing, slightly reorganized)
 ;;-----------------------------------------------------------------------------
 
+
 (deftest index-and-search-with-normalized-columns-test
   (testing "End-to-end: index with spaces, search with normalized names"
     (let [temp-dir   (File/createTempFile "lucene-test" "")
-          _          (.delete temp-dir)
-          _          (.mkdir temp-dir)
+          _ (.delete temp-dir)
+          _ (.mkdir temp-dir)
           index-path (.getAbsolutePath temp-dir)
 
           temp-csv   (File/createTempFile "test-data" ".csv")
-          _          (spit temp-csv
-                           "Customer Id,First Name,Last Name\n101,Alice,Smith\n102,Bob,Jones\n")
+          _ (spit temp-csv
+                  "Customer Id,First Name,Last Name\n101,Alice,Smith\n102,Bob,Jones\n")
           csv-path   (.getAbsolutePath temp-csv)]
 
       (try
@@ -583,7 +589,7 @@
 
             ;; Check metadata columns
             (is (number? (:score first-row)))
-            (is (= 1 (:rank first-row)))  ; First result has rank 1
+            (is (= 1 (:rank first-row))) ; First result has rank 1
             (is (number? (:doc_id first-row)))))
 
         ;; Search for another field
@@ -605,23 +611,23 @@
             (is (number? (:doc_id first-row)))))
 
         (finally
-          ;; Cleanup
-          (.delete temp-csv)
-          (doseq [f (reverse (file-seq temp-dir))]
-            (.delete f)))))))
+         ;; Cleanup
+         (.delete temp-csv)
+         (doseq [f (reverse (file-seq temp-dir))]
+           (.delete f)))))))
 
 
 (deftest normalization-consistency-test
   (testing "Normalization is consistent between indexing and searching"
     (let [temp-dir   (File/createTempFile "lucene-test" "")
-          _          (.delete temp-dir)
-          _          (.mkdir temp-dir)
+          _ (.delete temp-dir)
+          _ (.mkdir temp-dir)
           index-path (.getAbsolutePath temp-dir)
 
           temp-csv   (File/createTempFile "test-data" ".csv")
           ;; Create CSV with various column name formats
-          _          (spit temp-csv
-                           "User_Name,Email@Domain,Price(USD),Phone 1\nAlice,alice@example.com,100,555-1234\n")
+          _ (spit temp-csv
+                  "User_Name,Email@Domain,Price(USD),Phone 1\nAlice,alice@example.com,100,555-1234\n")
           csv-path   (.getAbsolutePath temp-csv)]
 
       (try
@@ -653,95 +659,96 @@
             (is (= "555-1234" (:phone_1 first-row)))))
 
         (finally
-          ;; Cleanup
-          (.delete temp-csv)
-          (doseq [f (reverse (file-seq temp-dir))]
-            (.delete f)))))))
+         ;; Cleanup
+         (.delete temp-csv)
+         (doseq [f (reverse (file-seq temp-dir))]
+           (.delete f)))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; compile-lucene-query Tests (existing)
 ;;-----------------------------------------------------------------------------
 
+
 (deftest compile-lucene-query-test
   (testing "Compile lucene query"
     (are [got compiled] (= compiled (sut/compile-lucene-query got))
-      "data"
+     "data"
       "\"data\""
 
-      "data and pata"
+     "data and pata"
       "\"data and pata\""
 
-      "d?ta"
+     "d?ta"
       "\"d?ta\""
 
-      #"d.*ta"
+     #"d.*ta"
       "/d.*ta/"
 
-      [:field "d?ta"]
+     [:field "d?ta"]
       "field:\"d?ta\""
 
-      [:field_name "something" "some phrase here"]
+     [:field_name "something" "some phrase here"]
       "field_name:(\"something\" \"some phrase here\")"
 
-      [:range {:exclusive? true} ["50" "100"]]
+     [:range {:exclusive? true} ["50" "100"]]
       "{\"50\" TO \"100\"}"
 
-      [:range [50 100]]
+     [:range [50 100]]
       "[50 TO 100]"
 
-      [:field [:range ["50" "100"]]]
+     [:field [:range ["50" "100"]]]
       "field:[\"50\" TO \"100\"]"
 
-      [:field ["a" [:range ["50" "100"]]]]
+     [:field ["a" [:range ["50" "100"]]]]
       "field:(\"a\" [\"50\" TO \"100\"])"
 
-      [:fuzzy {:ed 0.7} "data"]
+     [:fuzzy {:ed 0.7} "data"]
       "\"data\"~0.7"
 
-      [:fuzzy "data"]
+     [:fuzzy "data"]
       "\"data\"~0.5"
 
-      [:- [:field "data"]]
+     [:- [:field "data"]]
       "-field:\"data\""
 
-      [:prox {:nw 10} "data data2"]
+     [:prox {:nw 10} "data data2"]
       "\"data data2\"~10"
 
-      ["a" [:not "b"]]
+     ["a" [:not "b"]]
       "(\"a\" NOT \"b\")"
 
-      [:or "a" [:category "electronics"]]
+     [:or "a" [:category "electronics"]]
       "(\"a\" OR category:\"electronics\")"
 
-      [:and
-       [:title "leather jacket"]
-       [:color "gr?y"]
-       [:size "M"]]
+     [:and
+      [:title "leather jacket"]
+      [:color "gr?y"]
+      [:size "M"]]
       "(title:\"leather jacket\" AND color:\"gr?y\" AND size:\"M\")"
 
-      [:and
-       [:or "a" [:and "c" "d"]]
-       "a"
-       [:fuzzy "e"]
-       [:- "d"]
-       [:condition [:- "refurbished"]]
-       [:price
-        [:range ["100" "500"]]]
-       ["a" [:not "b"]]]
+     [:and
+      [:or "a" [:and "c" "d"]]
+      "a"
+      [:fuzzy "e"]
+      [:- "d"]
+      [:condition [:- "refurbished"]]
+      [:price
+       [:range ["100" "500"]]]
+      ["a" [:not "b"]]]
       "((\"a\" OR (\"c\" AND \"d\")) AND \"a\" AND \"e\"~0.5 AND -\"d\" AND condition:-\"refurbished\" AND price:[\"100\" TO \"500\"] AND (\"a\" NOT \"b\"))"
 
-      [:title
-       ["a"
-        [:fuzzy {:ed 1} "smartphone"]
-        [:+ "Samsung"]]]
+     [:title
+      ["a"
+       [:fuzzy {:ed 1} "smartphone"]
+       [:+ "Samsung"]]]
       "title:(\"a\" \"smartphone\"~1 +\"Samsung\")"
 
-      [:and
-       [:headline
-        [:or "climate change" "global warming"]]
-       [:date
-        [:range [20250101 20251231]]]]
+     [:and
+      [:headline
+       [:or "climate change" "global warming"]]
+      [:date
+       [:range [20250101 20251231]]]]
       "(headline:(\"climate change\" OR \"global warming\") AND date:[20250101 TO 20251231])"))
 
   (testing "Throwing errors on invalid states"
@@ -754,6 +761,7 @@
 ;; Integration Tests: Action Dispatch
 ;;-----------------------------------------------------------------------------
 
+
 (deftest index-action-test
   (testing "::index action dispatch"
     (let [index-path (create-temp-index)
@@ -765,8 +773,8 @@
           (is (= 2 (:indexed result)))
           (is (= 0 (:failed result))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest query-action-test
@@ -784,8 +792,8 @@
           (is (pos? (ds/row-count result)))
           (is (= "Alice" (-> result ds/mapseq-reader first :name))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest query-action-with-options-test
@@ -809,13 +817,14 @@
             (is (contains? first-row :city))
             (is (not (contains? first-row :score)))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; Integration Tests: Pipeline Execution
 ;;-----------------------------------------------------------------------------
+
 
 (deftest lucene-pipeline-integration-test
   (testing "Full pipeline: index and query actions"
@@ -849,8 +858,8 @@
             (is (every? #(= "London" (:city %))
                         (ds/mapseq-reader results)))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest lucene-pipeline-with-query-dsl-test
@@ -876,11 +885,11 @@
                                                                     [:category "electronics"]]}}]}]})
               run      (tf/run-pipeline! pipeline {:index-path index-path})
               results  (:search run)]
-            (is (= 1 (ds/row-count results)))
-            (is (= "Laptop" (-> results ds/mapseq-reader first :title))))
+          (is (= 1 (ds/row-count results)))
+          (is (= "Laptop" (-> results ds/mapseq-reader first :title))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest lucene-pipeline-or-query-test
@@ -915,8 +924,8 @@
               results  (:search run)]
           (is (= 2 (ds/row-count results))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest lucene-pipeline-exclusion-query-test
@@ -949,16 +958,17 @@
                                          {:index-path index-path
                                           :csv-path   csv-path})
               results  (:search run)]
-            (is (= 1 (ds/row-count results)))
-            (is (= "Samsung" (-> results ds/mapseq-reader first :brand))))
+          (is (= 1 (ds/row-count results)))
+          (is (= "Samsung" (-> results ds/mapseq-reader first :brand))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 ;;-----------------------------------------------------------------------------
 ;; Dataset/Collection Input Tests
 ;;-----------------------------------------------------------------------------
+
 
 (deftest index-dataset-test
   (testing "index! with a single dataset"
@@ -977,7 +987,7 @@
                                             :query      "name:Alice"})]
             (is (= 1 (ds/row-count search-results)))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-collection-test
@@ -996,7 +1006,7 @@
                                             :query      "product:Laptop"})]
             (is (= 1 (ds/row-count search-results)))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-dataset-seq-test
@@ -1018,7 +1028,7 @@
                                          :limit      10})]
             (is (= 4 (ds/row-count all-results)))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-backward-compat-test
@@ -1032,8 +1042,8 @@
           (is (= 2 (:indexed result)))
           (is (= 0 (:failed result))))
         (finally
-          (cleanup-dir index-path)
-          (io/delete-file csv-path))))))
+         (cleanup-dir index-path)
+         (io/delete-file csv-path))))))
 
 
 (deftest index-memory-metadata-test
@@ -1052,7 +1062,7 @@
             (is (str/starts-with? (get row :source-path) "memory://"))
             (is (= "memory" (get row :source-extension)))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-with-custom-source-id-test
@@ -1070,7 +1080,7 @@
           (let [row (first (ds/mapseq-reader results))]
             (is (= "custom://my-data-source" (get row :source-path)))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-action-with-dataset-test
@@ -1084,7 +1094,7 @@
           (is (= 2 (:indexed result)))
           (is (= 0 (:failed result))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-error-missing-input-test
@@ -1096,7 +1106,7 @@
              #"Missing required parameter"
              (sut/index! {:index-path index-path})))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-error-file-not-found-test
@@ -1109,7 +1119,7 @@
              (sut/index! {:index-path index-path
                           :input      "/nonexistent/path/to/data.csv"})))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-error-unsupported-type-test
@@ -1122,7 +1132,7 @@
              (sut/index! {:index-path index-path
                           :input      12345})))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))
 
 
 (deftest index-empty-collection-test
@@ -1133,4 +1143,4 @@
           (is (= 0 (:indexed result)))
           (is (= 0 (:failed result))))
         (finally
-          (cleanup-dir index-path))))))
+         (cleanup-dir index-path))))))

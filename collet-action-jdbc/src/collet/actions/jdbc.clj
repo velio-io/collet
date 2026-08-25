@@ -12,11 +12,11 @@
    [next.jdbc.result-set :as rs]
    [tech.v3.dataset :as ds])
   (:import
-    [clojure.lang ILookup]
-    [java.io Closeable File Writer]
-    [java.util Arrays Locale]
-    [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
-    [java.time Duration LocalDate LocalDateTime LocalTime]))
+   [clojure.lang ILookup]
+   [java.io Closeable File Writer]
+   [java.util Arrays Locale]
+   [java.sql Array Clob Connection ResultSet ResultSetMetaData SQLFeatureNotSupportedException Time Types]
+   [java.time Duration LocalDate LocalDateTime LocalTime]))
 
 
 ;; next.jdbc.types namespace exports the following functions to convert Clojure types to SQL types:

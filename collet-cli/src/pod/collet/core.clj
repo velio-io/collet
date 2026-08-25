@@ -11,8 +11,8 @@
    [portal.api :as p]
    [tech.v3.dataset :as ds])
   (:import
-    [java.io EOFException PushbackInputStream StringWriter]
-    [java.util.regex Pattern]))
+   [java.io EOFException PushbackInputStream StringWriter]
+   [java.util.regex Pattern]))
 
 
 (def stdin

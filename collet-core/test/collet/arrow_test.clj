@@ -6,16 +6,16 @@
    [collet.test-fixtures :as tf]
    [tech.v3.dataset :as ds])
   (:import
-    (clojure.lang ExceptionInfo)
-    [java.io File]
-    [java.math BigDecimal BigInteger]
-    [java.time LocalDate LocalDateTime LocalTime Instant Duration]
-    [java.util Date]
-    [org.apache.arrow.vector.types.pojo ArrowType$Int ArrowType$Timestamp Schema]
-    [org.apache.arrow.vector.types TimeUnit]
-    [org.apache.arrow.vector VectorSchemaRoot]
-    [org.apache.arrow.memory RootAllocator]
-    [org.apache.arrow.vector.complex ListVector]))
+   (clojure.lang ExceptionInfo)
+   [java.io File]
+   [java.math BigDecimal BigInteger]
+   [java.time LocalDate LocalDateTime LocalTime Instant Duration]
+   [java.util Date]
+   [org.apache.arrow.vector.types.pojo ArrowType$Int ArrowType$Timestamp Schema]
+   [org.apache.arrow.vector.types TimeUnit]
+   [org.apache.arrow.vector VectorSchemaRoot]
+   [org.apache.arrow.memory RootAllocator]
+   [org.apache.arrow.vector.complex ListVector]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.arrow))

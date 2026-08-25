@@ -2,9 +2,9 @@
   (:require
    [clojure.string :as string]
    [clojure.test :refer :all]
-   [wkok.openai-clojure.api :as openai]
+   [collet.actions.llm :as sut]
    [collet.test-fixtures :as tf]
-   [collet.actions.llm :as sut])
+   [wkok.openai-clojure.api :as openai])
   (:import
    [clojure.lang ExceptionInfo]))
 
@@ -104,7 +104,8 @@
     (testing "basic completion"
       (let [result (sut/chat-completion
                     {:model "gpt-4"
-                     :msgs  [{:user "Hi"}]} {})]
+                     :msgs  [{:user "Hi"}]}
+                    {})]
         (is (= {:content "Hello"} result))))
 
     (testing "with tools"

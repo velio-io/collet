@@ -11,30 +11,30 @@
    [tech.v3.libs.arrow :as arrow]
    [tech.v3.resource :as resource])
   (:import
-    (clojure.lang BigInt ExceptionInfo)
-    [java.io Closeable File FileOutputStream]
-    (java.lang AutoCloseable)
-    [java.math BigDecimal BigInteger RoundingMode]
-    [java.nio.channels FileChannel SeekableByteChannel]
-    [java.nio.file OpenOption Path Paths StandardOpenOption]
-    [java.time Duration Instant LocalDate LocalDateTime LocalTime ZoneOffset]
-    [java.util Date Map UUID]
-    [org.apache.arrow.memory RootAllocator]
-    [org.apache.arrow.vector
-     BigIntVector BitVector DateDayVector Decimal256Vector DecimalVector DurationVector FieldVector Float4Vector
-     Float8Vector IntVector SmallIntVector TimeMicroVector TimeMilliVector TimeNanoVector TimeSecVector
-     TimeStampMicroVector TimeStampMilliVector TimeStampNanoVector TinyIntVector UInt1Vector UInt2Vector UInt4Vector
-     UInt8Vector VarCharVector VectorSchemaRoot]
-    [org.apache.arrow.vector.complex FixedSizeListVector ListVector MapVector StructVector]
-    [org.apache.arrow.vector.complex.impl UnionListWriter]
-    [org.apache.arrow.vector.holders NullableDurationHolder]
-    [org.apache.arrow.vector.ipc ArrowFileReader ArrowFileWriter ArrowReader]
-    [org.apache.arrow.vector.types DateUnit FloatingPointPrecision TimeUnit]
-    [org.apache.arrow.vector.types.pojo
-     ArrowType ArrowType$Bool ArrowType$Date ArrowType$Decimal ArrowType$Duration ArrowType$FixedSizeList ArrowType$FloatingPoint
-     ArrowType$Int ArrowType$List ArrowType$Map ArrowType$Struct ArrowType$Time ArrowType$Timestamp ArrowType$Utf8 Field FieldType
-     Schema]
-    [org.apache.arrow.vector.util Text]))
+   (clojure.lang BigInt ExceptionInfo)
+   [java.io Closeable File FileOutputStream]
+   (java.lang AutoCloseable)
+   [java.math BigDecimal BigInteger RoundingMode]
+   [java.nio.channels FileChannel SeekableByteChannel]
+   [java.nio.file OpenOption Path Paths StandardOpenOption]
+   [java.time Duration Instant LocalDate LocalDateTime LocalTime ZoneOffset]
+   [java.util Date Map UUID]
+   [org.apache.arrow.memory RootAllocator]
+   [org.apache.arrow.vector
+    BigIntVector BitVector DateDayVector Decimal256Vector DecimalVector DurationVector FieldVector Float4Vector
+    Float8Vector IntVector SmallIntVector TimeMicroVector TimeMilliVector TimeNanoVector TimeSecVector
+    TimeStampMicroVector TimeStampMilliVector TimeStampNanoVector TinyIntVector UInt1Vector UInt2Vector UInt4Vector
+    UInt8Vector VarCharVector VectorSchemaRoot]
+   [org.apache.arrow.vector.complex FixedSizeListVector ListVector MapVector StructVector]
+   [org.apache.arrow.vector.complex.impl UnionListWriter]
+   [org.apache.arrow.vector.holders NullableDurationHolder]
+   [org.apache.arrow.vector.ipc ArrowFileReader ArrowFileWriter ArrowReader]
+   [org.apache.arrow.vector.types DateUnit FloatingPointPrecision TimeUnit]
+   [org.apache.arrow.vector.types.pojo
+    ArrowType ArrowType$Bool ArrowType$Date ArrowType$Decimal ArrowType$Duration ArrowType$FixedSizeList ArrowType$FloatingPoint
+    ArrowType$Int ArrowType$List ArrowType$Map ArrowType$Struct ArrowType$Time ArrowType$Timestamp ArrowType$Utf8 Field FieldType
+    Schema]
+   [org.apache.arrow.vector.util Text]))
 
 
 (def schema-version 1)

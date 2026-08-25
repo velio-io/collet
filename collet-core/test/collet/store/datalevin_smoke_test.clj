@@ -24,8 +24,9 @@
 
 (defn- delete-store! [^Path path]
   (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
-    (doseq [entry (sort-by str #(compare %2 %1)
-                          (iterator-seq (.iterator paths)))]
+    (doseq [entry (sort-by str
+                           #(compare %2 %1)
+                           (iterator-seq (.iterator paths)))]
       (Files/deleteIfExists ^Path entry))))
 
 
@@ -40,10 +41,11 @@
     (try
       (let [conn (d/create-conn path smoke-schema)]
         (try
-          (d/transact! conn [{:smoke/id :one
-                              :smoke/value 42}])
+          (d/transact! conn
+            [{:smoke/id    :one
+              :smoke/value 42}])
           (finally
-            (d/close conn))))
+           (d/close conn))))
       (let [reopened (d/get-conn path smoke-schema)]
         (try
           (is (= 42
@@ -55,8 +57,8 @@
                       (d/db reopened)
                       :one)))
           (finally
-            (d/close reopened))))
-        (finally
-          (delete-store! store-path)))
+           (d/close reopened))))
+      (finally
+       (delete-store! store-path)))
     (is (not (Files/exists store-path
                            (make-array LinkOption 0))))))

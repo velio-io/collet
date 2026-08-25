@@ -1,10 +1,10 @@
 (ns collet.actions.queue-test
   (:require
    [clojure.test :refer :all]
+   [collet.actions.queue :as sut]
    [collet.core :as collet]
    [collet.test-fixtures :as tf]
    [cues.queue :as q]
-   [collet.actions.queue :as sut]
    [tech.v3.dataset :as ds]))
 
 
@@ -14,8 +14,9 @@
 (deftest write-into-queue-test
   (testing "writing into a queue"
     (let [input    [{:a 1 :b 2} {:a 3 :b 4}]
-          queue    (q/queue :write-test {:queue-path "./tmp/queues"
-                                         :roll-cycle :fast-daily})
+          queue    (q/queue :write-test
+                            {:queue-path "./tmp/queues"
+                             :roll-cycle :fast-daily})
           appender (q/appender queue)
           tailer   (q/tailer queue)]
 

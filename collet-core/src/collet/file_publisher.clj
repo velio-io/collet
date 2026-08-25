@@ -1,11 +1,11 @@
 (ns collet.file-publisher
   (:require
-   [clojure.walk :as w]
-   [clojure.string :as str]
    [clojure.java.io :as io]
-   [com.brunobonacci.mulog.publisher]
+   [clojure.string :as str]
+   [clojure.walk :as w]
    [com.brunobonacci.mulog.buffer :as rb]
    [com.brunobonacci.mulog.common.json :as json]
+   [com.brunobonacci.mulog.publisher]
    [com.brunobonacci.mulog.utils :as ut])
   (:import
    [com.brunobonacci.mulog.publisher PPublisher]

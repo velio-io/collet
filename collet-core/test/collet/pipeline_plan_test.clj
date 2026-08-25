@@ -20,9 +20,9 @@
 
 
 (deftest compile-pipeline-produces-durable-data
-  (testing "version defaults to one and the plan round-trips as EDN"
+  (testing "version remains unassigned until persistence and the plan round-trips as EDN"
     (let [pipeline (collet/compile-pipeline minimal-pipeline)]
-      (is (= 1 (:version pipeline)))
+      (is (not (contains? pipeline :version)))
       (is (= pipeline (edn/read-string (pr-str pipeline))))
       (is (map? pipeline))))
 

@@ -45,8 +45,9 @@
 
 (defn fold
   "Collect items into a vector. Item can be updated with provided value."
-  {:malli/schema [:=> [:cat fold-params-spec
-                       [:maybe [:vector :any]]]
+  {:malli/schema [:=>
+                  [:cat fold-params-spec
+                   [:maybe [:vector :any]]]
                   [:vector :any]]}
   [{:keys [into op item in with]
     :or   {into []}}
@@ -57,14 +58,17 @@
       (conj data (conjoin item in with)))))
 
 
-(defmethod action/action-fn :fold [_]
+(defmethod action/action-fn :fold
+  [_]
   fold)
 
 
-(defmethod action/prep :fold [action-spec]
+(defmethod action/prep :fold
+  [action-spec]
   (common/prep-stateful-action action-spec))
 
 
-(defmethod action/expand :fold [task _action]
+(defmethod action/expand :fold
+  [task _action]
   ;; Keep latest state from task as fold will accumulate value
   (assoc task :state-format (or (:state-format task) :latest)))

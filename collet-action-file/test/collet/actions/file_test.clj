@@ -1,14 +1,14 @@
 (ns collet.actions.file-test
   (:require
-   [clojure.test :refer :all]
-   [clojure.java.io :as io]
-   [clj-test-containers.core :as tc]
    [charred.api :as charred]
-   [next.jdbc :as jdbc]
+   [clj-test-containers.core :as tc]
+   [clojure.java.io :as io]
+   [clojure.test :refer :all]
+   [collet.actions.file :as sut]
+   [collet.core :as collet]
    [collet.test-containers :as containers]
    [collet.test-fixtures :as tf]
-   [collet.core :as collet]
-   [collet.actions.file :as sut]
+   [next.jdbc :as jdbc]
    [tech.v3.dataset :as ds]))
 
 

@@ -6,9 +6,9 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
-    [java.net InetAddress ServerSocket]
-    [java.nio.file Files]
-    [java.util.concurrent TimeUnit]))
+   [java.net InetAddress ServerSocket]
+   [java.nio.file Files]
+   [java.util.concurrent TimeUnit]))
 
 
 (def ^:private nrepl-client-script
@@ -170,7 +170,7 @@
         {:keys [exit out err]} (shell/sh "clojure" "-M:dev" "-e" code)]
     (is (zero? exit) (str out err))
     (is (str/includes? out "dev-repl-contract-ok") out)
-    (is (str/includes? user-source ":no-reload '#{user}") user-source)))
+    (is (str/includes? user-source ":no-reload '#{user playground}") user-source)))
 
 
 (deftest repository-formatter-ignores-generated-target-files

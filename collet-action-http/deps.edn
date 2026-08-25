@@ -1,19 +1,19 @@
 {:collet/artifact
- {:description "HTTP actions for Collet"
+ {:description       "HTTP actions for Collet"
   :public-namespaces [collet.actions.http]
-  :publish? true
-  :kind :library}
+  :publish?          true
+  :kind              :library}
 
  :paths ["src"]
- :deps {org.clojure/clojure        {:mvn/version "1.12.5"}
-        io.velio/collet-core       {:local/root "../collet-core"}
-        hato/hato                  {:mvn/version "1.0.0"}
-        com.cnuernber/charred      {:mvn/version "1.041"}
-        diehard/diehard            {:mvn/version "0.12.1"}}
+ :deps {org.clojure/clojure   {:mvn/version "1.12.5"}
+        io.velio/collet-core  {:local/root "../collet-core"}
+        hato/hato             {:mvn/version "1.0.0"}
+        com.cnuernber/charred {:mvn/version "1.041"}
+        diehard/diehard       {:mvn/version "0.12.1"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
-         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}}}
+         :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+         :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                       "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                       "--enable-native-access=ALL-UNNAMED"]
+         :main-opts   ["-m" "cognitect.test-runner"]}}}

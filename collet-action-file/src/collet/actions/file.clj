@@ -1,13 +1,13 @@
 (ns collet.actions.file
   (:require
-   [clojure.java.io :as io]
    [charred.api :as charred]
-   [ham-fisted.lazy-noncaching :as lznc]
-   [tech.v3.dataset :as ds]
-   [tech.v3.dataset.protocols :as ds-proto]
+   [clojure.java.io :as io]
+   [collet.action :as action]
    [collet.actions.http :as http]
    [collet.utils :as utils]
-   [collet.action :as action])
+   [ham-fisted.lazy-noncaching :as lznc]
+   [tech.v3.dataset :as ds]
+   [tech.v3.dataset.protocols :as ds-proto])
   (:import
    [java.io InputStream OutputStream]
    [java.net URI URISyntaxException]))
@@ -29,8 +29,10 @@
   [dataset file format csv-header?]
   (case format
     :json (ds/write! dataset file {:file-type :json})
-    :csv (ds/write! dataset file {:headers?  csv-header?
-                                  :file-type :csv})))
+    :csv (ds/write! dataset
+                    file
+                    {:headers?  csv-header?
+                     :file-type :csv})))
 
 
 (defn dataset-seq->csv
@@ -108,9 +110,12 @@
         (io/copy in out))
 
       (and (string? input) (is-uri? input))
-      (with-open [in  ^InputStream (-> (assoc request-options :url input :as :stream)
-                                       (http/make-request)
-                                       :body)
+      (with-open [in  ^InputStream
+                      (-> (assoc request-options :url
+                                 input :as
+                                 :stream)
+                          (http/make-request)
+                          :body)
                   out ^OutputStream (io/output-stream file)]
         (io/copy in out))
 
@@ -130,5 +135,6 @@
      :path      (.getAbsolutePath file)}))
 
 
-(defmethod action/action-fn ::sink [_]
+(defmethod action/action-fn ::sink
+  [_]
   write-into-file)

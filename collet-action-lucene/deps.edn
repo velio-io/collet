@@ -1,21 +1,21 @@
 {:collet/artifact
- {:description "Lucene actions for Collet"
+ {:description       "Lucene actions for Collet"
   :public-namespaces [collet.actions.lucene]
-  :publish? true
-  :kind :library}
+  :publish?          true
+  :kind              :library}
 
  :paths ["src"]
- :deps {org.clojure/clojure                     {:mvn/version "1.12.5"}
-        io.velio/collet-core                    {:local/root "../collet-core"}
-        metosin/malli                           {:mvn/version "0.20.1"}
-        techascent/tech.ml.dataset              {:mvn/version "8.024"}
-        org.apache.lucene/lucene-core           {:mvn/version "10.5.0"}
-        org.apache.lucene/lucene-queryparser    {:mvn/version "10.5.0"}
+ :deps {org.clojure/clojure                  {:mvn/version "1.12.5"}
+        io.velio/collet-core                 {:local/root "../collet-core"}
+        metosin/malli                        {:mvn/version "0.20.1"}
+        techascent/tech.ml.dataset           {:mvn/version "8.024"}
+        org.apache.lucene/lucene-core        {:mvn/version "10.5.0"}
+        org.apache.lucene/lucene-queryparser {:mvn/version "10.5.0"}
         org.apache.lucene/lucene-analysis-common {:mvn/version "10.5.0"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
-         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}}}
+         :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+         :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                       "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                       "--enable-native-access=ALL-UNNAMED"]
+         :main-opts   ["-m" "cognitect.test-runner"]}}}

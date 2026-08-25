@@ -5,8 +5,9 @@
    [collet.store.datalevin :as datalevin]
    [datalevin.core :as d])
   (:import
-    [java.nio.file FileVisitOption Files Path]
-    [java.nio.file.attribute FileAttribute]))
+   [clojure.lang ExceptionInfo]
+   [java.nio.file FileVisitOption Files LinkOption Path]
+   [java.nio.file.attribute FileAttribute]))
 
 
 (defn- temporary-store-path
@@ -19,7 +20,7 @@
 
 (defn- delete-store!
   [^Path path]
-  (when (Files/exists path (make-array java.nio.file.LinkOption 0))
+  (when (Files/exists path (make-array LinkOption 0))
     (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
       (doseq [entry (sort-by str
                              #(compare %2 %1)
@@ -86,132 +87,190 @@
 
 (deftest store-schema-declares-the-complete-durable-domain
   (with-store [db]
-              (is
-               (= #{:pipeline/name
-                    :pipeline/version
-                    :pipeline/key
-                    :pipeline/plan
-                    :pipeline/created-at
-                    :run/id
-                    :run/pipeline
-                    :run/status
-                    :run/created-at
-                    :run/started-at
-                    :run/finished-at
-                    :run/error
-                    :task/id
-                    :task/run
-                    :task/name
-                    :task/key
-                    :task/inputs
-                    :task/output
-                    :task/status
-                    :task/outcome
-                    :task/created-at
-                    :task/started-at
-                    :task/finished-at
-                    :task/error
-                    :artifact/id
-                    :artifact/run
-                    :artifact/task
-                    :artifact/kind
-                    :artifact/format
-                    :artifact/version
-                    :artifact/checksum
-                    :artifact/bytes
-                    :artifact/records
-                    :artifact/schema
-                    :artifact/created-at}
-                  (->> (d/schema (:conn db))
-                       keys
-                       (remove #(= "db" (namespace %)))
-                       set)))
-              (is (= {:db/valueType         :db.type/idoc
-                      :db/domain            "pipeline_plans"
-                      :db.idoc/indexedPaths [:name
-                                             :version
-                                             [:tasks :name]
-                                             [:tasks :inputs]]}
-                     (select-keys
-                      (get (d/schema (:conn db)) :pipeline/plan)
-                      [:db/valueType :db/domain :db.idoc/indexedPaths])))
-              (is (thrown? Exception
-                           (d/transact! (:conn db)
-                             [{:run/id       (random-uuid)
-                               :run/unknown? true}])))
-              (is (thrown? Exception
-                           (d/transact! (:conn db)
-                             [{:run/id     (random-uuid)
-                               :run/status "done"}])))))
+    (is
+     (= #{:pipeline/name
+          :pipeline/version
+          :pipeline/key
+          :pipeline/plan
+          :pipeline/created-at
+          :run/id
+          :run/pipeline
+          :run/status
+          :run/created-at
+          :run/started-at
+          :run/finished-at
+          :run/error
+          :task/id
+          :task/run
+          :task/name
+          :task/key
+          :task/inputs
+          :task/output
+          :task/status
+          :task/outcome
+          :task/created-at
+          :task/started-at
+          :task/finished-at
+          :task/error
+          :artifact/id
+          :artifact/run
+          :artifact/task
+          :artifact/kind
+          :artifact/format
+          :artifact/version
+          :artifact/checksum
+          :artifact/bytes
+          :artifact/records
+          :artifact/schema
+          :artifact/created-at}
+        (->> (d/schema (:conn db))
+             keys
+             (remove #(= "db" (namespace %)))
+             set)))
+    (is (= {:db/valueType         :db.type/idoc
+            :db/domain            "pipeline_plans"
+            :db.idoc/indexedPaths [:name
+                                   :version
+                                   [:tasks :name]
+                                   [:tasks :inputs]]}
+           (select-keys
+            (get (d/schema (:conn db)) :pipeline/plan)
+            [:db/valueType :db/domain :db.idoc/indexedPaths])))
+    (is (thrown? Exception
+                 (d/transact! (:conn db)
+                   [{:run/id       (random-uuid)
+                     :run/unknown? true}])))
+    (is (thrown? Exception
+                 (d/transact! (:conn db)
+                   [{:run/id     (random-uuid)
+                     :run/status "done"}])))))
 
 
 (deftest pipeline-plan-is-a-round-trippable-idoc
-  (with-store
-   [db]
-   (store/save-pipeline! db pipeline-with-edn-values)
-   (let [loaded (store/load-pipeline db :orders 1)]
-     (is (= pipeline-with-edn-values loaded))
-     (is (= {:collet.store.datalevin/list [:a :b]}
-            (get-in loaded [:tasks 0 :actions 0 :params :list-marker])))
-     (is (= {:collet.store.datalevin/entries [[:a 1]]}
-            (get-in loaded [:tasks 0 :actions 0 :params :entries-marker])))
-     (is (= [{:collet.store.datalevin/list [:nested]}]
-            (get-in loaded [:tasks 0 :actions 0 :params :nested-marker]))))
-   (is (= 1
-          (d/q '[:find (count ?pipeline) .
-                 :where
-                 [(idoc-match $ :pipeline/plan {:tasks {:name :fetch}})
-                  [[?pipeline]]]]
-               (d/db (:conn db)))))
-   (is
-    (nil?
-     (d/q '[:find (count ?pipeline) .
-            :where
-            [(idoc-match
-              $
-              :pipeline/plan
-              {:tasks {:actions {:params {:missing (nil?)}}}})
-             [[?pipeline]]]]
-          (d/db (:conn db)))))))
+  (with-store [db]
+    (store/save-pipeline! db {} pipeline-with-edn-values)
+    (let [loaded (store/load-pipeline db :orders 1)]
+      (is (= pipeline-with-edn-values loaded))
+      (is (= {:collet.store.datalevin/list [:a :b]}
+             (get-in loaded [:tasks 0 :actions 0 :params :list-marker])))
+      (is (= {:collet.store.datalevin/entries [[:a 1]]}
+             (get-in loaded [:tasks 0 :actions 0 :params :entries-marker])))
+      (is (= [{:collet.store.datalevin/list [:nested]}]
+             (get-in loaded [:tasks 0 :actions 0 :params :nested-marker]))))
+    (is (= 1
+           (d/q '[:find (count ?pipeline) .
+                  :where
+                  [(idoc-match $ :pipeline/plan {:tasks {:name :fetch}})
+                   [[?pipeline]]]]
+                (d/db (:conn db)))))
+    (is
+     (nil?
+      (d/q '[:find (count ?pipeline) .
+             :where
+             [(idoc-match
+               $
+               :pipeline/plan
+               {:tasks {:actions {:params {:missing (nil?)}}}})
+              [[?pipeline]]]]
+           (d/db (:conn db)))))))
 
 
 (deftest literal-json-null-is-not-supported
   (with-store [db]
-              (is (thrown?
-                   clojure.lang.ExceptionInfo
-                   (store/save-pipeline!
-                    db
-                    (assoc-in pipeline-v1
-                     [:tasks 0 :actions 0 :params]
-                     {:value :json/null}))))))
+    (is (thrown?
+         ExceptionInfo
+         (store/save-pipeline!
+          db
+          {}
+          (assoc-in pipeline-v1
+           [:tasks 0 :actions 0 :params]
+           {:value :json/null}))))))
 
 
-(deftest pipeline-revisions-are-immutable
+(deftest pipeline-revision-save-modes
   (with-store [db]
-              (testing "an equal revision is idempotent"
-                (is (= pipeline-v1 (store/save-pipeline! db pipeline-v1)))
-                (is (= pipeline-v1 (store/save-pipeline! db pipeline-v1))))
+    (let [unversioned-v1  (dissoc pipeline-v1 :version)
+          pipeline-v2     (assoc pipeline-v1
+                            :version 2
+                            :max-parallelism 2)
+          pipeline-v3     (assoc pipeline-v2
+                            :version 3
+                            :max-parallelism 3)
+          pipeline-v4     (assoc pipeline-v3
+                            :version 4
+                            :max-parallelism 4)
+          dev-pipeline-v1 (assoc pipeline-v1 :max-parallelism 5)
+          dev-pipeline-v4 (assoc pipeline-v4 :max-parallelism 6)]
+      (testing "normal mode assigns the first omitted version"
+        (is (= pipeline-v1
+               (store/save-pipeline! db {} unversioned-v1))))
 
-              (testing "a conflicting plan requires a version bump"
-                (let [error (try
-                              (store/save-pipeline!
-                               db
-                               (assoc pipeline-v1 :max-parallelism 2))
-                              nil
-                              (catch clojure.lang.ExceptionInfo error
-                                error))]
-                  (is (= :collet.error/pipeline-revision-conflict
-                         (:collet.error/type (ex-data error))))))
+      (testing "equal explicit and omitted plans are idempotent"
+        (is (= pipeline-v1 (store/save-pipeline! db {} pipeline-v1)))
+        (is (= pipeline-v1 (store/save-pipeline! db {} unversioned-v1))))
 
-              (testing "versions coexist and latest/exact loading works"
-                (let [pipeline-v2 (assoc pipeline-v1
-                                    :version 2
-                                    :max-parallelism 2)]
-                  (store/save-pipeline! db pipeline-v2)
-                  (is (= pipeline-v1 (store/load-pipeline db :orders 1)))
-                  (is (= pipeline-v2 (store/load-pipeline db :orders 2)))
-                  (is (= pipeline-v2 (store/load-pipeline db :orders)))
-                  (is (nil? (store/load-pipeline db :missing)))))))
+      (testing "a changed explicit latest revision allocates the next revision"
+        (is (= pipeline-v2
+               (store/save-pipeline!
+                db
+                {}
+                (assoc pipeline-v1 :max-parallelism 2))))
+        (is (= pipeline-v1 (store/load-pipeline db :orders 1)))
+        (is (= pipeline-v2 (store/load-pipeline db :orders 2)))
+        (is (= pipeline-v2 (store/load-pipeline db :orders))))
+
+      (testing "a changed omitted plan allocates the next revision"
+        (is (= pipeline-v3
+               (store/save-pipeline! db {} (dissoc pipeline-v3 :version))))
+        (is (= pipeline-v3 (store/load-pipeline db :orders 3)))
+        (is (= pipeline-v3 (store/load-pipeline db :orders))))
+
+      (testing "an explicit next revision is accepted"
+        (is (= pipeline-v4 (store/save-pipeline! db {} pipeline-v4)))
+        (is (= pipeline-v4 (store/load-pipeline db :orders 4)))
+        (is (= pipeline-v4 (store/load-pipeline db :orders))))
+
+      (testing "dev mode replaces an exact revision without changing latest"
+        (is (= dev-pipeline-v1
+               (store/save-pipeline! db {:dev? true} dev-pipeline-v1)))
+        (is (= dev-pipeline-v1 (store/load-pipeline db :orders 1)))
+        (is (= pipeline-v2 (store/load-pipeline db :orders 2)))
+        (is (= pipeline-v4 (store/load-pipeline db :orders 4)))
+        (is (= pipeline-v4 (store/load-pipeline db :orders)))
+        (is (= 1
+               (d/q '[:find (count ?pipeline) .
+                      :in $ ?name ?version
+                      :where
+                      [?pipeline :pipeline/name ?name]
+                      [?pipeline :pipeline/version ?version]]
+                    (d/db (:conn db))
+                    :orders
+                    1))))
+
+      (testing "dev mode uses an omitted version to replace the latest revision"
+        (is (= dev-pipeline-v4
+               (store/save-pipeline!
+                db
+                {:dev? true}
+                (dissoc dev-pipeline-v4 :version))))
+        (is (= dev-pipeline-v1 (store/load-pipeline db :orders 1)))
+        (is (= dev-pipeline-v4 (store/load-pipeline db :orders 4)))
+        (is (= dev-pipeline-v4 (store/load-pipeline db :orders))))
+
+      (testing "normal mode rejects changed stale explicit revisions"
+        (let [error (try
+                      (store/save-pipeline!
+                       db
+                       {}
+                       (assoc pipeline-v1 :max-parallelism 7))
+                      nil
+                      (catch ExceptionInfo error
+                        error))]
+          (is (= :collet.error/pipeline-revision-conflict
+                 (:collet.error/type (ex-data error))))
+          (is (= dev-pipeline-v1 (store/load-pipeline db :orders 1)))
+          (is (= dev-pipeline-v4 (store/load-pipeline db :orders)))
+          (is (nil? (store/load-pipeline db :missing))))))))
 
 
 (deftest pipeline-runs-and-task-references-survive-reopen
@@ -240,7 +299,7 @@
                      :task/created-at created-at}]
         db         (datalevin/store {:dir (str path)})]
     (try
-      (store/save-pipeline! db pipeline-v1)
+      (store/save-pipeline! db {} pipeline-v1)
       (is (= run (store/create-run! db run task-runs)))
       (store/update-run! db run-id {:run/status :paused})
       (store/update-task! db
@@ -275,142 +334,142 @@
 
 (deftest task-completion-registers-direct-artifacts-and-derived-lineage
   (with-store
-   [db]
-   (let [run-id (random-uuid)
-         source-id (random-uuid)
-         target-id (random-uuid)
-         artifact-id (random-uuid)
-         now (System/currentTimeMillis)
-         run {:run/id         run-id
-              :run/pipeline   {:pipeline/name :orders :pipeline/version 1}
-              :run/status     :running
-              :run/created-at now
-              :run/started-at now}
-         task-runs [{:task/id         source-id
-                     :task/run        run-id
-                     :task/name       :source
-                     :task/status     :waiting
-                     :task/inputs     []
-                     :task/created-at now}
-                    {:task/id         target-id
-                     :task/run        run-id
-                     :task/name       :target
-                     :task/status     :waiting
-                     :task/inputs     [source-id]
-                     :task/created-at now}]
-         source-artifact
-         {:artifact/id         (random-uuid)
-          :artifact/run-id     run-id
-          :artifact/task-id    source-id
-          :artifact/kind       :scalar
-          :artifact/format     :edn
-          :artifact/version    1
-          :artifact/checksum   "sha256:source"
-          :artifact/bytes      1
-          :artifact/created-at now}
-         source-output
-         {:output/kind :scalar
-          :output/ref  [:artifact/id (:artifact/id source-artifact)]}
-         artifact
-         {:artifact/id         artifact-id
-          :artifact/run-id     run-id
-          :artifact/task-id    target-id
-          :artifact/kind       :dataset
-          :artifact/format     :parquet
-          :artifact/version    1
-          :artifact/checksum   "sha256:target"
-          :artifact/bytes      2
-          :artifact/records    2
-          :artifact/schema     {:version 1
-                                :fields  [{:key :id :name "id" :type :int64}]}
-          :artifact/created-at now}
-         output
-         {:output/kind :dataset
-          :output/ref  [:artifact/id artifact-id]}]
-     (store/save-pipeline! db pipeline-v1)
-     (store/create-run! db run task-runs)
-     (store/complete-task! db
-                           source-id
-                           {:task/status      :completed
-                            :task/outcome     :computed
-                            :task/finished-at now
-                            :artifact         source-artifact
-                            :output           source-output})
-     (store/complete-task! db
-                           target-id
-                           {:task/status      :completed
-                            :task/outcome     :computed
-                            :task/finished-at now
-                            :artifact         artifact
-                            :output           output})
-     (is (= output (store/get-task-output db target-id)))
-     (is (= :computed
-            (:task/outcome
-             (some #(when (= target-id (:task/id %)) %)
-                   (store/get-task-runs db run-id)))))
-     (is (= artifact (store/get-artifact db artifact-id)))
-     (is (= [source-id]
-            (mapv :task/id (store/get-lineage db target-id :upstream))))
-     (is (= [target-id]
-            (mapv :task/id (store/get-lineage db source-id :downstream))))
+    [db]
+    (let [run-id (random-uuid)
+          source-id (random-uuid)
+          target-id (random-uuid)
+          artifact-id (random-uuid)
+          now (System/currentTimeMillis)
+          run {:run/id         run-id
+               :run/pipeline   {:pipeline/name :orders :pipeline/version 1}
+               :run/status     :running
+               :run/created-at now
+               :run/started-at now}
+          task-runs [{:task/id         source-id
+                      :task/run        run-id
+                      :task/name       :source
+                      :task/status     :waiting
+                      :task/inputs     []
+                      :task/created-at now}
+                     {:task/id         target-id
+                      :task/run        run-id
+                      :task/name       :target
+                      :task/status     :waiting
+                      :task/inputs     [source-id]
+                      :task/created-at now}]
+          source-artifact
+          {:artifact/id         (random-uuid)
+           :artifact/run-id     run-id
+           :artifact/task-id    source-id
+           :artifact/kind       :scalar
+           :artifact/format     :edn
+           :artifact/version    1
+           :artifact/checksum   "sha256:source"
+           :artifact/bytes      1
+           :artifact/created-at now}
+          source-output
+          {:output/kind :scalar
+           :output/ref  [:artifact/id (:artifact/id source-artifact)]}
+          artifact
+          {:artifact/id         artifact-id
+           :artifact/run-id     run-id
+           :artifact/task-id    target-id
+           :artifact/kind       :dataset
+           :artifact/format     :parquet
+           :artifact/version    1
+           :artifact/checksum   "sha256:target"
+           :artifact/bytes      2
+           :artifact/records    2
+           :artifact/schema     {:version 1
+                                 :fields  [{:key :id :name "id" :type :int64}]}
+           :artifact/created-at now}
+          output
+          {:output/kind :dataset
+           :output/ref  [:artifact/id artifact-id]}]
+      (store/save-pipeline! db {} pipeline-v1)
+      (store/create-run! db run task-runs)
+      (store/complete-task! db
+                            source-id
+                            {:task/status      :completed
+                             :task/outcome     :computed
+                             :task/finished-at now
+                             :artifact         source-artifact
+                             :output           source-output})
+      (store/complete-task! db
+                            target-id
+                            {:task/status      :completed
+                             :task/outcome     :computed
+                             :task/finished-at now
+                             :artifact         artifact
+                             :output           output})
+      (is (= output (store/get-task-output db target-id)))
+      (is (= :computed
+             (:task/outcome
+              (some #(when (= target-id (:task/id %)) %)
+                    (store/get-task-runs db run-id)))))
+      (is (= artifact (store/get-artifact db artifact-id)))
+      (is (= [source-id]
+             (mapv :task/id (store/get-lineage db target-id :upstream))))
+      (is (= [target-id]
+             (mapv :task/id (store/get-lineage db source-id :downstream))))
 
-     (let [{:keys [run released-artifacts]}
-           (store/finalize-run! db
-                                run-id
-                                {:run/status :done :run/finished-at now}
-                                #{target-id})]
-       (is (= :done (:run/status run)))
-       (is (= [(:artifact/id source-artifact)]
-              (mapv :artifact/id released-artifacts)))
-       (is (nil? (store/get-task-output db source-id)))
-       (is (nil? (store/get-artifact db (:artifact/id source-artifact))))
-       (is (= output (store/get-task-output db target-id))))
+      (let [{:keys [run released-artifacts]}
+            (store/finalize-run! db
+                                 run-id
+                                 {:run/status :done :run/finished-at now}
+                                 #{target-id})]
+        (is (= :done (:run/status run)))
+        (is (= [(:artifact/id source-artifact)]
+               (mapv :artifact/id released-artifacts)))
+        (is (nil? (store/get-task-output db source-id)))
+        (is (nil? (store/get-artifact db (:artifact/id source-artifact))))
+        (is (= output (store/get-task-output db target-id))))
 
-     (is (= [artifact-id]
-            (mapv :artifact/id
-                  (:released-artifacts
-                   (store/finalize-run! db run-id {} #{})))))
-     (is (nil? (store/get-artifact db artifact-id)))
-     (is (empty? (:released-artifacts
-                  (store/finalize-run! db run-id {} #{})))))))
+      (is (= [artifact-id]
+             (mapv :artifact/id
+                   (:released-artifacts
+                    (store/finalize-run! db run-id {} #{})))))
+      (is (nil? (store/get-artifact db artifact-id)))
+      (is (empty? (:released-artifacts
+                   (store/finalize-run! db run-id {} #{})))))))
 
 
 (deftest task-runs-use-one-query-with-an-inline-pull
   (with-store [db]
-              (let [run-id    (random-uuid)
-                    fetch-id  (random-uuid)
-                    load-id   (random-uuid)
-                    run       {:run/id         run-id
-                               :run/pipeline   {:pipeline/name    :orders
-                                                :pipeline/version 1}
-                               :run/status     :running
-                               :run/created-at 1
-                               :run/started-at 1}
-                    task-runs [{:task/id         fetch-id
-                                :task/run        run-id
-                                :task/name       :fetch
-                                :task/status     :waiting
-                                :task/inputs     []
-                                :task/created-at 1}
-                               {:task/id         load-id
-                                :task/run        run-id
-                                :task/name       :load
-                                :task/status     :waiting
-                                :task/inputs     [fetch-id]
-                                :task/created-at 1}]
-                    query     d/q
-                    pull      d/pull
-                    queries   (atom 0)
-                    pulls     (atom 0)]
-                (store/save-pipeline! db pipeline-v1)
-                (store/create-run! db run task-runs)
-                (let [tasks (with-redefs [d/q    (fn [& args]
-                                                   (swap! queries inc)
-                                                   (apply query args))
-                                          d/pull (fn [& args]
-                                                   (swap! pulls inc)
-                                                   (apply pull args))]
-                              (store/get-task-runs db run-id))]
-                  (is (= #{fetch-id load-id} (set (map :task/id tasks))))
-                  (is (= 1 @queries))
-                  (is (zero? @pulls))))))
+    (let [run-id    (random-uuid)
+          fetch-id  (random-uuid)
+          load-id   (random-uuid)
+          run       {:run/id         run-id
+                     :run/pipeline   {:pipeline/name    :orders
+                                      :pipeline/version 1}
+                     :run/status     :running
+                     :run/created-at 1
+                     :run/started-at 1}
+          task-runs [{:task/id         fetch-id
+                      :task/run        run-id
+                      :task/name       :fetch
+                      :task/status     :waiting
+                      :task/inputs     []
+                      :task/created-at 1}
+                     {:task/id         load-id
+                      :task/run        run-id
+                      :task/name       :load
+                      :task/status     :waiting
+                      :task/inputs     [fetch-id]
+                      :task/created-at 1}]
+          query     d/q
+          pull      d/pull
+          queries   (atom 0)
+          pulls     (atom 0)]
+      (store/save-pipeline! db {} pipeline-v1)
+      (store/create-run! db run task-runs)
+      (let [tasks (with-redefs [d/q    (fn [& args]
+                                         (swap! queries inc)
+                                         (apply query args))
+                                d/pull (fn [& args]
+                                         (swap! pulls inc)
+                                         (apply pull args))]
+                    (store/get-task-runs db run-id))]
+        (is (= #{fetch-id load-id} (set (map :task/id tasks))))
+        (is (= 1 @queries))
+        (is (zero? @pulls))))))

@@ -64,7 +64,8 @@
                        (subvec acc (inc idx)))
                (vec))
            acc)))
-     x replacement-map)
+     x
+     replacement-map)
     x))
 
 
@@ -144,8 +145,9 @@
    (fn [acc klass-sym]
      (let [klass            (resolve klass-sym)
            short-klass-name (-> (str klass) (string/split #"\.") last symbol)]
-       (assoc acc klass-sym klass
-                  short-klass-name klass)))
+       (assoc acc
+         klass-sym klass
+         short-klass-name klass)))
    {:allow :all}
    classes))
 
@@ -161,8 +163,8 @@
 
            fake-ns (sci/create-ns ns-name)
            publics (ns-publics full-ns-name)
-           sci-ns  (update-vals publics #(sci/copy-var* % fake-ns))
-           acc'    (assoc-in acc [:namespaces full-ns-name] sci-ns)]
+           sci-ns (update-vals publics #(sci/copy-var* % fake-ns))
+           acc' (assoc-in acc [:namespaces full-ns-name] sci-ns)]
        (if (not= full-ns-name ns-name)
          (assoc-in acc' [:ns-aliases ns-name] full-ns-name)
          acc')))

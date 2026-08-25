@@ -4,15 +4,16 @@
    [collet.action :as action]
    [collet.artifact :as artifact]
    [collet.core :as collet]
+   [collet.runtime :as runtime]
    [collet.store :as store]
    [collet.store.datalevin :as datalevin]
    [datalevin.core :as d]
    [tech.v3.dataset :as ds])
   (:import
-    [java.nio.file FileVisitOption Files Path]
-    [java.nio.file.attribute FileAttribute]
-    [java.util UUID]
-    [java.util.concurrent AbstractExecutorService]))
+   [java.nio.file FileVisitOption Files LinkOption Path]
+   [java.nio.file.attribute FileAttribute]
+   [java.util UUID]
+   [java.util.concurrent AbstractExecutorService]))
 
 
 (def task-gate (atom nil))
@@ -100,8 +101,8 @@
    store/Store
    (close! [_]
      (store/close! delegate))
-   (save-pipeline! [_ pipeline]
-     (store/save-pipeline! delegate pipeline))
+   (save-pipeline! [_ ctx pipeline]
+     (store/save-pipeline! delegate ctx pipeline))
    (load-pipeline [_ name]
      (store/load-pipeline delegate name))
    (load-pipeline [_ name version]
@@ -198,7 +199,7 @@
 
 (defn- delete-store!
   [^Path path]
-  (when (Files/exists path (make-array java.nio.file.LinkOption 0))
+  (when (Files/exists path (make-array LinkOption 0))
     (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
       (doseq [entry (sort-by str
                              #(compare %2 %1)
@@ -259,13 +260,30 @@
         ctx    (collet/context
                 {:store db})]
     (try
-      (is (Files/exists path (make-array java.nio.file.LinkOption 0)))
+      (is (Files/exists path (make-array LinkOption 0)))
       (is (map? ctx))
       (is (identical? db (:store ctx)))
       (is (= "./.collet/artifacts" (str (:artifact-dir ctx))))
       (finally
        (collet/close ctx)
        (delete-store! parent)))))
+
+
+(deftest dev-context-replaces-an-existing-pipeline-revision
+  (let [path        (temporary-store-path)
+        db          (datalevin/store {:dir (str path)})
+        ctx         (collet/context {:store db :dev? true})
+        original    (basic-pipeline)
+        replacement (assoc original :max-parallelism 1)]
+    (try
+      (is (true? (:dev? ctx)))
+      (is (= :done (:run/status @(collet/start ctx original {}))))
+      (is (= :done (:run/status @(collet/start ctx replacement {}))))
+      (is (= replacement (collet/load-pipeline ctx :orders 1)))
+      (is (= replacement (collet/load-pipeline ctx :orders)))
+      (finally
+       (collet/close ctx)
+       (delete-store! path)))))
 
 
 (deftest task-future-is-registered-before-execution
@@ -292,11 +310,11 @@
       {#'store/update-task!
        (fn [_ _ changes]
          (merge task changes))
-       #'collet/execute-run-task!
+       #'runtime/execute-run-task!
        (fn [_ _ started-task]
          (swap! task-futures dissoc (:name started-task)))}
       #(do
-         (#'collet/start-ready-task! ctx run-id task)
+         (#'runtime/start-ready-task! ctx run-id task)
          (is (empty? @task-futures))))))
 
 
@@ -418,7 +436,7 @@
               directory  (artifact-directory ctx artifact)]
           (is (= :artifact/id (first output-ref)))
           (is (= :dataset (:artifact/kind artifact)))
-          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (is (Files/exists directory (make-array LinkOption 0)))
           (is (= [{:id 1} {:id 2}]
                  (mapv #(into {} %)
                        (mapcat ds/rows (collet/read-output ctx output-ref)))))
@@ -429,7 +447,7 @@
           (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
           (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
           (is (not (Files/exists directory
-                                 (make-array java.nio.file.LinkOption 0))))))
+                                 (make-array LinkOption 0))))))
       (finally
        (deliver @task-gate true)
        (collet/close ctx)
@@ -475,7 +493,7 @@
                (get-in result [:run/error :message])))
         (is (= :artifact/id (first output)))
         (is (= artifact (store/get-artifact db (second output))))
-        (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+        (is (Files/exists directory (make-array LinkOption 0)))
         (collet/close ctx)
         (let [reopened (collet/context {:data-dir path})]
           (try
@@ -521,7 +539,7 @@
               output-ref (:task/output source)
               artifact   (store/get-artifact (:store ctx) (second output-ref))
               directory  (artifact-directory ctx artifact)]
-          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (is (Files/exists directory (make-array LinkOption 0)))
           (with-redefs [artifact/delete-artifacts!
                         (fn [_ _]
                           (throw (ex-info "delete failed" {})))]
@@ -529,7 +547,7 @@
             (is (= :done (:run/status @run))))
           (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
           (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
-          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))))
+          (is (Files/exists directory (make-array LinkOption 0)))))
       (finally
        (deliver @task-gate true)
        (collet/close ctx)
@@ -559,13 +577,13 @@
               output-ref (:task/output source)
               artifact   (store/get-artifact (:store ctx) (second output-ref))
               directory  (artifact-directory ctx artifact)]
-          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (is (Files/exists directory (make-array LinkOption 0)))
           (deliver @task-gate true)
           (is (= :failed (:run/status @run)))
           (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
           (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
           (is (not (Files/exists directory
-                                 (make-array java.nio.file.LinkOption 0))))))
+                                 (make-array LinkOption 0))))))
       (finally
        (deliver @task-gate true)
        (collet/close ctx)
@@ -595,13 +613,13 @@
               output-ref (:task/output source)
               artifact   (store/get-artifact (:store ctx) (second output-ref))
               directory  (artifact-directory ctx artifact)]
-          (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+          (is (Files/exists directory (make-array LinkOption 0)))
           (collet/stop run)
           (is (= :stopped (:run/status @run)))
           (is (nil? (store/get-task-output (:store ctx) (:task/id source))))
           (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
           (is (not (Files/exists directory
-                                 (make-array java.nio.file.LinkOption 0))))))
+                                 (make-array LinkOption 0))))))
       (finally
        (deliver @task-gate true)
        (collet/close ctx)
@@ -641,8 +659,8 @@
         (is (not= (:artifact/id artifact-1) (:artifact/id artifact-2)))
         (is (not (contains? artifact-1 :artifact/uri)))
         (is (not= directory-1 directory-2))
-        (is (Files/exists directory-1 (make-array java.nio.file.LinkOption 0)))
-        (is (Files/exists directory-2 (make-array java.nio.file.LinkOption 0))))
+        (is (Files/exists directory-1 (make-array LinkOption 0)))
+        (is (Files/exists directory-2 (make-array LinkOption 0))))
       (finally
        (collet/close ctx)
        (delete-store! path)))))
@@ -745,10 +763,10 @@
         (is (= [{:id 1} {:id 2}]
                (mapv #(into {} %)
                      (mapcat ds/rows (collet/read-output ctx output)))))
-        (is (Files/exists directory (make-array java.nio.file.LinkOption 0)))
+        (is (Files/exists directory (make-array LinkOption 0)))
         (collet/close ctx)
         (is (not (Files/exists directory
-                               (make-array java.nio.file.LinkOption 0))))
+                               (make-array LinkOption 0))))
         (let [reopened (collet/context {:data-dir path})]
           (try
             (let [db (d/db (:conn (:store reopened)))

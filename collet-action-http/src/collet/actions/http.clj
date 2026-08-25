@@ -1,13 +1,13 @@
 (ns collet.actions.http
   (:require
+   [charred.api :as charred]
    [clojure.java.io :as io]
    [clojure.string :as string]
-   [collet.utils :as utils]
    [collet.action :as action]
-   [hato.client :as hato]
-   [charred.api :as charred]
+   [collet.utils :as utils]
    [diehard.core :as dh]
-   [diehard.rate-limiter :as rl])
+   [diehard.rate-limiter :as rl]
+   [hato.client :as hato])
   (:import
    [java.io StringReader]))
 
@@ -30,7 +30,7 @@
   (fn [{::keys [rate-limiter] :as options}]
     (if (some? rate-limiter)
       (dh/with-rate-limiter {:ratelimiter rate-limiter}
-        (func (dissoc options ::rate-limiter)))
+                            (func (dissoc options ::rate-limiter)))
       (func options))))
 
 
@@ -57,7 +57,10 @@
       (if (or (some? (:error response))
               (not (unexceptional-request-status? req (:status response))))
         (let [error (or (:error response)
-                        (some-> (:body response) (read-json true) :error :message))]
+                        (some-> (:body response)
+                                (read-json true)
+                                :error
+                                :message))]
           (throw (ex-info (str "Request failed. " error)
                           {:status  (:status response)
                            :error   error
@@ -124,9 +127,12 @@
                         (not (string? body)))
                    (assoc :body (charred/write-json-str body))
 
-                   :always (assoc :method method
-                                  :throw-exceptions false
-                                  :http-client {:redirect-policy :normal}))
+                   :always (assoc :method
+                             method
+                             :throw-exceptions
+                             false
+                             :http-client
+                             {:redirect-policy :normal}))
         response (http-request request)]
     (cond-> response
       (= as :json) (update :body read-json keywordize))))
@@ -140,11 +146,13 @@
       (some? rate) (assoc-in [:params ::rate-limiter] (rl/rate-limiter {:rate rate})))))
 
 
-(defmethod action/action-fn ::request [_]
+(defmethod action/action-fn ::request
+  [_]
   make-request)
 
 
-(defmethod action/prep ::request [action-spec]
+(defmethod action/prep ::request
+  [action-spec]
   (attach-rate-limiter action-spec))
 
 
@@ -154,8 +162,9 @@
 
 (def oauth2-params
   [:map
-   [:url [:or :string
-          [:catn [:template-string :string] [:substitution [:* :any]]]]]
+   [:url
+    [:or :string
+     [:catn [:template-string :string] [:substitution [:* :any]]]]]
    [:method {:optional true :default :post} [:enum :get :post]]
    [:client-id {:optional true} :string]
    [:client-secret {:optional true} :string]
@@ -177,16 +186,17 @@
    (utils/assoc-some {:url         url
                       :method      method
                       :form-params (->> (utils/assoc-some {}
-                                          :client_id client-id
-                                          :client_secret client-secret
-                                          :grant_type grant-type
-                                          :scope (->scope scope))
+                                         :client_id client-id
+                                         :client_secret client-secret
+                                         :grant_type grant-type
+                                         :scope (->scope scope))
                                         (merge auth-data))
                       :as          as
                       :keywordize  keywordize}
-     :basic-auth basic-auth
-     :headers headers)))
+    :basic-auth basic-auth
+    :headers headers)))
 
 
-(defmethod action/action-fn ::oauth2 [_]
+(defmethod action/action-fn ::oauth2
+  [_]
   get-oauth2-token)

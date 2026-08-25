@@ -176,8 +176,7 @@ Let's dive in into some pipeline implementation details.
 The basic structure of pipeline spec can be represented as follows:
 
 ```clojure
-{:name  :my-pipeline
- :version 1
+{:name :my-pipeline
  :deps  {...}
  :max-parallelism 10
  :tasks [...]}
@@ -185,7 +184,8 @@ The basic structure of pipeline spec can be represented as follows:
 
 - `:name` (required): A keyword representing the pipeline name (something meaningful to distinct logs and results from
   other ones).
-- `:version` (optional): A positive integer identifying an immutable pipeline revision. It defaults to `1`.
+- `:version` (optional): A positive integer identifying a pipeline revision. When omitted, the Store assigns a
+  revision when the pipeline is saved.
 - `:tasks` (required): A vector of task.
 - `:deps` (optional): A map with the coordinates of the pipeline dependencies (from maven or clojars). Check the deps
   format [here](./docs/deps.md).
@@ -581,10 +581,9 @@ After adding Collet to your project dependencies, you can use it as follows:
 (def ctx
   (collet/context {:data-dir "./.collet"}))
 
-;; pipeline specifications compile to immutable, persistable data
+;; :version is optional; the Store assigns revision 1 on the first save
 (def my-pipeline-spec
-  {:name    :my-pipeline
-   :version 1
+  {:name  :my-pipeline
    :tasks [...]})
 
 (def my-pipeline
@@ -612,10 +611,14 @@ After adding Collet to your project dependencies, you can use it as follows:
 (collet/close ctx)
 ```
 
-Saving an equal pipeline under the same `[name version]` is idempotent. Saving a different plan with that revision
-fails; increment `:version` for any modification. Durable custom code may be supplied as a quoted function form,
-fully-qualified symbol, or Var. Vars normalize to symbols, while anonymous function objects and other unsupported
-runtime values fail compilation.
+An unversioned pipeline is assigned revision `1` on its first save. Thereafter, an equal unversioned plan reuses the
+latest revision and a changed plan receives the next revision. Equal explicit revisions are also idempotent. For a
+changed explicit plan, normal mode accepts the current latest revision (and creates the next one) or the next revision
+directly; stale or skipped revisions are rejected. For disposable local development only, a Context created with
+`{:dev? true}` replaces the exact explicit revision or the latest revision when `:version` is omitted. It invalidates
+reproducibility for existing runs and must not be used with shared or durable state. Durable custom code may be supplied
+as a quoted function form, fully-qualified symbol, or Var. Vars normalize to symbols, while anonymous function objects
+and other unsupported runtime values fail compilation.
 
 ### Modules and development
 

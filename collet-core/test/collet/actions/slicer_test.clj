@@ -10,8 +10,8 @@
    [collet.utils :as utils]
    [tech.v3.dataset :as ds])
   (:import
-    [java.time LocalDate]
-    [java.time.format DateTimeFormatter]))
+   [java.time LocalDate]
+   [java.time.format DateTimeFormatter]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.slicer))

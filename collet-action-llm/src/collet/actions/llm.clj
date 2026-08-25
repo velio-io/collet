@@ -3,10 +3,10 @@
    [charred.api :as charred]
    [clojure.java.io :as io]
    [clojure.string :as string]
-   [wkok.openai-clojure.api :as openai]
-   [malli.json-schema :as json-schema]
+   [collet.action :as action]
    [collet.utils :as utils]
-   [collet.action :as action])
+   [malli.json-schema :as json-schema]
+   [wkok.openai-clojure.api :as openai])
   (:import
    [java.io ByteArrayOutputStream InputStream]
    [java.util Base64]
@@ -42,7 +42,7 @@
                              (fn [{:keys [name type :required desc]}]
                                [(keyword name) {:type type :description desc}]))
                             (:args tool-spec))
-        required-args (vec (for [arg (:args tool-spec)
+        required-args (vec (for [arg   (:args tool-spec)
                                  :when (:required arg)]
                              (:name arg)))]
     {:type     "function"
@@ -70,11 +70,11 @@
   [{:keys [model msgs tools max-tokens top-p temperature response-format]}
    {:keys [api-key api-endpoint organization]}]
   (let [params      (cond-> (utils/assoc-some
-                              {:model    (or model "gpt-4o")
-                               :messages (map ->open-ai-message msgs)}
-                              :temperature temperature
-                              :top_p top-p
-                              :max_completion_tokens max-tokens)
+                             {:model    (or model "gpt-4o")
+                              :messages (map ->open-ai-message msgs)}
+                             :temperature temperature
+                             :top_p top-p
+                             :max_completion_tokens max-tokens)
                       (seq tools)
                       (assoc :tools (map tool->function tools))
                       (some? response-format)
@@ -82,10 +82,10 @@
         completions (openai/create-chat-completion
                      params
                      (utils/assoc-some
-                       {:throw-exceptions? false}
-                       :api-key api-key
-                       :api-endpoint api-endpoint
-                       :organization organization))]
+                      {:throw-exceptions? false}
+                      :api-key api-key
+                      :api-endpoint api-endpoint
+                      :organization organization))]
     (-> completions
         :choices
         first
@@ -95,9 +95,11 @@
 (defn parse-arguments
   "Parse the arguments of the tool calls."
   [result]
-  (update result :tool_calls
+  (update result
+          :tool_calls
           #(map (fn [tool-call]
-                  (update-in tool-call [:function :arguments]
+                  (update-in tool-call
+                             [:function :arguments]
                              (fn [arguments]
                                (charred/read-json arguments :key-fn keyword))))
                 %)))
@@ -149,7 +151,8 @@
               {:ai
                (if (= :values as)
                  (map (fn [{:keys [function result]}]
-                        {(keyword (:name function)) result}) fn-results)
+                        {(keyword (:name function)) result})
+                      fn-results)
                  (:content
                   (chat-completion
                    {:model           model
@@ -313,11 +316,13 @@
                       (seq images)
                       (with-images images))
         response    (-> (ask-open-ai prompt llm-params llm-options)
-                        last :ai)]
+                        last
+                        :ai)]
     (if (some? response-format)
       (charred/read-json response :key-fn keyword)
       response)))
 
 
-(defmethod action/action-fn ::openai [_]
+(defmethod action/action-fn ::openai
+  [_]
   ask-openai)

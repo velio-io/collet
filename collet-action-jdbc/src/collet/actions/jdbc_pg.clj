@@ -1,8 +1,8 @@
 (ns collet.actions.jdbc-pg
   (:require
-   [next.jdbc.result-set :as rs]
+   [charred.api :as charred]
    [next.jdbc.prepare :as p]
-   [charred.api :as charred])
+   [next.jdbc.result-set :as rs])
   (:import
    [clojure.lang IPersistentMap IPersistentVector]
    [java.sql PreparedStatement]
@@ -19,10 +19,10 @@
 
 
 (extend-protocol p/SettableParameter
-  ;; Convert durations to PGIntervals before inserting into db
-  Duration
-  (set-parameter [^Duration v ^PreparedStatement s ^long i]
-    (.setObject s i (->pg-interval v))))
+ ;; Convert durations to PGIntervals before inserting into db
+ Duration
+ (set-parameter [^Duration v ^PreparedStatement s ^long i]
+   (.setObject s i (->pg-interval v))))
 
 
 (defn <-pg-interval
@@ -37,17 +37,17 @@
 
 
 (extend-protocol rs/ReadableColumn
-  ;; Convert PGIntervals back to durations
-  PGInterval
-  (read-column-by-label [^PGInterval v _]
-    (<-pg-interval v))
-  (read-column-by-index [^PGInterval v _2 _3]
-    (<-pg-interval v)))
-
+ ;; Convert PGIntervals back to durations
+ PGInterval
+ (read-column-by-label [^PGInterval v _]
+   (<-pg-interval v))
+ (read-column-by-index [^PGInterval v _2 _3]
+   (<-pg-interval v)))
 
 
 (def ->json
   charred/write-json-str)
+
 
 (def <-json
   #(charred/read-json % :key-fn keyword))
@@ -67,13 +67,13 @@
 ;; if a SQL parameter is a Clojure hash map or vector, it'll be transformed
 ;; to a PGobject for JSON/JSONB:
 (extend-protocol p/SettableParameter
-  IPersistentMap
-  (set-parameter [m ^PreparedStatement s i]
-    (.setObject s i (->pgobject m)))
+ IPersistentMap
+ (set-parameter [m ^PreparedStatement s i]
+   (.setObject s i (->pgobject m)))
 
-  IPersistentVector
-  (set-parameter [v ^PreparedStatement s i]
-    (.setObject s i (->pgobject v))))
+ IPersistentVector
+ (set-parameter [v ^PreparedStatement s i]
+   (.setObject s i (->pgobject v))))
 
 
 (defn <-pgobject
@@ -91,8 +91,8 @@
 ;; if a row contains a PGobject then we'll convert them to Clojure data
 ;; while reading (if column is either "json" or "jsonb" type):
 (extend-protocol rs/ReadableColumn
-  PGobject
-  (read-column-by-label [^PGobject v _]
-    (<-pgobject v))
-  (read-column-by-index [^PGobject v _2 _3]
-    (<-pgobject v)))
+ PGobject
+ (read-column-by-label [^PGobject v _]
+   (<-pgobject v))
+ (read-column-by-index [^PGobject v _2 _3]
+   (<-pgobject v)))

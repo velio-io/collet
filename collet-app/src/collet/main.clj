@@ -10,8 +10,8 @@
    [collet.utils :as utils]
    [com.brunobonacci.mulog :as ml])
   (:import
-    [java.io File]
-    [java.net URI URISyntaxException]))
+   [java.io File]
+   [java.net URI URISyntaxException]))
 
 
 (defmulti coerce

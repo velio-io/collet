@@ -1,4 +1,4 @@
-{:openai-api-key  #env "OPENAI_API_KEY"
+{:openai-api-key #env "OPENAI_API_KEY"
  :rss-url        "https://www.archiproducts.com/en/products/feed"
  :jdbc-url       "jdbc:postgresql://localhost:5432/products"
  :pg-user        "user"

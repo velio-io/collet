@@ -11,12 +11,16 @@
  {":require"         [:force-nl-body
                       {:list               {:indent 1}
                        :next-inner-restore [[:list :indent]]}]
+  ":import"          [:force-nl-body
+                      {:list               {:indent 1}
+                       :next-inner-restore [[:list :indent]]}]
   "assoc"            :arg1-pair-body
   "assoc-some"       :arg1-pair
   "invoke!"          :arg1
   "transact!"        :arg1-body
   "ml/trace"         :arg1-body
-  "with-transaction" :binding}
+  "with-transaction" :binding
+  "with-store"       :binding}
 
  :remove  {:fn-force-nl #{:noarg1-body}}
  :list    {:wrap-after-multi? false

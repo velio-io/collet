@@ -3,7 +3,7 @@
    [babashka.cli :as cli]
    [clojure.string :as str])
   (:import
-    [clojure.lang ExceptionInfo]))
+   [clojure.lang ExceptionInfo]))
 
 
 (defn usage

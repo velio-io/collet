@@ -1,8 +1,8 @@
 (ns collet.actions.fold-test
   (:require
    [clojure.test :refer :all]
-   [collet.test-fixtures :as tf]
-   [collet.actions.fold :as sut]))
+   [collet.actions.fold :as sut]
+   [collet.test-fixtures :as tf]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.fold))
@@ -20,8 +20,8 @@
 
   (is (= (sut/conjoin {:a [{:b [1 2]}
                            {:b [3 4]}]}
-                  [:a 1 :b]
-                  5)
+                      [:a 1 :b]
+                      5)
          {:a [{:b [1 2]} {:b 5}]}))
 
   (is (= (sut/conjoin [] nil 123)
@@ -40,10 +40,10 @@
          {:a 123 :b 321}))
 
   (is (= (sut/conjoin {:a 123} [:b] {:c 321})
-         {:a 123, :b {:c 321}}))
+         {:a 123 :b {:c 321}}))
 
   (is (= (sut/conjoin {:a 123} [:b 10] 321)
-         {:a 123, :b '(321)})))
+         {:a 123 :b '(321)})))
 
 
 (deftest basic-fold-test
@@ -60,10 +60,10 @@
            [{:a 123 :b 321}]))
 
     (is (= (sut/fold {:item {:a 123} :in [:b] :with {:c 321}} nil)
-           [{:a 123, :b {:c 321}}]))
+           [{:a 123 :b {:c 321}}]))
 
     (is (= (sut/fold {:item {:a 123} :in [:b 10] :with 321} nil)
-           [{:a 123, :b '(321)}])))
+           [{:a 123 :b '(321)}])))
 
   (testing "accumulating value"
     (let [first-iteration  (sut/fold {:item {:a 123} :with {:b 321}} nil)

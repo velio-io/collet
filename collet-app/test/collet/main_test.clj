@@ -11,9 +11,9 @@
    [collet.main :as sut]
    [collet.test-containers :as containers])
   (:import
-    [java.nio.file FileVisitOption Files LinkOption Path]
-    [java.nio.file.attribute FileAttribute]
-    [java.util.regex Pattern]))
+   [java.nio.file FileVisitOption Files LinkOption Path]
+   [java.nio.file.attribute FileAttribute]
+   [java.util.regex Pattern]))
 
 
 (defn- delete-tree!

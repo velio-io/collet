@@ -1,5 +1,6 @@
 (ns applied-science.darkstar
-  (:require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io])
+  (:import [java.util.function Function]))
 
 
 (def ^:dynamic *base-directory* nil)
@@ -20,12 +21,15 @@
     (.put bindings "polyglot.js.allowAllAccess" true)
     (.put bindings "polyglot.js.allowHostAccess" true)
     (.put bindings "polyglot.js.allowHostClassLookup" true)
-    (.put bindings "darkstarReadFile"
-          (reify java.util.function.Function
-            (apply [_ filename]
-              (read-file filename))))
+    (.put bindings
+          "darkstarReadFile"
+          (reify
+           Function
+           (apply [_ filename]
+             (read-file filename))))
     (doto engine
-      (.eval "
+      (.eval
+       "
 async function fetch(path, options) {
   var body = Java.type('clojure.core$slurp').invokeStatic(path,null);
   return {'ok' : true,
@@ -49,7 +53,7 @@ var fs = {'readFile':readFile};
 
 (defn make-js-fn
   [js-text]
-  (let [^java.util.function.Function f (.eval engine js-text)]
+  (let [^Function f (.eval engine js-text)]
     (fn [& args]
       (.apply f (to-array args)))))
 

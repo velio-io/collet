@@ -57,7 +57,7 @@
 
 (reload/init
  {:dirs      reload-dirs
-  :no-reload '#{user}})
+  :no-reload '#{user playground}})
 
 
 (start-publishers)

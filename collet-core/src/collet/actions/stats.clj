@@ -31,8 +31,10 @@
                        :quartiles stats/quartiles
                        nil)]
          (assoc result k (stat-fn column))))
-     {} metrics)))
+     {}
+     metrics)))
 
 
-(defmethod action/action-fn :stats [_]
+(defmethod action/action-fn :stats
+  [_]
   calc-stats)

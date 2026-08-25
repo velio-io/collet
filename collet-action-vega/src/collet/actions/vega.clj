@@ -22,7 +22,8 @@
   "Creates a temp file and returns an info where to store data of the plot."
   [prefix suffix]
   {:file-path (.getAbsolutePath (File/createTempFile prefix suffix))
-   :format :json})
+   :format    :json})
+
 
 (def vega-params-spec
   [:or
@@ -33,9 +34,10 @@
    [:map
     [:vega-lite-spec
      [:map
-      [:data [:or
-              [:map [:values file/input-param-spec]]
-              [:map [:url :string]]]]]]
+      [:data
+       [:or
+        [:map [:values file/input-param-spec]]
+        [:map [:url :string]]]]]]
     [:store-data-files? {:optional true :default false} :boolean]
     [:data {:optional true} data-spec]
     [:svg-file-path :string]]
@@ -44,13 +46,14 @@
     [:vega-spec
      [:map
       [:data
-       [:vector [:or
-                 [:map
-                  [:values file/input-param-spec]
-                  [:name :string]]
-                 [:map
-                  [:url :string]
-                  [:name :string]]]]]]]
+       [:vector
+        [:or
+         [:map
+          [:values file/input-param-spec]
+          [:name :string]]
+         [:map
+          [:url :string]
+          [:name :string]]]]]]]
     [:store-data-files? {:optional true :default false} :boolean]
     [:data {:optional true}
      ;; data name to data file
@@ -66,25 +69,27 @@
    The file with the data is then should be written to the file system."
   [data-spec {:keys [file-path] :as data}]
   (if (and (some? data) (:values data-spec))
-    {:spec (-> data-spec
-               (dissoc :values)
-               (assoc :url (.getAbsolutePath (io/file file-path))))
+    {:spec            (-> data-spec
+                          (dissoc :values)
+                          (assoc :url (.getAbsolutePath (io/file file-path))))
      :values-to-write (:values data-spec)}
 
-    {:spec data-spec
+    {:spec            data-spec
      :values-to-write nil}))
 
 
 (defn write-data-spec!
   "Writes a file for single :data entry"
-  [data-spec {:keys [file-path format csv-header?] :as data
-              :or {csv-header? false}}]
+  [data-spec
+   {:keys [file-path format csv-header?]
+    :as   data
+    :or   {csv-header? false}}]
   (let [{:keys [spec values-to-write]} (update-data-spec data-spec data)]
     (when values-to-write
       (file/write-into-file
-       {:input values-to-write
-        :format format
-        :file-name file-path
+       {:input       values-to-write
+        :format      format
+        :file-name   file-path
         :csv-header? csv-header?}))
     spec))
 
@@ -99,13 +104,13 @@
   [spec store-data-files? data]
   (let [data (or data (make-temp-data "collet-vega-" ".json"))
 
-        svg (try
-              (-> spec
-                  (update :data write-data-spec! data)
-                  charred/write-json-str
-                  darkstar/vega-lite-spec->svg)
-              (catch PolyglotException e
-                (throw (Exception. (str "vega-lite spec is incorrect: " (.getMessage e))))))]
+        svg  (try
+               (-> spec
+                   (update :data write-data-spec! data)
+                   charred/write-json-str
+                   darkstar/vega-lite-spec->svg)
+               (catch PolyglotException e
+                 (throw (Exception. (str "vega-lite spec is incorrect: " (.getMessage e))))))]
 
     (when-not store-data-files?
       (io/delete-file (io/file (:file-path data))))
@@ -116,18 +121,19 @@
 (defn write-vega-into-svg!
   [spec store-data-files? name->data]
   (let [name->data (or name->data
-                       (->> spec :data
+                       (->> spec
+                            :data
                             (map #(vector (:name %)
                                           (make-temp-data "collet-vega-" ".json")))
                             (into {})))
 
-        svg (try
-              (-> spec
-                  (update :data write-vega-data-spec! name->data)
-                  charred/write-json-str
-                  darkstar/vega-spec->svg)
-              (catch PolyglotException e
-                (throw (Exception. (str "vega spec is incorrect: " (.getMessage e))))))]
+        svg        (try
+                     (-> spec
+                         (update :data write-vega-data-spec! name->data)
+                         charred/write-json-str
+                         darkstar/vega-spec->svg)
+                     (catch PolyglotException e
+                       (throw (Exception. (str "vega spec is incorrect: " (.getMessage e))))))]
 
     (when-not store-data-files?
       (doseq [[_ f] name->data]
@@ -164,11 +170,11 @@
                   [:map
                    [:svg-file-path :string]]]}
   [{:keys [vega-lite-spec vega-spec store-data-files? data svg-file-path]
-    :or {store-data-files? false}}]
+    :or   {store-data-files? false}}]
 
-  (let [svg (if (some? vega-lite-spec)
-              (write-vega-lite-into-svg! vega-lite-spec store-data-files? data)
-              (write-vega-into-svg! vega-spec store-data-files? data))
+  (let [svg         (if (some? vega-lite-spec)
+                      (write-vega-lite-into-svg! vega-lite-spec store-data-files? data)
+                      (write-vega-into-svg! vega-spec store-data-files? data))
 
         output-file (io/file svg-file-path)]
 
@@ -179,5 +185,6 @@
     {:svg-file-path svg-file-path}))
 
 
-(defmethod action/action-fn ::sink [_]
+(defmethod action/action-fn ::sink
+  [_]
   render-vega)

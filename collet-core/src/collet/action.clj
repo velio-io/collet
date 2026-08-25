@@ -8,7 +8,8 @@
   :type)
 
 
-(defmethod prep :default [action-spec]
+(defmethod prep :default
+  [action-spec]
   action-spec)
 
 
@@ -20,7 +21,8 @@
     (:type action-spec)))
 
 
-(defmethod expand :default [task-spec _action-spec]
+(defmethod expand :default
+  [task-spec _action-spec]
   task-spec)
 
 
@@ -30,6 +32,7 @@
   :type)
 
 
-(defmethod action-fn :default [action-spec]
+(defmethod action-fn :default
+  [action-spec]
   (throw (ex-info (str "Unknown action type: " (:type action-spec))
                   {:spec action-spec})))

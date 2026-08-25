@@ -114,15 +114,22 @@
           from-idoc))
 
 
-(defn- latest-pipeline-version
+(defn- latest-pipeline-plan
   [conn name]
-  (d/q '[:find (max ?version) .
-         :in $ ?name
-         :where
-         [?pipeline :pipeline/name ?name]
-         [?pipeline :pipeline/version ?version]]
-       (d/db conn)
-       name))
+  (some->
+    (d/q '[:find ?plan .
+           :in $ ?name
+           :where
+           [?pipeline :pipeline/name ?name]
+           [?pipeline :pipeline/version ?version]
+           (not
+            [?newer :pipeline/name ?name]
+            [?newer :pipeline/version ?newer-version]
+            [(> ?newer-version ?version)])
+           [?pipeline :pipeline/plan ?plan]]
+         (d/db conn)
+         name)
+    from-idoc))
 
 
 (defn- run-entity->map
@@ -361,34 +368,62 @@
     (d/close conn)
     nil)
 
-  (save-pipeline! [_ pipeline]
-    (let [{:keys [name version]} pipeline]
+  (save-pipeline! [_ {:keys [dev?]} pipeline]
+    (let [{:keys [name version]} pipeline
+          requested-version      version]
       (d/with-transaction [transaction conn]
-        (let [existing (pipeline-plan transaction name version)]
+        (let [existing (if (some? requested-version)
+                         (pipeline-plan transaction name requested-version)
+                         (latest-pipeline-plan transaction name))]
           (cond
-            (= existing pipeline)
-            pipeline
-
+            ;; pipeline might have or not contain a version
+            ;; if no we need to do comparison without version as existing will always have a version
+            (or (and (some? requested-version)
+                     (= existing pipeline))
+                (and (nil? requested-version)
+                     (= pipeline (dissoc existing :version))))
             existing
-            (throw
-             (ex-info
-              "A different pipeline plan already exists for this name and version."
-              {:collet.error/type :collet.error/pipeline-revision-conflict
-               :name              name
-               :version           version}))
 
-            :else
-            (do
+            ;; mutate existing pipeline, dev only
+            (and existing dev?)
+            (let [version  (:version existing)
+                  pipeline (assoc pipeline :version version)]
               (d/transact! transaction
-                [{:pipeline/name       name
-                  :pipeline/version    version
-                  :pipeline/plan       (to-idoc pipeline)
-                  :pipeline/created-at (System/currentTimeMillis)}])
-              pipeline))))))
+                [{:db/id         [:pipeline/key [name version]]
+                  :pipeline/plan (to-idoc pipeline)}])
+              (pipeline-plan transaction name version))
+
+            ;; new pipeline
+            :else
+            (let [latest         (latest-pipeline-plan transaction name)
+                  latest-version (:version latest)
+                  next-version   (inc (or latest-version 0))]
+              (when (and latest
+                         (some? requested-version)
+                         (not (#{latest-version next-version} requested-version)))
+                (throw
+                 (ex-info
+                  "Invalid pipeline version."
+                  {:collet.error/type :collet.error/pipeline-revision-conflict
+                   :name              name
+                   :requested-version requested-version
+                   :latest-version    latest-version})))
+
+              (let [version (if (and (some? requested-version)
+                                     (or (nil? latest)
+                                         (= requested-version next-version)))
+                              requested-version
+                              next-version)
+                    pipeline (assoc pipeline :version version)]
+                (d/transact! transaction
+                  [{:pipeline/name       name
+                    :pipeline/version    version
+                    :pipeline/plan       (to-idoc pipeline)
+                    :pipeline/created-at (System/currentTimeMillis)}])
+                (pipeline-plan transaction name version))))))))
 
   (load-pipeline [_ name]
-    (when-let [version (latest-pipeline-version conn name)]
-      (pipeline-plan conn name version)))
+    (latest-pipeline-plan conn name))
 
   (load-pipeline [_ name version]
     (pipeline-plan conn name version))
@@ -398,11 +433,11 @@
       (let [run-id           (:run/id run)
             pipeline-name    (get-in run [:run/pipeline :pipeline/name])
             pipeline-version (get-in run [:run/pipeline :pipeline/version])
-            task-id->temp-id (into {}
-                                   (map-indexed
-                                    (fn [index task]
-                                      [(:task/id task) (- (+ index 2))])
-                                    task-runs))
+            task-id->temp-id (->> task-runs
+                                  (map-indexed
+                                   (fn [index task]
+                                     [(:task/id task) (- (+ index 2))]))
+                                  (into {}))
             run-entity       {:db/id          -1
                               :run/id         run-id
                               :run/pipeline   [:pipeline/key [pipeline-name pipeline-version]]
@@ -428,22 +463,22 @@
     (pull-run conn run-id))
 
   (get-task-runs [_ run-id]
-    (mapv
-     task-entity->map
-     (d/q
-      '[:find
-        [(pull
-          ?task
-          [* {:task/run [:run/id]}
-           {:task/inputs [:task/id]}
-           {:task/output [:artifact/id :artifact/kind]}])
-         ...]
-        :in $ ?run-id
-        :where
-        [?run :run/id ?run-id]
-        [?task :task/run ?run]]
-      (d/db conn)
-      run-id)))
+    (->>
+      (d/q
+       '[:find
+         [(pull
+           ?task
+           [* {:task/run [:run/id]}
+            {:task/inputs [:task/id]}
+            {:task/output [:artifact/id :artifact/kind]}])
+          ...]
+         :in $ ?run-id
+         :where
+         [?run :run/id ?run-id]
+         [?task :task/run ?run]]
+       (d/db conn)
+       run-id)
+      (mapv task-entity->map)))
 
   (update-run! [_ run-id changes]
     (d/with-transaction [transaction conn]

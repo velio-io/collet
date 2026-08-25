@@ -7,10 +7,10 @@
    [collet.main :as main]
    [pod.collet.core :as sut])
   (:import
-    (java.io PushbackInputStream)
-    [java.nio.file FileVisitOption Files LinkOption Path]
-    [java.nio.file.attribute FileAttribute]
-    (java.util.concurrent TimeUnit)))
+   (java.io PushbackInputStream)
+   [java.nio.file FileVisitOption Files LinkOption Path]
+   [java.nio.file.attribute FileAttribute]
+   (java.util.concurrent TimeUnit)))
 
 
 (def jvm-options

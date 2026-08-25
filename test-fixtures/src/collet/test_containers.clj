@@ -3,6 +3,7 @@
    [clj-test-containers.core :as tc]
    [next.jdbc :as jdbc]))
 
+
 (defn postgres []
   (-> (tc/create {:image-name    "postgres:16.3"
                   :exposed-ports [5432]
@@ -10,6 +11,7 @@
                                   "POSTGRES_USER"     "test"
                                   "POSTGRES_DB"       "test"}})
       (tc/start!)))
+
 
 (defn mysql []
   (-> (tc/create {:image-name    "mysql:9.0.0"
@@ -19,6 +21,7 @@
                                   "MYSQL_USER"          "test-user"
                                   "MYSQL_PASSWORD"      "test-pass"}})
       (tc/start!)))
+
 
 (defn localstack []
   (-> (tc/create {:image-name    "localstack/localstack:4.14.0"
@@ -32,11 +35,13 @@
                                   "AWS_DEFAULT_REGION"    "eu-west-1"}})
       (tc/start!)))
 
+
 (defn populate-users! [connection]
   (jdbc/execute! connection ["CREATE TABLE users (id SERIAL PRIMARY KEY, user_name TEXT, age INT)"])
   (jdbc/execute! connection ["INSERT INTO users (user_name, age) VALUES ('Alice', 30)"])
   (jdbc/execute! connection ["INSERT INTO users (user_name, age) VALUES ('Bob', 40)"])
   (jdbc/execute! connection ["INSERT INTO users (user_name, age) VALUES ('Charlie', 50)"]))
+
 
 (defn populate-employees! [connection]
   (jdbc/execute! connection ["CREATE TABLE employees (id SERIAL PRIMARY KEY, user_name TEXT, position TEXT)"])

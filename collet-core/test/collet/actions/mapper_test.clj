@@ -2,10 +2,10 @@
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer :all]
-   [tech.v3.dataset :as ds]
-   [collet.test-fixtures :as tf]
+   [collet.actions.mapper :as sut]
    [collet.arrow :as collet.arrow]
-   [collet.actions.mapper :as sut]))
+   [collet.test-fixtures :as tf]
+   [tech.v3.dataset :as ds]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.mapper))

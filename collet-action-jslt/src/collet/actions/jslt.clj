@@ -1,7 +1,7 @@
 (ns collet.actions.jslt
   (:require
-   [malli.core :as m]
-   [collet.action :as action])
+   [collet.action :as action]
+   [malli.core :as m])
   (:import
    [com.fasterxml.jackson.databind JsonNode ObjectMapper]
    [com.schibsted.spt.data.jslt Parser Expression]
@@ -14,10 +14,11 @@
   (cond
     ;; If the node is a JSON object, convert it to a map.
     (.isObject node)
-    (into {} (map (fn [^Map$Entry entry]
-                    ;; Convert field names to keywords and recurse on the value.
-                    [(keyword (.getKey entry))
-                     (parse (.getValue entry))]))
+    (into {}
+          (map (fn [^Map$Entry entry]
+                 ;; Convert field names to keywords and recurse on the value.
+                 [(keyword (.getKey entry))
+                  (parse (.getValue entry))]))
           (iterator-seq (.fields node)))
 
     ;; If the node is a JSON array, convert it to a vector.
@@ -76,11 +77,13 @@
       (parse output))))
 
 
-(defmethod action/action-fn ::apply [_]
+(defmethod action/action-fn ::apply
+  [_]
   apply-jslt-template)
 
 
-(defmethod action/prep ::apply [action-spec]
+(defmethod action/prep ::apply
+  [action-spec]
   (let [template ^String (get-in action-spec [:params :template])]
     (-> action-spec
         (assoc-in [:params ::mapper] (ObjectMapper.))

@@ -8,18 +8,20 @@
    [collet.release :as release]
    [k16.kaven.deploy :as kaven.deploy]))
 
+
 (def packages
   {'example/pkg-a
-   {:fqn 'example/pkg-a
-    :version "1.2.4"
+   {:fqn      'example/pkg-a
+    :version  "1.2.4"
     :release? true
     :deps-edn {:collet/artifact {:publish? true}}}
    'example/pkg-cli
-   {:fqn 'example/pkg-cli
-    :version "1.2.4"
-    :release? true
+   {:fqn        'example/pkg-cli
+    :version    "1.2.4"
+    :release?   true
     :depends-on #{'example/pkg-a}
-    :deps-edn {:collet/artifact {:publish? false}}}})
+    :deps-edn   {:collet/artifact {:publish? false}}}})
+
 
 (defn- exception [f]
   (try
@@ -27,8 +29,10 @@
     nil
     (catch clojure.lang.ExceptionInfo error error)))
 
+
 (defn- release-var [name]
   (ns-resolve 'collet.release name))
+
 
 (deftest plan-shows-only-package-version-tag-and-publication
   (let [output (release/format-plan packages)]
@@ -38,6 +42,7 @@
       (is (str/includes? output text)))
     (is (not (str/includes? output "REASON")))
     (is (not (str/includes? output "CURRENT")))))
+
 
 (deftest preflight-requires-clean-synchronized-main
   (is (= "abc123"
@@ -52,24 +57,26 @@
             "Local main must equal origin/main"]]]
     (is (= message (ex-message (exception #(release/validate-preflight! state)))))))
 
+
 (deftest kaven-deploy-reuses-the-built-jar-and-pom
-  (let [called (atom nil)
-        package (get packages 'example/pkg-a)
+  (let [called   (atom nil)
+        package  (get packages 'example/pkg-a)
         artifact {:jar-file "/tmp/pkg.jar" :pom-file "/tmp/pom.xml"}]
     (with-redefs [kaven.deploy/deploy #(reset! called %)]
       ((release-var 'deploy!) package artifact))
-    (is (= {:jar-path "/tmp/pkg.jar"
-            :pom-path "/tmp/pom.xml"
+    (is (= {:jar-path   "/tmp/pkg.jar"
+            :pom-path   "/tmp/pom.xml"
             :repository {:id "clojars" :url "https://repo.clojars.org/"}}
            @called))))
 
+
 (deftest kaven-deploys-to-a-file-maven-repository
-  (let [root (fs/create-temp-dir {:prefix "collet-kaven-test-"})
-        classes (fs/path root "classes")
-        jar (fs/path root "sample.jar")
-        pom (fs/path root "pom.xml")
+  (let [root       (fs/create-temp-dir {:prefix "collet-kaven-test-"})
+        classes    (fs/path root "classes")
+        jar        (fs/path root "sample.jar")
+        pom        (fs/path root "pom.xml")
         repository (fs/path root "repository")
-        home (fs/path root "home")]
+        home       (fs/path root "home")]
     (try
       (fs/create-dirs classes)
       (fs/create-dirs (fs/path home ".m2"))
@@ -82,26 +89,27 @@
                  "<groupId>example</groupId><artifactId>sample</artifactId>"
                  "<version>1.0.0</version></project>"))
       (b/with-project-root (str root)
-        (b/jar {:class-dir "classes" :jar-file "sample.jar"}))
+                           (b/jar {:class-dir "classes" :jar-file "sample.jar"}))
       (let [original-home (System/getProperty "user.home")]
         (try
           (System/setProperty "user.home" (str home))
           (kaven.deploy/deploy
-           {:jar-path (str jar)
-            :pom-path (str pom)
+           {:jar-path   (str jar)
+            :pom-path   (str pom)
             :repository {:id "test" :url (str (.toUri repository))}})
           (finally
-            (System/setProperty "user.home" original-home))))
+           (System/setProperty "user.home" original-home))))
       (is (fs/regular-file?
            (fs/path repository "example" "sample" "1.0.0" "sample-1.0.0.jar")))
       (is (fs/regular-file?
            (fs/path repository "example" "sample" "1.0.0" "sample-1.0.0.pom")))
       (finally
-        (fs/delete-tree root)))))
+       (fs/delete-tree root)))))
+
 
 (deftest release-builds-and-deploys-all-changed-packages-before-tagging
-  (let [events (atom [])
-        artifacts {'example/pkg-a {:jar-file "/tmp/a.jar" :pom-file "/tmp/a.xml"}
+  (let [events    (atom [])
+        artifacts {'example/pkg-a   {:jar-file "/tmp/a.jar" :pom-file "/tmp/a.xml"}
                    'example/pkg-cli {:uber-file "/tmp/cli.jar"}}]
     (with-redefs-fn
       {(release-var 'fetch-tags!) (fn [_] (swap! events conj [:fetch]))

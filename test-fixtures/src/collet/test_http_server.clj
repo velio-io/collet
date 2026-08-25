@@ -33,7 +33,9 @@
 
 (defn- query-params
   [^HttpExchange exchange]
-  (let [query (some-> exchange .getRequestURI .getRawQuery)]
+  (let [query (some-> exchange
+                      .getRequestURI
+                      .getRawQuery)]
     (if (string/blank? query)
       {}
       (->> (string/split query #"&")
@@ -46,7 +48,8 @@
 
 (defn- int-param
   [params key default-value]
-  (or (some-> (get params key) parse-long)
+  (or (some-> (get params key)
+              parse-long)
       default-value))
 
 
@@ -103,8 +106,8 @@
     (= path "/ws/2/event")
     (let [limit  (int-param params "limit" 10)
           offset (int-param params "offset" 0)]
-      (json-response {:offset offset
-                      :events (mapv event (range offset (+ offset limit)))
+      (json-response {:offset      offset
+                      :events      (mapv event (range offset (+ offset limit)))
                       :event-count 50}))
 
     :else nil))
@@ -118,45 +121,51 @@
 
     (= path "/odata/People")
     (json-response {"@odata.count" 3
-                    "value" [{"FirstName" "Alice"
-                               "LastName" "One"
-                               "AddressInfo" [{"City" {"Name" "Berlin"}}]}
-                              {"FirstName" "Bob"
-                               "LastName" "Two"
-                               "AddressInfo" [{"City" {"Name" "Boston"}}]}
-                              {"FirstName" "Carol"
-                               "LastName" "Three"
-                               "AddressInfo" [{"City" {"Name" "Brussels"}}]}]})
+                    "value"        [{"FirstName"   "Alice"
+                                     "LastName"    "One"
+                                     "AddressInfo" [{"City" {"Name" "Berlin"}}]}
+                                    {"FirstName"   "Bob"
+                                     "LastName"    "Two"
+                                     "AddressInfo" [{"City" {"Name" "Boston"}}]}
+                                    {"FirstName"   "Carol"
+                                     "LastName"    "Three"
+                                     "AddressInfo" [{"City" {"Name" "Brussels"}}]}]})
 
     (= path "/odata/Airports/$count")
     {:status 200 :headers {"Content-Type" "text/plain"} :body (str (count airports))}
 
     (= path "/odata/Airports")
     (let [skip      (int-param params "$skip" 0)
-          requested (some-> (get params "$top") parse-long)
+          requested (some-> (get params "$top")
+                            parse-long)
           page-size (or requested 8)
-          values    (->> airports (drop skip) (take page-size) vec)
+          values    (->> airports
+                         (drop skip)
+                         (take page-size)
+                         vec)
           next-skip (+ skip (count values))]
       (json-response
        (cond-> {"value" values}
          (and (nil? requested) (< next-skip (count airports)))
          (assoc "@odata.nextLink"
-                (str (odata-url) "/Airports?$skip=" next-skip)))))
+           (str (odata-url) "/Airports?$skip=" next-skip)))))
 
     :else nil))
 
 
 (defn- response-for
   [^HttpExchange exchange]
-  (let [path   (some-> exchange .getRequestURI .getPath)
+  (let [path   (some-> exchange
+                       .getRequestURI
+                       .getPath)
         params (query-params exchange)]
     (or (musicbrainz-response path params)
         (odata-response path params)
         (case path
           "/status/204" {:status 204 :headers {} :body ""}
-          "/status/503" {:status 503
+          "/status/503" {:status  503
                          :headers {"Content-Type" "application/json"}
-                         :body (charred/write-json-str {:error {:message "unavailable"}})}
+                         :body    (charred/write-json-str {:error {:message "unavailable"}})}
           {:status 404 :headers {"Content-Type" "text/plain"} :body "not found"}))))
 
 
@@ -174,16 +183,18 @@
 (defn with-server
   [test]
   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
-    (.createContext server "/"
-                    (reify HttpHandler
-                      (handle [_ exchange]
-                        (send-response! exchange (response-for exchange)))))
+    (.createContext server
+                    "/"
+                    (reify
+                     HttpHandler
+                     (handle [_ exchange]
+                       (send-response! exchange (response-for exchange)))))
     (.setExecutor server nil)
     (.start server)
     (reset! base-url
-            (str "http://127.0.0.1:" (.getPort (.getAddress server))))
+      (str "http://127.0.0.1:" (.getPort (.getAddress server))))
     (try
       (test)
       (finally
-        (reset! base-url nil)
-        (.stop server 0)))))
+       (reset! base-url nil)
+       (.stop server 0)))))

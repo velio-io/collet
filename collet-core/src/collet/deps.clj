@@ -30,8 +30,9 @@
    [:coordinates {:optional true}
     [:vector [:catn [:library :symbol] [:version :string]]]]
    [:requires {:optional true}
-    [:vector [:or [:catn [:library :symbol]]
-              [:catn [:library :symbol] [:alias-key [:= :as]] [:alias :symbol]]]]]
+    [:vector
+     [:or [:catn [:library :symbol]]
+      [:catn [:library :symbol] [:alias-key [:= :as]] [:alias :symbol]]]]]
    [:imports {:optional true}
     [:+ :symbol]]])
 

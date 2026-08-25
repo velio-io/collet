@@ -2,19 +2,19 @@
   (:require
    [clojure.string :as str])
   (:import
-    [java.nio ByteBuffer]
-    [java.nio.channels FileChannel]
-    [java.nio.charset StandardCharsets]
-    [java.nio.file Files Path Paths StandardOpenOption]
-    [java.nio.file.attribute FileAttribute]
-    [java.sql Connection DriverManager ResultSet SQLException]
-    [java.time Instant]
-    [java.util Optional]
-    [org.apache.arrow.memory RootAllocator]
-    [org.apache.arrow.vector BigIntVector VectorSchemaRoot]
-    [org.apache.arrow.vector.types.pojo ArrowType$Int Field Schema]
-    [org.lance Dataset Fragment ReadOptions$Builder WriteParams$Builder]
-    [org.lance.schema SqlExpressions$Builder]))
+   [java.nio ByteBuffer]
+   [java.nio.channels FileChannel]
+   [java.nio.charset StandardCharsets]
+   [java.nio.file Files Path Paths StandardOpenOption]
+   [java.nio.file.attribute FileAttribute]
+   [java.sql Connection DriverManager ResultSet SQLException]
+   [java.time Instant]
+   [java.util Optional]
+   [org.apache.arrow.memory RootAllocator]
+   [org.apache.arrow.vector BigIntVector VectorSchemaRoot]
+   [org.apache.arrow.vector.types.pojo ArrowType$Int Field Schema]
+   [org.lance Dataset Fragment ReadOptions$Builder WriteParams$Builder]
+   [org.lance.schema SqlExpressions$Builder]))
 
 
 (def lance-java-version "9.0.1")

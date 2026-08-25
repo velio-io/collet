@@ -1,9 +1,9 @@
 (ns collet.actions.queue
   (:require
-   [tech.v3.dataset :as ds]
-   [cues.queue :as q]
    [collet.action :as action]
-   [collet.utils :as utils]))
+   [collet.utils :as utils]
+   [cues.queue :as q]
+   [tech.v3.dataset :as ds]))
 
 
 (def queue-action-spec
@@ -60,9 +60,11 @@
         (assoc-in [:params ::appender] appender))))
 
 
-(defmethod action/action-fn ::enqueue [_]
+(defmethod action/action-fn ::enqueue
+  [_]
   write-into-queue)
 
 
-(defmethod action/prep ::enqueue [action-spec]
+(defmethod action/prep ::enqueue
+  [action-spec]
   (attach-queue action-spec))

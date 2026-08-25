@@ -1,8 +1,8 @@
 {:collet/artifact
- {:description "OData actions for Collet"
+ {:description       "OData actions for Collet"
   :public-namespaces [collet.actions.odata]
-  :publish? true
-  :kind :library}
+  :publish?          true
+  :kind              :library}
 
  :paths ["src"]
  :deps {org.clojure/clojure         {:mvn/version "1.12.5"}
@@ -11,8 +11,8 @@
         metosin/malli               {:mvn/version "0.20.1"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
-         :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--enable-native-access=ALL-UNNAMED"]
-         :main-opts ["-m" "cognitect.test-runner"]}}}
+         :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+         :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                       "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                       "--enable-native-access=ALL-UNNAMED"]
+         :main-opts   ["-m" "cognitect.test-runner"]}}}

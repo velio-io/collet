@@ -9,11 +9,14 @@
    [k16.kmono.git.tags :as git.tags]
    [k16.kmono.version :as kmono.version]))
 
+
 (defn- fail! [message data]
   (throw (ex-info message data)))
 
+
 (defn- publish? [package]
   (get-in package [:deps-edn :collet/artifact :publish?]))
+
 
 (defn validate-preflight!
   [{:keys [branch status head remote-head]}]
@@ -25,22 +28,27 @@
     (fail! "Local main must equal origin/main" {:head head :remote-head remote-head}))
   head)
 
+
 (defn- ordered [packages]
   (mapv packages (mapcat identity (kmono.graph/parallel-topo-sort packages))))
 
+
 (defn format-plan [packages]
-  (let [rows (into [["PACKAGE" "VERSION" "TAG" "PUBLICATION"]]
-                   (map (fn [package]
-                          [(str (:fqn package)) (:version package)
-                           (kmono.version/create-package-version-tag package)
-                           (if (publish? package) "Maven" "tag only")]))
-                   (ordered packages))
+  (let [rows   (into [["PACKAGE" "VERSION" "TAG" "PUBLICATION"]]
+                     (map (fn [package]
+                            [(str (:fqn package)) (:version package)
+                             (kmono.version/create-package-version-tag package)
+                             (if (publish? package) "Maven" "tag only")]))
+                     (ordered packages))
         widths (apply mapv (fn [& cells] (apply max (map count cells))) rows)]
     (str/join "\n"
-              (map #(str/join "  " (map (fn [width value]
-                                           (format (str "%-" width "s") value))
-                                         widths %))
+              (map #(str/join "  "
+                              (map (fn [width value]
+                                     (format (str "%-" width "s") value))
+                                   widths
+                                   %))
                    rows))))
+
 
 (defn- command! [opts & command]
   (let [{:keys [exit out err]} (apply shell/sh (concat command (mapcat identity opts)))]
@@ -50,52 +58,69 @@
       (fail! "Command failed" {:command (vec command) :exit exit :error err}))
     (str/trim out)))
 
+
 (defn- git-output [root & args]
   (apply command! {} "git" "-C" root args))
+
 
 (defn- fetch-tags! [root]
   (command! {} "git" "-C" root "fetch" "origin" "--tags"))
 
+
 (defn- production-preflight! [root]
   (validate-preflight!
-   {:branch (git-output root "branch" "--show-current")
-    :status (git-output root "status" "--porcelain")
-    :head (git-output root "rev-parse" "HEAD")
+   {:branch      (git-output root "branch" "--show-current")
+    :status      (git-output root "status" "--porcelain")
+    :head        (git-output root "rev-parse" "HEAD")
     :remote-head (git-output root "rev-parse" "origin/main")}))
+
 
 (defn- tag-exists? [root tag]
   (zero? (:exit (shell/sh "git" "-C" root "rev-parse" "--verify" "--quiet" tag))))
 
+
 (defn- ensure-target-tags-absent! [root packages]
   (doseq [package (vals packages)
-          :let [tag (kmono.version/create-package-version-tag package)]
-          :when (tag-exists? root tag)]
+          :let    [tag (kmono.version/create-package-version-tag package)]
+          :when   (tag-exists? root tag)]
     (fail! "Release target tag already exists" {:tag tag})))
+
 
 (defn- quality-gate! [root task]
   (command! {:dir root} "bb" task))
+
 
 (defn- deploy! [package {:keys [jar-file pom-file]}]
   (when-not (and jar-file pom-file)
     (fail! "Publishable package build did not produce JAR and POM"
            {:package (:fqn package)}))
   (kaven.deploy/deploy
-   {:jar-path jar-file
-    :pom-path pom-file
+   {:jar-path   jar-file
+    :pom-path   pom-file
     :repository {:id "clojars" :url "https://repo.clojars.org/"}}))
+
 
 (defn- create-tags! [root packages revision]
   (git.tags/create-tags
-   root {:ref revision
-         :tags (mapv kmono.version/create-package-version-tag (vals packages))}))
+   root
+   {:ref  revision
+    :tags (mapv kmono.version/create-package-version-tag (vals packages))}))
+
 
 (defn- push-tags! [root packages]
-  (apply command! {} "git" "-C" root "push" "--atomic" "origin"
+  (apply command!
+         {}
+         "git"
+         "-C" root
+         "push" "--atomic"
+         "origin"
          (map kmono.version/create-package-version-tag (vals packages))))
+
 
 (defn- candidates [root]
   (let [packages (build/load-packages {:dir root :changes? true})]
     {:packages packages :selected (build/release-packages packages)}))
+
 
 (defn plan
   "Print the changed-package plan without building or publishing."
@@ -103,6 +128,7 @@
   (let [{:keys [selected] :as result} (candidates root)]
     (println (format-plan selected))
     result))
+
 
 (defn release
   "Test, build, deploy, and tag every Kmono release candidate."
@@ -130,5 +156,5 @@
           (create-tags! root selected revision)
           (push-tags! root selected)
           {:revision revision
-           :tags (mapv kmono.version/create-package-version-tag (vals selected))
+           :tags     (mapv kmono.version/create-package-version-tag (vals selected))
            :deployed (mapv :fqn (filter publish? (ordered selected)))})))))

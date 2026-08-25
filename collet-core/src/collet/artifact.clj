@@ -5,23 +5,23 @@
    [collet.arrow :as arrow]
    [collet.durable :as durable])
   (:import
-    [java.io BufferedReader BufferedWriter InputStreamReader OutputStream OutputStreamWriter
-     PushbackReader]
-    [java.lang AutoCloseable]
-    [java.nio.channels FileChannel]
-    [java.nio.charset StandardCharsets]
-    [java.nio.file FileVisitOption Files LinkOption OpenOption Path Paths StandardCopyOption
-     StandardOpenOption]
-    [java.nio.file.attribute FileAttribute]
-    [java.security DigestInputStream DigestOutputStream MessageDigest]
-    [java.sql DriverManager]
-    [java.time Duration Instant LocalDate LocalDateTime LocalTime]
-    [java.util Base64 HexFormat UUID]
-    [java.util.regex Pattern]
-    [org.apache.arrow.c ArrowArrayStream Data]
-    [org.apache.arrow.memory RootAllocator]
-    [org.apache.arrow.vector.ipc ArrowFileReader]
-    [org.duckdb DuckDBConnection DuckDBResultSet]))
+   [java.io BufferedReader BufferedWriter InputStreamReader OutputStream OutputStreamWriter
+    PushbackReader]
+   [java.lang AutoCloseable]
+   [java.nio.channels FileChannel]
+   [java.nio.charset StandardCharsets]
+   [java.nio.file FileVisitOption Files LinkOption OpenOption Path Paths StandardCopyOption
+    StandardOpenOption]
+   [java.nio.file.attribute FileAttribute]
+   [java.security DigestInputStream DigestOutputStream MessageDigest]
+   [java.sql DriverManager]
+   [java.time Duration Instant LocalDate LocalDateTime LocalTime]
+   [java.util Base64 HexFormat UUID]
+   [java.util.regex Pattern]
+   [org.apache.arrow.c ArrowArrayStream Data]
+   [org.apache.arrow.memory RootAllocator]
+   [org.apache.arrow.vector.ipc ArrowFileReader]
+   [org.duckdb DuckDBConnection DuckDBResultSet]))
 
 
 (def ^:private arrow-batch-size 4096)

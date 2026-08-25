@@ -1,10 +1,10 @@
 (ns collet.actions.mapper
   (:require
    [collet.action :as action]
-   [tech.v3.dataset :as ds]
-   [collet.utils :as utils]
+   [collet.actions.common :as common]
    [collet.arrow :as collet.arrow]
-   [collet.actions.common :as common]))
+   [collet.utils :as utils]
+   [tech.v3.dataset :as ds]))
 
 
 (def mapper-params-spec
@@ -24,8 +24,9 @@
 (defn map-sequence
   "Will read values from collection one by one and put them into the action state.
    Useful for iterating over collections."
-  {:malli/schema [:=> [:cat mapper-params-spec
-                       [:maybe mapper-state-spec]]
+  {:malli/schema [:=>
+                  [:cat mapper-params-spec
+                   [:maybe mapper-state-spec]]
                   mapper-state-spec]}
   [{:keys [cat?] data-seq :sequence} prev-state]
   (let [state    (if (nil? prev-state)
@@ -83,16 +84,20 @@
         :next next?))))
 
 
-(defmethod action/action-fn :mapper [_]
+(defmethod action/action-fn :mapper
+  [_]
   map-sequence)
 
 
-(defmethod action/prep :mapper [action-spec]
+(defmethod action/prep :mapper
+  [action-spec]
   (common/prep-stateful-action action-spec))
 
 
-(defmethod action/expand :mapper [task action]
+(defmethod action/expand :mapper
+  [task action]
   ;; Unwraps the mapper bindings and replaces the iterator with the mapper keys
   (let [action-name (:name action)]
-    (utils/replace-all task {:$mapper/item          [:state action-name :current]
-                             :$mapper/has-next-item [:state action-name :next]})))
+    (utils/replace-all task
+                       {:$mapper/item          [:state action-name :current]
+                        :$mapper/has-next-item [:state action-name :next]})))

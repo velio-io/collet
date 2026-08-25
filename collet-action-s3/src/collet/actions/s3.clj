@@ -3,10 +3,10 @@
    [clojure.java.io :as io]
    [cognitect.aws.client.api :as aws]
    [cognitect.aws.credentials :as credentials]
-   [diehard.core :as dh]
-   [collet.utils :as utils]
+   [collet.action :as action]
    [collet.actions.file :as actions.file]
-   [collet.action :as action])
+   [collet.utils :as utils]
+   [diehard.core :as dh])
   (:import
    [java.io ByteArrayInputStream InputStream]
    [java.nio.file Files]))
@@ -17,12 +17,12 @@
   [api {:keys [aws-region aws-key aws-secret endpoint-override]}]
   (aws/client
    (utils/assoc-some {:api api}
-     :region aws-region
-     :credentials-provider (when (and (some? aws-key) (some? aws-secret))
-                             (credentials/basic-credentials-provider
-                              {:access-key-id     aws-key
-                               :secret-access-key aws-secret}))
-     :endpoint-override endpoint-override)))
+    :region aws-region
+    :credentials-provider (when (and (some? aws-key) (some? aws-secret))
+                            (credentials/basic-credentials-provider
+                             {:access-key-id     aws-key
+                              :secret-access-key aws-secret}))
+    :endpoint-override endpoint-override)))
 
 
 (defn invoke!
@@ -49,21 +49,23 @@
 (defn initiate-multipart-upload
   "Initiates the multipart upload process."
   [s3-client bucket key]
-  (let [response (invoke! s3-client :CreateMultipartUpload
-                   {:Bucket bucket
-                    :Key    key})]
+  (let [response (invoke! s3-client
+                  :CreateMultipartUpload
+                  {:Bucket bucket
+                   :Key    key})]
     (:UploadId response)))
 
 
 (defn upload-part
   "Uploads a part of a file to S3."
   [s3-client bucket key upload-id part-number part-content]
-  (let [response (invoke! s3-client :UploadPart
-                   {:Bucket     bucket
-                    :Key        key
-                    :UploadId   upload-id
-                    :PartNumber part-number
-                    :Body       part-content})]
+  (let [response (invoke! s3-client
+                  :UploadPart
+                  {:Bucket     bucket
+                   :Key        key
+                   :UploadId   upload-id
+                   :PartNumber part-number
+                   :Body       part-content})]
     {:ETag       (:ETag response)
      :PartNumber part-number}))
 
@@ -71,11 +73,12 @@
 (defn complete-multipart-upload
   "Completes the multipart upload process."
   [s3-client bucket key upload-id parts]
-  (invoke! s3-client :CompleteMultipartUpload
-    {:Bucket          bucket
-     :Key             key
-     :UploadId        upload-id
-     :MultipartUpload {:Parts parts}}))
+  (invoke! s3-client
+   :CompleteMultipartUpload
+   {:Bucket          bucket
+    :Key             key
+    :UploadId        upload-id
+    :MultipartUpload {:Parts parts}}))
 
 
 (defn multipart-upload
@@ -102,10 +105,11 @@
                             parts)))]
         (complete-multipart-upload s3-client bucket key upload-id parts))
       (catch Exception e
-        (invoke! s3-client :AbortMultipartUpload
-          {:Bucket   bucket
-           :Key      key
-           :UploadId upload-id})
+        (invoke! s3-client
+         :AbortMultipartUpload
+         {:Bucket   bucket
+          :Key      key
+          :UploadId upload-id})
         (throw e)))))
 
 
@@ -149,28 +153,29 @@
                    [:key :string]]]}
   [{:keys [aws-creds bucket format file-name input cat? csv-header?]
     :or   {cat? false}}]
-  (let [s3-client (make-client :s3 aws-creds)
+  (let [s3-client      (make-client :s3 aws-creds)
         {:keys [path]} (actions.file/write-into-file
                         (utils/assoc-some
-                          {:input     input
-                           :file-name file-name
-                           :cat?      cat?}
-                          :format format
-                          :csv-header? csv-header?))
-        file      (io/as-file path)]
+                         {:input     input
+                          :file-name file-name
+                          :cat?      cat?}
+                         :format format
+                         :csv-header? csv-header?))
+        file           (io/as-file path)]
     (dh/with-retry
-      {:retry-on        Exception
-       :delay-ms        1000
-       :max-duration-ms (* 1000 60 2)}
-      (with-open [is (io/input-stream file)]
-        ;; if the file is larger than 5GB, use multipart upload
-        (if (> (Files/size (.toPath file)) five-gb-in-bytes)
-          (multipart-upload s3-client bucket file-name is)
-          ;; regular upload
-          (invoke! s3-client :PutObject
-            {:Bucket bucket
-             :Key    file-name
-             :Body   is}))))
+     {:retry-on        Exception
+      :delay-ms        1000
+      :max-duration-ms (* 1000 60 2)}
+     (with-open [is (io/input-stream file)]
+       ;; if the file is larger than 5GB, use multipart upload
+       (if (> (Files/size (.toPath file)) five-gb-in-bytes)
+         (multipart-upload s3-client bucket file-name is)
+         ;; regular upload
+         (invoke! s3-client
+          :PutObject
+          {:Bucket bucket
+           :Key    file-name
+           :Body   is}))))
     ;; cleanup
     (io/delete-file file)
     ;; return the S3 coordinates
@@ -178,5 +183,6 @@
      :key    file-name}))
 
 
-(defmethod action/action-fn ::sink [_]
+(defmethod action/action-fn ::sink
+  [_]
   upload-file)

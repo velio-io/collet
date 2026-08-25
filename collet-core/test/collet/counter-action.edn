@@ -1,2 +1,2 @@
-{:name   :my-external-action
- :type   :clj/inc}
+{:name :my-external-action
+ :type :clj/inc}

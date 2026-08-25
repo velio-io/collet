@@ -1,13 +1,13 @@
 (ns collet.actions.s3-test
   (:require
-   [clojure.test :refer :all]
-   [clojure.java.io :as io]
    [charred.api :as charred]
    [clj-test-containers.core :as tc]
-   [collet.test-containers :as containers]
-   [collet.test-fixtures :as tf]
+   [clojure.java.io :as io]
+   [clojure.test :refer :all]
+   [collet.actions.s3 :as sut]
    [collet.core :as collet]
-   [collet.actions.s3 :as sut]))
+   [collet.test-containers :as containers]
+   [collet.test-fixtures :as tf]))
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.s3))
@@ -23,9 +23,10 @@
                                             :hostname "localhost"
                                             :port     container-port}}
         s3-client      (sut/make-client :s3 aws-creds)]
-    (sut/invoke! s3-client :CreateBucket
-      {:Bucket                    "test-bucket"
-       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+    (sut/invoke! s3-client
+     :CreateBucket
+     {:Bucket "test-bucket"
+      :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     (sut/upload-file
      {:aws-creds   aws-creds
@@ -41,12 +42,14 @@
       :file-name "test/test-image.png"
       :input     (tf/resource-path "Clojure_logo.png")})
 
-    (let [file  (sut/invoke! s3-client :GetObject
-                  {:Bucket "test-bucket"
-                   :Key    "test/test-file.csv"})
-          image (sut/invoke! s3-client :GetObject
-                  {:Bucket "test-bucket"
-                   :Key    "test/test-image.png"})]
+    (let [file  (sut/invoke! s3-client
+                 :GetObject
+                 {:Bucket "test-bucket"
+                  :Key    "test/test-file.csv"})
+          image (sut/invoke! s3-client
+                 :GetObject
+                 {:Bucket "test-bucket"
+                  :Key    "test/test-image.png"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
              (charred/read-csv (io/reader (:Body file)))))
       (is (= (slurp (tf/resource-path "Clojure_logo.png"))
@@ -75,9 +78,10 @@
                                             :hostname "localhost"
                                             :port     container-port}}
         s3-client      (sut/make-client :s3 aws-creds)]
-    (sut/invoke! s3-client :CreateBucket
-      {:Bucket                    "test-multipart-bucket"
-       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+    (sut/invoke! s3-client
+     :CreateBucket
+     {:Bucket "test-multipart-bucket"
+      :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
     (generate-large-file "./tmp/large-test-file.bin" 1024)
 
@@ -88,9 +92,10 @@
        "large-test-file.bin"
        is))
 
-    (let [file            (sut/invoke! s3-client :GetObject
-                            {:Bucket "test-multipart-bucket"
-                             :Key    "large-test-file.bin"})
+    (let [file            (sut/invoke! s3-client
+                           :GetObject
+                           {:Bucket "test-multipart-bucket"
+                            :Key    "large-test-file.bin"})
           one-gb-in-bytes 1073741824]
       (is (= one-gb-in-bytes (:ContentLength file))))
 
@@ -120,20 +125,23 @@
                                                          :bucket      "pipe-test-bucket"
                                                          :file-name   "pipe-test-file.csv"
                                                          :csv-header? true}}]}]})]
-    (sut/invoke! s3-client :CreateBucket
-      {:Bucket                    "pipe-test-bucket"
-       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
+    (sut/invoke! s3-client
+     :CreateBucket
+     {:Bucket "pipe-test-bucket"
+      :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
-    (tf/run-pipeline! pipeline {:aws-creds {:aws-region        "eu-west-1"
-                            :aws-key           "test"
-                            :aws-secret        "test"
-                            :endpoint-override {:protocol :http
-                                                :hostname "localhost"
-                                                :port     container-port}}})
+    (tf/run-pipeline! pipeline
+                      {:aws-creds {:aws-region        "eu-west-1"
+                                   :aws-key           "test"
+                                   :aws-secret        "test"
+                                   :endpoint-override {:protocol :http
+                                                       :hostname "localhost"
+                                                       :port     container-port}}})
 
-    (let [file (sut/invoke! s3-client :GetObject
-                 {:Bucket "pipe-test-bucket"
-                  :Key    "pipe-test-file.csv"})]
+    (let [file (sut/invoke! s3-client
+                :GetObject
+                {:Bucket "pipe-test-bucket"
+                 :Key    "pipe-test-file.csv"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
              (charred/read-csv (io/reader (:Body file))))))
 

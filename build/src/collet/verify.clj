@@ -12,15 +12,19 @@
    (java.nio.file.attribute FileAttribute PosixFilePermissions)
    (java.util.jar JarFile)))
 
+
 (defn- fail! [message data]
   (throw (ex-info message data)))
+
 
 (defn- ensure! [condition message data]
   (when-not condition
     (fail! message data)))
 
+
 (defn- artifact [package]
   (get-in package [:deps-edn :collet/artifact]))
+
 
 (defn- command! [dir & command]
   (let [{:keys [exit out err]} (apply shell/sh (concat command [:dir (str dir)]))]
@@ -29,21 +33,26 @@
              {:command (vec command) :dir (str dir) :exit exit :error err}))
     (str out err)))
 
+
 (defn- delete-tree! [path]
   (let [file (io/file path)]
     (when (.exists file)
       (doseq [entry (reverse (file-seq file))]
         (Files/deleteIfExists (.toPath entry))))))
 
+
 (defn- temp-directory [prefix]
   (str (Files/createTempDirectory prefix (make-array FileAttribute 0))))
+
 
 (defn- file? [path]
   (.isFile (io/file path)))
 
+
 (defn- jar-entries [path]
   (with-open [jar (JarFile. (str path))]
     (into #{} (map #(.getName %)) (enumeration-seq (.entries jar)))))
+
 
 (defn- jar-entry [path entry]
   (with-open [jar (JarFile. (str path))]
@@ -51,10 +60,12 @@
       (ensure! item "Missing JAR entry" {:jar (str path) :entry entry})
       (slurp (.getInputStream jar item)))))
 
+
 (defn- child-elements [element tag]
   (->> (:content element)
        (filter map?)
        (filter #(= tag (name (:tag %))))))
+
 
 (defn- only-child [element tag]
   (let [matches (vec (child-elements element tag))]
@@ -63,6 +74,7 @@
              {:element tag :count (count matches)})
     (first matches)))
 
+
 (defn- element-text [element]
   (let [content (:content element)]
     (ensure! (every? string? content)
@@ -70,12 +82,15 @@
              {:element (name (:tag element))})
     (str/trim (apply str content))))
 
+
 (defn- child-text [element tag]
   (element-text (only-child element tag)))
+
 
 (defn- optional-child-text [element tag]
   (when-let [child (first (child-elements element tag))]
     (element-text child)))
+
 
 (defn- parse-pom [pom]
   (let [project (xml/parse-str pom
@@ -86,46 +101,54 @@
              {:root (:tag project)})
     project))
 
+
 (defn- pom-coordinate [project]
-  {:group (child-text project "groupId")
+  {:group    (child-text project "groupId")
    :artifact (child-text project "artifactId")
-   :version (child-text project "version")})
+   :version  (child-text project "version")})
+
 
 (defn- expected-coordinate [{:keys [fqn version]}]
   {:group (namespace fqn) :artifact (name fqn) :version version})
 
+
 (defn- dependency-data [dependency]
-  {:lib (symbol (str (child-text dependency "groupId") "/"
-                     (child-text dependency "artifactId")))
-   :version (child-text dependency "version")
-   :extension (or (optional-child-text dependency "type") "jar")
+  {:lib        (symbol (str (child-text dependency "groupId")
+                            "/"
+                            (child-text dependency "artifactId")))
+   :version    (child-text dependency "version")
+   :extension  (or (optional-child-text dependency "type") "jar")
    :exclusions (if-let [container (first (child-elements dependency "exclusions"))]
                  (into #{}
-                       (map #(symbol (str (child-text % "groupId") "/"
+                       (map #(symbol (str (child-text % "groupId")
+                                          "/"
                                           (child-text % "artifactId"))))
                        (child-elements container "exclusion"))
                  #{})})
+
 
 (defn- pom-dependencies [project]
   (if-let [container (first (child-elements project "dependencies"))]
     (mapv dependency-data (child-elements container "dependency"))
     []))
 
+
 (defn- expected-dependencies [{:keys [packages]} package]
   (mapv (fn [[lib dependency]]
-          {:lib lib
-           :version (or (:mvn/version dependency)
-                        (get-in packages [lib :version]))
-           :extension (or (:extension dependency) "jar")
+          {:lib        lib
+           :version    (or (:mvn/version dependency)
+                           (get-in packages [lib :version]))
+           :extension  (or (:extension dependency) "jar")
            :exclusions (set (:exclusions dependency))})
         (get-in package [:deps-edn :deps])))
+
 
 (defn verify-pom!
   "Verify public Maven coordinates and exact direct dependencies."
   [context package pom]
-  (let [project (parse-pom pom)
+  (let [project  (parse-pom pom)
         expected (expected-coordinate package)
-        actual (pom-coordinate project)]
+        actual   (pom-coordinate project)]
     (ensure! (= expected actual)
              "POM Maven coordinates do not match"
              {:package (:fqn package) :expected expected :actual actual})
@@ -135,13 +158,14 @@
              "POM leaks a local-root or snapshot dependency"
              {:package (:fqn package)})
     (let [expected-deps (expected-dependencies context package)
-          actual-deps (pom-dependencies project)]
+          actual-deps   (pom-dependencies project)]
       (ensure! (= (frequencies expected-deps) (frequencies actual-deps))
                "POM direct dependencies differ"
-               {:package (:fqn package)
+               {:package  (:fqn package)
                 :expected expected-deps
-                :actual actual-deps}))
+                :actual   actual-deps}))
     true))
+
 
 (defn- namespace-entry [namespace]
   (str (-> (str namespace)
@@ -149,13 +173,16 @@
            (str/replace "-" "_"))
        ".clj"))
 
+
 (defn- pom-entry [{:keys [fqn]}]
   (str "META-INF/maven/" (namespace fqn) "/" (name fqn) "/pom.xml"))
+
 
 (defn verify-library-artifact!
   "Verify one publishable library JAR's POM and required namespaces."
   [context package path]
-  (ensure! (file? path) "Library JAR was not built"
+  (ensure! (file? path)
+           "Library JAR was not built"
            {:package (:fqn package) :path (str path)})
   (let [entries (jar-entries path)]
     (verify-pom! context package (jar-entry path (pom-entry package)))
@@ -166,17 +193,24 @@
                  {:package (:fqn package) :namespace namespace}))))
   true)
 
+
 (defn- main-class [path]
   (with-open [jar (JarFile. (str path))]
-    (some-> jar .getManifest .getMainAttributes (.getValue "Main-Class"))))
+    (some-> jar
+            .getManifest
+            .getMainAttributes
+            (.getValue "Main-Class"))))
+
 
 (defn- file-mode [path]
   (PosixFilePermissions/toString
    (Files/getPosixFilePermissions (.toPath (io/file path))
                                   (make-array LinkOption 0))))
 
+
 (defn- output-path [package output]
   (str (io/file (:absolute-path package) output)))
+
 
 (defn- check-package! [package contract f]
   (try
@@ -184,28 +218,30 @@
     (catch clojure.lang.ExceptionInfo error
       (throw (ex-info (ex-message error)
                       (assoc (ex-data error)
-                             :package (:fqn package)
-                             :contract contract)
+                        :package (:fqn package)
+                        :contract contract)
                       error)))
     (catch Exception error
       (throw (ex-info "Artifact check failed"
                       {:package (:fqn package) :contract contract}
                       error)))))
 
+
 (defn- verify-archive! [package]
   (let [{:keys [archive root files]} (:outputs (artifact package))
-        path (output-path package archive)
+        path   (output-path package archive)
         target (temp-directory "collet-distribution-")]
     (try
-      (ensure! (file? path) "Distribution archive is missing"
+      (ensure! (file? path)
+               "Distribution archive is missing"
                {:package (:fqn package) :path path})
       (command! target "tar" "-xzf" path)
-      (let [root (io/file target root)
+      (let [root     (io/file target root)
             expected (into {} (map (juxt :to :mode)) files)
-            actual (->> (file-seq root)
-                        (filter #(.isFile %))
-                        (map #(.toString (.relativize (.toPath root) (.toPath %))))
-                        set)]
+            actual   (->> (file-seq root)
+                          (filter #(.isFile %))
+                          (map #(.toString (.relativize (.toPath root) (.toPath %))))
+                          set)]
         (ensure! (= (set (keys expected)) actual)
                  "Distribution archive layout changed"
                  {:package (:fqn package)})
@@ -214,14 +250,16 @@
                    "Distribution archive mode changed"
                    {:package (:fqn package) :entry relative})))
       (finally
-        (delete-tree! target)))))
+       (delete-tree! target)))))
+
 
 (defn verify-deployable!
   "Verify executable filenames, entrypoints, and distribution layout."
   [context package]
   (let [{:keys [kind main outputs]} (artifact package)
         uberjar (output-path package (:uberjar outputs))]
-    (ensure! (file? uberjar) "Deployable uberjar is missing"
+    (ensure! (file? uberjar)
+             "Deployable uberjar is missing"
              {:package (:fqn package) :path uberjar})
     (ensure! (= (str main) (main-class uberjar))
              "Deployable entrypoint changed"
@@ -231,6 +269,7 @@
       (verify-archive! package)))
   true)
 
+
 (defn- verify-vega-golden! [{:keys [packages]}]
   (let [package (get packages 'io.velio/collet-action-vega)]
     (command! (:absolute-path package)
@@ -239,24 +278,27 @@
               "-e" ":integration"))
   true)
 
+
 (defn verify
   "Build all artifacts and check their public contracts."
   [_opts]
   (let [packages (build/load-packages {})
-        order (mapcat identity (kmono.graph/parallel-topo-sort packages))
-        context {:packages packages}
+        order    (mapcat identity (kmono.graph/parallel-topo-sort packages))
+        context  {:packages packages}
         versions (into {} (map (juxt key (comp :version val))) packages)]
     (build/build {:versions versions})
-    (doseq [fqn order
-            :let [package (get packages fqn)]
+    (doseq [fqn   order
+            :let  [package (get packages fqn)]
             :when (:publish? (artifact package))]
       (check-package!
-       package :library
+       package
+       :library
        #(verify-library-artifact!
-         context package
+         context
+         package
          (output-path package (str "target/" (name fqn) "-" (:version package) ".jar")))))
-    (doseq [fqn order
-            :let [package (get packages fqn)]
+    (doseq [fqn   order
+            :let  [package (get packages fqn)]
             :when (#{:uberjar :distribution} (:kind (artifact package)))]
       (check-package! package :executable #(verify-deployable! context package)))
     (let [package (get packages 'io.velio/collet-action-vega)]

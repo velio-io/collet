@@ -51,13 +51,13 @@
 
 
 (comment
- (def mb
-   (create-bean {:name "performance" :type "pipeline_metrics"}))
+  (def mb
+    (create-bean {:name "performance" :type "pipeline_metrics"}))
 
- (increment-counter mb :http-requests-num)
- (set-attribute mb :http-requests-avg-time 1587)
+  (increment-counter mb :http-requests-num)
+  (set-attribute mb :http-requests-avg-time 1587)
 
- (drop-bean mb)
+  (drop-bean mb)
 
- (jmx/mbean-names "*:*")
- (jmx/read "collet.engine:name=latency,type=pipeline_metrics" :http-requests-num))
+  (jmx/mbean-names "*:*")
+  (jmx/read "collet.engine:name=latency,type=pipeline_metrics" :http-requests-num))
