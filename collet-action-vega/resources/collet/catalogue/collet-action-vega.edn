@@ -1,0 +1,11 @@
+[{:type :collet.actions.vega/sink
+  :purpose "Render a Vega or Vega-Lite chart"
+  :effects "filesystem write"
+  :package "collet-action-vega"
+  :coordinate "io.velio/collet-action-vega"
+  :namespace "collet.actions.vega"
+  :params-schema [:or [:map [:vega-lite-spec :map] [:svg-file-path :string]] [:map [:vega-spec :map] [:svg-file-path :string]]]
+  :example
+  "{:name :chart :type :collet.actions.vega/sink :params {:vega-lite-spec {:$schema \"https://vega.github.io/schema/vega-lite/v5.json\" :data {:values [{:x 1 :y 2}]} :mark \"point\" :encoding {:x {:field \"x\"} :y {:field \"y\"}}} :svg-file-path \"chart.svg\"}}"
+  :notes "Vega and Vega-Lite schemas require runtime validation; see the action guide for output configuration."
+  :documentation "collet://docs/actions"}]

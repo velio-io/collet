@@ -92,7 +92,7 @@
                      ^java.util.List
                      ["clojure"
                       "-Sdeps"
-                      "{:deps {nrepl/nrepl {:mvn/version \"1.7.0\"}}}"
+                      "{:deps {nrepl/nrepl {:mvn/version \"1.8.0\"}}}"
                       "-M" "-m" "nrepl.cmdline"
                       "--bind" "127.0.0.1"])
                     (.directory (io/file dir))
@@ -150,7 +150,7 @@
                      [:aliases :dev :extra-deps
                       'io.github.tonsky/clj-reload :mvn/version]))))
     (testing "loopback-only nREPL startup"
-      (is (= "1.7.0"
+      (is (= "1.8.0"
              (get-in deps
                      [:aliases :nrepl :extra-deps
                       'nrepl/nrepl :mvn/version])))

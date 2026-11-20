@@ -226,10 +226,10 @@
               {:id 2 :name "Jane" :user {:id 2} :city "Lakeside"}
               {:id 3 :name "Jack" :user {:id 3} :city "Springfield"}
               {:id 4 :name "Jill"}]
-             (ds/rows result)))
+             (mapcat ds/rows result)))
       (is (= [:id :name :user :city]
-             (ds/column-names result)))
-      (is (= 4 (ds/row-count result)))
+             (ds/column-names (first result))))
+      (is (= 4 (reduce + (map ds/row-count result))))
 
       (io/delete-file "tmp/slicer-joining-arrow-test.arrow")))
 
@@ -728,3 +728,13 @@
              {:user-id 3 :pulls-count 1 :year-month "2025-1"}
              {:user-id 3 :pulls-count 2 :year-month "2025-2"}}
            (-> (:monthly-prs-by-member pipeline) (ds/rows) set)))))
+
+
+(deftest partition-retains-order-and-partial-batches
+  (let [input  (with-meta [(ds/->dataset [{:id 1}])
+                           (ds/->dataset [{:id 2} {:id 3} {:id 4}])]
+                          {:ds-seq true})
+        result (sut/prep-dataset {:sequence input :apply [[:partition {:size 3}]]})]
+    (is (= [[1 2 3] [4]] (mapv #(mapv :id (:items %)) (mapcat ds/rows result))))
+    (is (= :struct (get-in (meta result) [:arrow-columns :fields 0 :element :type])))
+    (is (zero? (ds/row-count (sut/prep-dataset {:sequence [] :apply [[:partition {:size 1}]]}))))))

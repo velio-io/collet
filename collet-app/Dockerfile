@@ -1,12 +1,19 @@
 ARG COLLET_CORE_VERSION="0.0.0-local"
 ARG COLLET_VERSION="0.0.0-local"
 ARG COLLET_REVISION="docker-build"
+# Release builds supply the independently resolved optional package versions.
+ARG COLLET_COMPATIBILITY_VERSIONS="{io.velio/collet-action-http \"0.0.0-local\" io.velio/collet-action-file \"0.0.0-local\" io.velio/collet-action-jdbc \"0.0.0-local\" io.velio/collet-action-s3 \"0.0.0-local\" io.velio/collet-action-queue \"0.0.0-local\" io.velio/collet-action-odata \"0.0.0-local\" io.velio/collet-action-jslt \"0.0.0-local\" io.velio/collet-action-llm \"0.0.0-local\" io.velio/collet-action-sparql \"0.0.0-local\" io.velio/collet-action-vega \"0.0.0-local\" io.velio/collet-action-lucene \"0.0.0-local\"}"
+
+FROM node:22-bookworm-slim AS node
 
 FROM clojure:temurin-25-tools-deps AS builder
+
+COPY --from=node /usr/local/ /usr/local/
 
 ARG COLLET_CORE_VERSION
 ARG COLLET_VERSION
 ARG COLLET_REVISION
+ARG COLLET_COMPATIBILITY_VERSIONS
 
 WORKDIR /build
 
@@ -15,10 +22,24 @@ COPY deps.edn /build/deps.edn
 COPY build /build/build
 COPY collet-core /build/collet-core
 COPY collet-app /build/collet-app
+COPY docs /build/docs
+COPY README.md /build/README.md
+COPY collet-action-http/resources/collet/catalogue /build/collet-action-http/resources/collet/catalogue
+COPY collet-action-file/resources/collet/catalogue /build/collet-action-file/resources/collet/catalogue
+COPY collet-action-jdbc/resources/collet/catalogue /build/collet-action-jdbc/resources/collet/catalogue
+COPY collet-action-s3/resources/collet/catalogue /build/collet-action-s3/resources/collet/catalogue
+COPY collet-action-queue/resources/collet/catalogue /build/collet-action-queue/resources/collet/catalogue
+COPY collet-action-odata/resources/collet/catalogue /build/collet-action-odata/resources/collet/catalogue
+COPY collet-action-jslt/resources/collet/catalogue /build/collet-action-jslt/resources/collet/catalogue
+COPY collet-action-llm/resources/collet/catalogue /build/collet-action-llm/resources/collet/catalogue
+COPY collet-action-sparql/resources/collet/catalogue /build/collet-action-sparql/resources/collet/catalogue
+COPY collet-action-vega/resources/collet/catalogue /build/collet-action-vega/resources/collet/catalogue
+COPY collet-action-lucene/resources/collet/catalogue /build/collet-action-lucene/resources/collet/catalogue
 
 RUN clojure -T:build build :module :collet-app \
       :versions "{io.velio/collet-core \"${COLLET_CORE_VERSION}\" \
-                  io.velio/collet-app \"${COLLET_VERSION}\"}"
+                  io.velio/collet-app \"${COLLET_VERSION}\"}" \
+      :compatibility-versions "${COLLET_COMPATIBILITY_VERSIONS}"
 
 
 FROM eclipse-temurin:25.0.3_9-jre
@@ -48,7 +69,7 @@ COPY collet-app/resources/jmx.yaml /app/jmx/jmx.yaml
 
 ARG TARGETPLATFORM
 ARG TINI_ARCH
-ARG WGET_VERSION=1.25.0-2ubuntu4.3
+ARG WGET_VERSION=1.25.0-2ubuntu4.4
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends wget="${WGET_VERSION}" && \

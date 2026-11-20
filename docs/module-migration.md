@@ -23,6 +23,7 @@ All rows except the CLI distribution are Maven coordinates published to Clojars.
 | `io.velio/collet-action-queue` | `collet.actions.queue` | core |
 | `io.velio/collet-action-jslt` | `collet.actions.jslt` | core |
 | `io.velio/collet-action-llm` | `collet.actions.llm` | core |
+| `io.velio/collet-action-sparql` | `collet.actions.sparql` | core, HTTP |
 | `io.velio/collet-action-vega` | `collet.actions.vega` | core, file |
 | `io.velio/collet-action-lucene` | `collet.actions.lucene` | core |
 | `io.velio/collet-actions` | All eleven action namespaces above | All ten action artifacts |

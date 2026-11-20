@@ -162,6 +162,18 @@
     (or (musicbrainz-response path params)
         (odata-response path params)
         (case path
+          "/pagination/batches"
+          (let [page (or (some-> (get params "page")
+                                 parse-long)
+                         1)
+                rows (cond
+                       (> page 40) []
+                       (= page 1) [{"id" page "a/b" {"key with space" [1 nil "two"]}}]
+                       (= page 2) [{"id" page "new-column" nil}]
+                       :else [{"id" page "values" [page]}])]
+            (assoc-in (json-response {"items" rows}) [:headers "X-Page"] (str page)))
+          "/auth/basic" (json-response {:authorization (.getFirst (.getRequestHeaders exchange) "Authorization")
+                                        :custom-header (.getFirst (.getRequestHeaders exchange) "X-Collet-Test")})
           "/status/204" {:status 204 :headers {} :body ""}
           "/status/503" {:status  503
                          :headers {"Content-Type" "application/json"}

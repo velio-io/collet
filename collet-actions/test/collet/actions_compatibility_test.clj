@@ -12,6 +12,7 @@
    [collet.actions.odata]
    [collet.actions.queue]
    [collet.actions.s3]
+   [collet.actions.sparql]
    [collet.actions.vega]
    [collet.core :as collet]
    [collet.test-fixtures :as tf]))
@@ -38,6 +39,12 @@
     (doseq [action-type legacy-action-types]
       (is (fn? (action/action-fn {:type action-type}))
           (str action-type " is registered")))))
+
+
+(deftest generic-action-registration-test
+  (doseq [action-type [:collet.actions.llm/request :collet.actions.sparql/format
+                       :collet.actions.sparql/query :collet.actions.sparql/update]]
+    (is (fn? (action/action-fn {:type action-type})))))
 
 
 (deftest unchanged-pipeline-spec-test

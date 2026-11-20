@@ -27,11 +27,17 @@ jobs:
         with:
           cli: "1.12.5.1654"
           bb: "1.12.218"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: collet-app/ui/package-lock.json
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-${{ runner.os }}-
+      - run: bb dev:llm-sdk
       - run: bb test:unit
 
   integration:
@@ -49,12 +55,18 @@ jobs:
         with:
           cli: "1.12.5.1654"
           bb: "1.12.218"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: collet-app/ui/package-lock.json
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-${{ runner.os }}-
       - run: docker info
+      - run: bb dev:llm-sdk
       - run: bb test:integration
       - name: Build and start the application image
         run: |
@@ -79,9 +91,15 @@ jobs:
         with:
           cli: "1.12.5.1654"
           bb: "1.12.218"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: collet-app/ui/package-lock.json
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: m2-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
           restore-keys: m2-${{ runner.os }}-
+      - run: bb dev:llm-sdk
       - run: bb verify

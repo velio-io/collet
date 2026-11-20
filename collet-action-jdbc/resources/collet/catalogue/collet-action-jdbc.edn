@@ -1,0 +1,34 @@
+[{:type :collet.actions.jdbc/query
+  :purpose "Read SQL rows"
+  :effects "database access; SQL may write"
+  :package "collet-action-jdbc"
+  :coordinate "io.velio/collet-action-jdbc"
+  :namespace "collet.actions.jdbc"
+  :params-schema
+  [:map
+   [:connection
+    [:or :string
+     [:map [:dbtype {:optional true} :string] [:host {:optional true} :string] [:port {:optional true} :int] [:dbname {:optional true} :string] [:jdbc-url {:optional true} :string] [:user {:optional true} :string]
+      [:password {:optional true} :string] [:auto-commit {:optional true} :boolean]]]]
+   [:query [:or :map [:vector :any]]] [:options {:optional true} :map] [:prefix-table? {:optional true} :boolean] [:timeout {:optional true} :int] [:fetch-size {:optional true} :int]
+   [:preserve-types? {:optional true} :boolean] [:concurrency {:optional true} :keyword] [:result-type {:optional true} :keyword] [:cursors {:optional true} :keyword]]
+  :example "{:name :query :type :collet.actions.jdbc/query :selectors {db [:config :database]} :params {:connection db :query [\"SELECT * FROM orders LIMIT 20\"]}}"
+  :notes "Queries and statements execute real SQL. Returning a bounded sample does not bound database work."
+  :documentation "collet://docs/actions"}
+ {:type :collet.actions.jdbc/execute
+  :purpose "Execute a SQL statement or HoneySQL map"
+  :effects "database access; SQL may write"
+  :package "collet-action-jdbc"
+  :coordinate "io.velio/collet-action-jdbc"
+  :namespace "collet.actions.jdbc"
+  :params-schema
+  [:map
+   [:connection
+    [:or :string
+     [:map [:dbtype {:optional true} :string] [:host {:optional true} :string] [:port {:optional true} :int] [:dbname {:optional true} :string] [:jdbc-url {:optional true} :string] [:user {:optional true} :string]
+      [:password {:optional true} :string] [:auto-commit {:optional true} :boolean]]]]
+   [:statement [:or :map [:vector :any]]] [:options {:optional true} :map] [:prefix-table? {:optional true} :boolean] [:timeout {:optional true} :int]]
+  :example
+  "{:name :execute :type :collet.actions.jdbc/execute :selectors {db [:config :database]} :params {:connection db :statement [\"INSERT INTO totals(day, currency, total) VALUES (?, ?, ?)\" \"2026-01-01\" \"EUR\" 10]}}"
+  :notes "Queries and statements execute real SQL. Returning a bounded sample does not bound database work."
+  :documentation "collet://docs/actions"}]

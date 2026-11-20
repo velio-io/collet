@@ -2,8 +2,12 @@
   (:require
    [charred.api :as charred]
    [clj-test-containers.core :as tc]
+   [clojure.core.async :as async]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer :all]
+   [cognitect.aws.client.api :as aws]
+   [cognitect.aws.http :as http]
    [collet.actions.s3 :as sut]
    [collet.core :as collet]
    [collet.test-containers :as containers]
@@ -11,6 +15,69 @@
 
 
 (use-fixtures :once (tf/instrument! 'collet.actions.s3))
+
+
+(deftest sink-returns-the-final-object-etag
+  (doseq [[multipart? etag] [[false "\"opaque-single\""] [true "\"opaque-multipart-2\""] [false nil]]]
+    (let [requests (atom [])
+          bytes    (byte-array [0 1 2 -1 -128])
+          creds    {:aws-region "auto" :aws-key "test" :aws-secret "test"}
+          invoke   (fn [_ operation request]
+                     (swap! requests conj operation)
+                     (case operation
+                       :CreateMultipartUpload {:UploadId "upload"}
+                       :UploadPart (do (is (= (seq bytes) (seq (.readAllBytes (:Body request)))))
+                                       {:ETag "part-etag"})
+                       :CompleteMultipartUpload {:ETag etag}
+                       :PutObject (do (is (= (seq bytes) (seq (.readAllBytes (:Body request)))))
+                                      (cond-> {} etag (assoc :ETag etag)))))
+          expected (cond-> {:bucket "images" :key "photo.png"} etag (assoc :etag etag))]
+      (with-redefs [sut/make-client      (fn [_ credentials] (is (= creds credentials)) :fixture-client)
+                    aws/stop             (fn [_])
+                    sut/invoke!          invoke
+                    sut/five-gb-in-bytes (if multipart? 1 Long/MAX_VALUE)]
+        (is (= expected
+               (sut/upload-file {:aws-creds creds
+                                 :bucket    "images"
+                                 :file-name "photo.png"
+                                 :input     (java.io.ByteArrayInputStream. bytes)})))
+        (is (= (if multipart? [:CreateMultipartUpload :UploadPart :CompleteMultipartUpload] [:PutObject])
+               @requests))))))
+
+
+(deftest custom-endpoints-support-r2-auto-without-changing-aws-regions
+  (doseq [[region override? expected] [["auto" true "us-east-1"]
+                                       ["eu-west-1" true "eu-west-1"]
+                                       ["us-east-1" false "us-east-1"]]]
+    (let [requests      (atom [])
+          transport     (reify
+                         http/HttpClient
+                         (-submit [_ request channel]
+                           (swap! requests conj request)
+                           (async/put! channel {:status 200 :headers {"etag" "uploaded"} :body nil})
+                           channel)
+                         (-stop [_] nil))
+          create-client aws/client
+          creds         (cond-> {:aws-region region :aws-key "test" :aws-secret "test"}
+                          override? (assoc :endpoint-override {:protocol :https :hostname "account.r2.cloudflarestorage.com" :port 443}))]
+      (with-redefs [aws/client (fn [options]
+                                 (create-client (assoc options
+                                                  :http-client transport
+                                                  :retriable? (constantly false))))]
+        (let [client (sut/make-client :s3 creds)]
+          (try
+            (is (= expected (:region client)))
+            (is (= {:ETag "uploaded"} (sut/invoke! client :PutObject {:Bucket "images" :Key "photo.png" :Body (java.io.ByteArrayInputStream. (byte-array [1 2 3]))})))
+            (is (= 1 (count @requests)))
+            (when override?
+              (is (= "account.r2.cloudflarestorage.com" (:server-name (first @requests))))
+              (is (= :https (:scheme (first @requests))))
+              (is (= 443 (:server-port (first @requests)))))
+            (is (some #(and (= "authorization" (str/lower-case (name (key %))))
+                            (str/includes? (val %) (str "/" expected "/s3/aws4_request")))
+                      (:headers (first @requests))))
+            (is (= region (:aws-region creds)))
+            (finally (aws/stop client))))))))
 
 
 (deftest ^:integration s3-upload-test
@@ -28,19 +95,19 @@
      {:Bucket "test-bucket"
       :CreateBucketConfiguration {:LocationConstraint "eu-west-1"}})
 
-    (sut/upload-file
-     {:aws-creds   aws-creds
-      :bucket      "test-bucket"
-      :format      :csv
-      :file-name   "test/test-file.csv"
-      :input       [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
-      :csv-header? true})
+    (is (string? (:etag (sut/upload-file
+                         {:aws-creds   aws-creds
+                          :bucket      "test-bucket"
+                          :format      :csv
+                          :file-name   "test/test-file.csv"
+                          :input       [{:a 1 :b 2} {:a 3 :b 4} {:a 5 :b 6}]
+                          :csv-header? true}))))
 
-    (sut/upload-file
-     {:aws-creds aws-creds
-      :bucket    "test-bucket"
-      :file-name "test/test-image.png"
-      :input     (tf/resource-path "Clojure_logo.png")})
+    (is (string? (:etag (sut/upload-file
+                         {:aws-creds aws-creds
+                          :bucket    "test-bucket"
+                          :file-name "test/test-image.png"
+                          :input     (tf/resource-path "Clojure_logo.png")}))))
 
     (let [file  (sut/invoke! s3-client
                  :GetObject
@@ -52,8 +119,9 @@
                   :Key    "test/test-image.png"})]
       (is (= [["a" "b"] ["1" "2"] ["3" "4"] ["5" "6"]]
              (charred/read-csv (io/reader (:Body file)))))
-      (is (= (slurp (tf/resource-path "Clojure_logo.png"))
-             (slurp (:Body image)))))
+      (with-open [original (io/input-stream (tf/resource-path "Clojure_logo.png"))
+                  uploaded (:Body image)]
+        (is (= (seq (.readAllBytes original)) (seq (.readAllBytes uploaded))))))
 
     (tc/stop! container)))
 

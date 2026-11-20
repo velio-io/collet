@@ -164,6 +164,23 @@
            (is (= "1.2.4" (get-in releases ['example/pkg-cli :version])))))))))
 
 
+(deftest newly-declared-package-can-bootstrap-without-a-fabricated-tag
+  (with-workspace
+   (fn [root]
+     (git! root "tag" "example/pkg-a@1.2.3")
+     (git! root "tag" "example/pkg-b@1.2.3")
+     (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                           #"tags are incomplete"
+                           (build/load-packages {:dir root})))
+     (let [path (fs/path root "pkg-cli" "deps.edn")]
+       (write-edn! path
+                   (assoc-in (edn/read-string (slurp (str path)))
+                    [:collet/artifact :initial-release?]
+                    true)))
+     (is (= "0.2.8" (get-in (build/load-packages {:dir root}) ['example/pkg-cli :version])))
+     (is (get-in (build/load-packages {:dir root :changes? true}) ['example/pkg-cli :release?])))))
+
+
 (deftest runtime-changes-require-a-release-producing-commit
   (with-workspace
    (fn [root]
@@ -210,3 +227,60 @@
          #(build/build {:dir root :module :pkg-b}))
        (is (= ['example/pkg-a 'example/pkg-b] (mapv first @calls)))
        (is (every? #(str/ends-with? (second %) (name (first %))) @calls))))))
+
+
+(deftest package-catalogues-match-action-dispatch-types
+  (let [modules    (filter #(or (= "collet-core" (str (fs/file-name %)))
+                                (str/starts-with? (str (fs/file-name %)) "collet-action-"))
+                           (map fs/parent (fs/glob "." "collet-*/deps.edn")))
+        documented (atom #{})
+        declared   (atom #{})]
+    (is (= 12 (count modules)))
+    (doseq [module modules]
+      (let [catalogue (fs/path module "resources" "collet" "catalogue" (str (fs/file-name module) ".edn"))]
+        (is (fs/exists? catalogue) (str module))
+        (doseq [descriptor (edn/read-string (slurp (str catalogue)))]
+          (let [namespace (:namespace descriptor)
+                source    (slurp (str (fs/path module "src" (str (str/replace namespace "." "/") ".clj"))))
+                types     (set (map (fn [[_ dispatch]]
+                                      (if (str/starts-with? dispatch "::")
+                                        (keyword namespace (subs dispatch 2))
+                                        (keyword (subs dispatch 1))))
+                                    (re-seq #"\(defmethod action/(?:action-fn|prep)\s+(::?[\w./!?+*<>=-]+)" source)))]
+            (swap! documented conj (:type descriptor))
+            (swap! declared into types)
+            (is (contains? types (:type descriptor)) (str (:type descriptor)))
+            (is (= (str "io.velio/" (fs/file-name module)) (:coordinate descriptor)))
+            (is (str/includes? (:example descriptor) (str (:type descriptor))))))))
+    (is (= @declared @documented))))
+
+
+(deftest compatibility-manifest-uses-independent-package-versions
+  (let [app      {:version "1.2.3"}
+        packages {'io.velio/collet-core {:version "2.3.4"}}]
+    (is (= {"io.velio/collet-core" {:version "2.3.4"} "io.velio/collet-action-http" {:version "3.4.5"}}
+           (:packages (build/compatibility-manifest packages {'io.velio/collet-action-http "3.4.5"} app ["collet-core" "collet-action-http"]))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Missing catalogue compatibility"
+                          (build/compatibility-manifest packages {} app ["collet-action-http"])))))
+
+
+(deftest source-workbench-preparation-only-writes-its-version-manifest
+  (with-workspace
+   (fn [root]
+     (let [app-root (fs/path root "collet-app")
+           index    "resources/collet/knowledge/index.edn"
+           packages {'io.velio/collet-app         {:version       "1.2.3"
+                                                   :absolute-path (str app-root)
+                                                   :deps-edn      {:collet/artifact {:knowledge {:index index}}}}
+                     'io.velio/collet-core        {:version "2.3.4"}
+                     'io.velio/collet-action-http {:version "3.4.5"}}]
+       (write-edn! (fs/path app-root index) {:catalogues ["collet-core" "collet-action-http"]})
+       (with-redefs-fn {(ns-resolve 'collet.build 'build-package!) (fn [& _] (throw (ex-info "Must not build" {})))}
+         (fn []
+           (let [result   (build/prepare-workbench {:dir root :packages packages})
+                 manifest (edn/read-string (slurp (:manifest result)))]
+             (is (= (str (fs/path root "target/workbench-knowledge/collet/knowledge/compatibility.edn")) (:manifest result)))
+             (is (= {:version "1.2.3" :distribution "source"} (:build manifest)))
+             (is (= {"io.velio/collet-core" {:version "2.3.4"} "io.velio/collet-action-http" {:version "3.4.5"}} (:packages manifest)))
+             (is (not (fs/exists? (fs/path app-root "target")))))))))))

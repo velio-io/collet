@@ -40,8 +40,14 @@
           (fail! "Complete package version overrides are required"
                  {:expected (sort (keys packages)) :supplied (sort (keys versions))}))
         (update-vals packages #(assoc % :version (get versions (:fqn %)))))
-      (let [resolved (kmono.version/resolve-package-versions root packages)
-            missing  (filterv #(nil? (:version %)) (vals resolved))]
+      (let [resolved   (kmono.version/resolve-package-versions root packages)
+            missing    (filterv #(nil? (:version %)) (vals resolved))
+            initial    (set (map :fqn (filter #(get-in % [:deps-edn :collet/artifact :initial-release?]) missing)))
+            initialize (fn [package]
+                         (cond-> package
+                           (initial (:fqn package)) (assoc :version
+                                                      bootstrap-version :release?
+                                                      true)))]
         (cond
           (= (count missing) (count resolved))
           (update-vals resolved
@@ -49,7 +55,7 @@
                           :version bootstrap-version
                           :release? true))
 
-          (seq missing)
+          (some #(not (initial (:fqn %))) missing)
           (fail! "Package version tags are incomplete"
                  {:packages (sort (map :fqn missing))})
 
@@ -58,7 +64,8 @@
                                 (kmono.version/resolve-package-changes root)
                                 (kmono.version/inc-package-versions
                                  conventional/version-fn))
-                unreleased (filter #(and (seq (:commits %))
+                unreleased (filter #(and (not (initial (:fqn %)))
+                                         (seq (:commits %))
                                          (= (:version %)
                                             (get-in resolved [(:fqn %) :version])))
                                    (vals next))]
@@ -67,11 +74,11 @@
                      {:packages (sort (map :fqn unreleased))
                       :guidance "Use fix:, feat:, !, or BREAKING CHANGE:"}))
             (update-vals next
-                         #(assoc %
-                            :release?
-                            (not= (:version %) (get-in resolved [(:fqn %) :version])))))
+                         #(initialize (assoc %
+                                        :release?
+                                        (not= (:version %) (get-in resolved [(:fqn %) :version]))))))
 
-          :else resolved)))))
+          :else (update-vals resolved initialize))))))
 
 
 (defn release-packages [packages]
@@ -151,10 +158,45 @@
          (get-in package [:deps-edn :deps]))))
 
 
-(defn- prepare! [{:keys [root project packages]} package]
+(defn compatibility-manifest
+  "Pin catalogue coordinates to the versions used for this distribution."
+  [packages extra-versions app catalogues]
+  (let [versions (merge extra-versions (into {} (map (juxt key (comp :version val))) packages))]
+    {:build    {:version (:version app) :distribution (if (str/includes? (:version app) "local") "local" "release")}
+     :packages (into {}
+                     (map (fn [module]
+                            (let [coordinate (symbol "io.velio" module)
+                                  version    (get versions coordinate)]
+                              (when-not (and (string? version) (seq version))
+                                (fail! "Missing catalogue compatibility version" {:coordinate coordinate}))
+                              [(str coordinate) {:version version}])))
+                     catalogues)}))
+
+
+(defn- prepare! [{:keys [root project packages compatibility-versions]} package]
   (b/delete {:path "target"})
   (when (seq (paths package))
     (b/copy-dir {:src-dirs (paths package) :target-dir "target/classes"}))
+  (when-let [index (get-in (artifact package) [:knowledge :index])]
+    (let [{:keys [docs catalogues]} (edn/read-string (slurp (output index)))]
+      (doseq [{:keys [id path]} docs]
+        (let [destination (io/file (output "target/classes/collet/knowledge/docs") (str id ".md"))]
+          (io/make-parents destination)
+          (io/copy (io/file root path) destination)))
+      (doseq [module catalogues]
+        (b/copy-dir {:src-dirs   [(str (io/file root module "resources/collet/catalogue"))]
+                     :target-dir "target/classes/collet/catalogue"}))
+      (let [path (io/file (output "target/classes") (get-in (artifact package) [:knowledge :compatibility]))]
+        (io/make-parents path)
+        (spit path (pr-str (compatibility-manifest packages compatibility-versions package catalogues))))))
+  (when-let [{:keys [dir resource-root]} (:ui (artifact package))]
+    (doseq [command [["npm" "ci" "--no-audit" "--no-fund"]
+                     ["npm" "run" "build"]]]
+      (let [{:keys [exit out err]} (apply shell/sh (concat command [:dir (output dir)]))]
+        (when-not (zero? exit)
+          (fail! "Workbench frontend build failed" {:command command :out out :err err}))))
+    (b/copy-dir {:src-dirs   [(str dir "/dist/client")]
+                 :target-dir (str "target/classes/" resource-root)}))
   (io/make-parents (io/file (output "target/classes/LICENSE")))
   (io/copy (io/file root "LICENSE") (io/file (output "target/classes/LICENSE")))
   (let [basis (kmono.build/create-basis packages package)]
@@ -235,9 +277,24 @@
 
 (defn- context [{:keys [dir packages] :as opts}]
   (let [{:keys [root]} (kmono.workspace/resolve-workspace-context! dir)]
-    {:root     root
-     :project  (project root)
-     :packages (or packages (load-packages opts))}))
+    {:root                   root
+     :project                (project root)
+     :compatibility-versions (:compatibility-versions opts)
+     :packages               (or packages (load-packages opts))}))
+
+
+(defn prepare-workbench
+  "Prepare source Workbench dependency metadata without building or installing packages."
+  [opts]
+  (let [{:keys [root packages compatibility-versions]} (context opts)
+        app      (or (get packages 'io.velio/collet-app)
+                     (fail! "Workbench package is missing" {}))
+        index    (edn/read-string (slurp (io/file (:absolute-path app) (get-in (artifact app) [:knowledge :index]))))
+        manifest (assoc-in (compatibility-manifest packages compatibility-versions app (:catalogues index)) [:build :distribution] "source")
+        path     (io/file root "target/workbench-knowledge/collet/knowledge/compatibility.edn")]
+    (io/make-parents path)
+    (spit path (pr-str manifest))
+    {:manifest (str path) :build (:build manifest) :packages (:packages manifest)}))
 
 
 (defn build

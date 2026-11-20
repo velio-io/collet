@@ -1,0 +1,802 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bd2aa22..c74aa46 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,15 @@
+ 
+ All notable user-visible changes are tracked here.
+ 
++## Unreleased
++
++- Share opt-in retries across synchronous chat, decisions, embeddings, moderation,
++  reranking, image generation, transcription and speech. Preserve HTTP error
++  status, request ID, `Retry-After` and attempt count.
++- Enforce retry budgets and response body deadlines, including multipart and
++  binary requests. Interruption, authentication failures, exhausted credits and
++  malformed successful responses are never retried.
++
+ ## 0.6.4
+ 
+ - Require explicit `:config {:auth-mode :oauth}` for Anthropic Claude Code OAuth.
+diff --git a/README.md b/README.md
+index 98bf4e8..a4170d8 100644
+--- a/README.md
++++ b/README.md
+@@ -182,6 +182,15 @@ Applications that manage secrets outside environment variables can pass per-call
+                        :timeout-ms 60000})
+ ```
+ 
++Synchronous chat and non-chat requests make one attempt by default. Pass
++`:retry true` for the default policy, or a policy such as
++`{:retry/max-attempts 3 :retry/budget-ms 30000}` to bound attempts and elapsed
++time. The budget includes response body reads and backoff. The SDK honors
++`Retry-After` within the budget and exposes HTTP status, request ID, parsed
++retry delay and attempt count in error data when available. Multipart retries
++require a replayable file or byte array. Streaming transports keep their
++existing recovery behavior.
++
+ ## Design Guarantees
+ 
+ - Canonical response parts preserve text, images, tool calls, citations, reasoning, safety data, and provider-native state.
+diff --git a/src/llm/sdk.clj b/src/llm/sdk.clj
+index 34c7f58..d113dbd 100644
+--- a/src/llm/sdk.clj
++++ b/src/llm/sdk.clj
+@@ -313,84 +313,22 @@
+         (pricing/stamp-response-cost-and-cache provider-id model)
+         (canonicalize-chat-response provider-id model))))
+ 
+-(defn- normalize-retry-policy
+-  "Translate the :retry kwarg into either nil (one-shot) or a policy map.
+-   true → default-policy; a map → merged into default-policy so callers
+-   can override only the keys they care about."
+-  [retry]
+-  (cond
+-    (or (nil? retry) (false? retry)) nil
+-    (true? retry) (retry/default-policy)
+-    (map? retry) (merge (retry/default-policy) retry)
+-    :else nil))
+-
+-(defn- retry-after-ms-from
+-  "Read the Retry-After header off a hato response and convert to ms.
+-   Header lookup is case-insensitive at the source but hato returns a
+-   keyword-or-string map - we try both spellings."
+-  [resp]
+-  (let [headers (:headers resp)
+-        v (or (get headers "retry-after")
+-              (get headers "Retry-After")
+-              (get headers :retry-after))]
+-    (retry/parse-retry-after v)))
+-
+ (def ^:dynamic *retry-sleep-fn*
+   "Indirection for tests - replace to drive retry without actually
+    sleeping. Default is Thread/sleep."
+   (fn [ms] (Thread/sleep (long ms))))
+ 
+ (defn- complete-non-streaming
+-  "Run the non-streaming request path, with optional retry. `policy`
+-   is nil (one-shot) or a normalized policy map."
+   [transport profile req provider-id model policy]
+   (if (true? (get-in req [:body :stream]))
++    ;; Preserve the existing bounded OAuth recovery, never replay partial output.
+     (complete-sse-non-streaming transport profile req provider-id model)
+-    (loop [attempt 1]
+-      (let [outcome
+-            (try
+-              (let [resp (http/request req)
+-                    status (:status resp)
+-                    body (:body resp)]
+-                (if (and (number? status) (>= status 400))
+-                  {:tag :http-error
+-                   :err (transport/parse-error transport profile status body)
+-                   :status status :body body :resp resp}
+-                  {:tag :ok
+-                   :response (transport/parse-response transport profile body)}))
+-              (catch Exception e
+-                {:tag :exception :ex e}))]
+-        (case (:tag outcome)
+-          :ok
+-          (stamp (:response outcome) provider-id model)
+-
+-          :http-error
+-          (let [classified (:err outcome)
+-                decision (when policy (retry/should-retry? classified policy attempt))]
+-            (if (:retry? decision)
+-              (let [wait (max (or (retry-after-ms-from (:resp outcome)) 0)
+-                              (:delay-ms decision))]
+-                (*retry-sleep-fn* wait)
+-                (recur (inc attempt)))
+-              (throw (ex-info "Provider API error"
+-                              {:error classified
+-                               :status (:status outcome)
+-                               :body (:body outcome)
+-                               :provider provider-id
+-                               :attempts attempt}))))
+-
+-          :exception
+-          (let [e (:ex outcome)
+-                classified (errors/classify-error e :provider provider-id)
+-                decision (when policy (retry/should-retry? classified policy attempt))]
+-            (if (:retry? decision)
+-              (do (*retry-sleep-fn* (:delay-ms decision))
+-                  (recur (inc attempt)))
+-              (throw (ex-info "Provider transport error"
+-                              {:error classified
+-                               :provider provider-id
+-                               :attempts attempt}
+-                              e)))))))))
++    (let [response (binding [retry/*sleep-fn* *retry-sleep-fn*]
++                     (retry/request! http/request req
++                                     #(transport/parse-error transport profile %1 %2)
++                                     provider-id policy))]
++      (stamp (transport/parse-response transport profile (:body response))
++             provider-id model))))
+ 
+ (defn- ensure-terminal-end
+   "Move provider end markers behind any trailing metadata and emit exactly one
+@@ -544,8 +482,7 @@
+                    provider-id model))
+           handle))
+       ;; Non-streaming path
+-      (complete-non-streaming transport profile req provider-id model
+-                              (normalize-retry-policy retry)))))
++      (complete-non-streaming transport profile req provider-id model retry))))
+ 
+ ;; ---------------------------------------------------------------------------
+ ;; Embed
+diff --git a/src/llm/sdk/decide.clj b/src/llm/sdk/decide.clj
+index 8db8210..8fa6632 100644
+--- a/src/llm/sdk/decide.clj
++++ b/src/llm/sdk/decide.clj
+@@ -8,12 +8,13 @@
+ (defn decide
+   "Evaluate :decision/state against :decision/questions with :decision/model.
+    Accepts :config for per-call credentials and HTTP settings."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (let [parsed
+         (operation/run
+          {:provider-id provider-id
+           :request request
+           :config config
++    :retry retry
+           :validate-request schema/validate-decision-request
+           :explain-request schema/explain-decision-request
+           :invalid-error-type :schema/invalid-decision-request
+diff --git a/src/llm/sdk/embed.clj b/src/llm/sdk/embed.clj
+index 131259c..49f9edd 100644
+--- a/src/llm/sdk/embed.clj
++++ b/src/llm/sdk/embed.clj
+@@ -57,12 +57,13 @@
+    vector of strings). Optional fields: :embed/dimensions,
+    :embed/encoding-format (:float or :base64), :embed/user,
+    :embed/provider-options."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (let [parsed
+         (operation/run
+          {:provider-id provider-id
+           :request request
+           :config config
++    :retry retry
+           :validate-request schema/validate-embed-request
+           :explain-request schema/explain-embed-request
+           :invalid-error-type :schema/invalid-embed-request
+diff --git a/src/llm/sdk/errors.clj b/src/llm/sdk/errors.clj
+index 48e7f9d..06dec44 100644
+--- a/src/llm/sdk/errors.clj
++++ b/src/llm/sdk/errors.clj
+@@ -297,6 +297,11 @@
+          :error/message "Payload too large"
+          :error/should-compress true}
+ 
++        (and (= status 429) (matches-any? msg billing-patterns))
++        {:error/reason :quota
++         :error/retryable false
++         :error/message "Billing/quota exhausted"}
++
+         (= status 429)
+         {:error/reason :rate-limit
+          :error/retryable true
+diff --git a/src/llm/sdk/http.clj b/src/llm/sdk/http.clj
+index 877b278..4cf0d0c 100644
+--- a/src/llm/sdk/http.clj
++++ b/src/llm/sdk/http.clj
+@@ -50,7 +50,8 @@
+ (defn- bounded-stream
+   "JDK request deadlines stop at response headers for InputStream bodies.
+    Close stalled bodies independently so a blocked stream read also times out."
+-  [input timeout-ms]
++  ([input timeout-ms] (bounded-stream input timeout-ms nil))
++  ([input timeout-ms deadline-nanos]
+   (if-not (instance? InputStream input)
+     input
+     (let [^InputStream input input
+@@ -84,13 +85,16 @@
+                           (throw error))))))
+           expire! (fn []
+                     (when (and (not @closed?)
+-                               (>= (- (System/nanoTime) (.get last-activity))
+-                                   (* (long timeout-ms) 1000000)))
++                               (or (and deadline-nanos (>= (System/nanoTime) deadline-nanos))
++                                   (>= (- (System/nanoTime) (.get last-activity))
++                                       (* (long timeout-ms) 1000000))))
+                       (reset! expired? true)
+                       (try (close!) (catch Throwable _))))
+           task (.scheduleWithFixedDelay
+                 ^ScheduledThreadPoolExecutor @stream-timer
+-                ^Runnable expire! (long timeout-ms)
++                ^Runnable expire! (long (if deadline-nanos
++                                         (max 1 (quot (- deadline-nanos (System/nanoTime)) 1000000))
++                                         timeout-ms))
+                 (long (min timeout-ms 1000)) TimeUnit/MILLISECONDS)
+           one-byte (byte-array 1)]
+       (reset! scheduled task)
+@@ -101,7 +105,7 @@
+                 (if (neg? n) -1 (bit-and 255 (aget one-byte 0)))))
+           ([target] (read! target 0 (alength ^bytes target)))
+           ([target offset length] (read! target offset length)))
+-        (close [] (close!))))))
++        (close [] (close!)))))))
+ 
+ (defn- encode-body
+   "Serialize body to a JSON string unless already a string or byte array
+@@ -129,6 +133,22 @@
+       (json/parse-string s true)
+       (catch Exception _ s))))
+ 
++(defn buffered-request
++  "Consume and close an HTTP body within one deadline, including multipart and
++   binary operations. JDK header timeouts alone do not bound body consumption."
++  [opts]
++  (let [timeout (long (or (:timeout opts) 120000))
++        deadline (+ (System/nanoTime) (* timeout 1000000))
++        response (hc/request (assoc opts :as :stream))
++        body (bounded-stream (:body response) timeout deadline)]
++    (assoc response :body
++           (if (instance? InputStream body)
++             (with-open [body ^InputStream body]
++               (if (= :byte-array (:as opts))
++                 (.readAllBytes body)
++                 (slurp (InputStreamReader. body StandardCharsets/UTF_8))))
++             body))))
++
+ (defn request
+   "Make an HTTP request. Returns a map with :status, :body, :headers
+    for every status code (including 4xx/5xx) — callers branch on
+@@ -149,10 +169,10 @@
+                (assoc opts :body (encode-body body))
+                opts)
+         opts (merge opts (request-options req))
+-        resp (hc/request opts)]
++        resp (buffered-request opts)]
+     {:status (:status resp)
+      :headers (:headers resp)
+-     :body (decode-body (bounded-stream (:body resp) (:timeout opts)))}))
++     :body (decode-body (:body resp))}))
+ 
+ (defn line-seq-closeable
+   "Return a lazy seq of lines and close the underlying stream at EOF
+diff --git a/src/llm/sdk/image.clj b/src/llm/sdk/image.clj
+index 2b00044..989f58f 100644
+--- a/src/llm/sdk/image.clj
++++ b/src/llm/sdk/image.clj
+@@ -73,12 +73,13 @@
+ 
+    The canonical response includes :image/images — a vector of
+    {:image/url? :image/b64? :image/revised-prompt?}."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (let [parsed
+         (operation/run
+          {:provider-id provider-id
+           :request request
+           :config config
++    :retry retry
+           :validate-request schema/validate-image-gen-request
+           :explain-request schema/explain-image-gen-request
+           :invalid-error-type :schema/invalid-image-request
+diff --git a/src/llm/sdk/moderate.clj b/src/llm/sdk/moderate.clj
+index 37c518b..e24cf85 100644
+--- a/src/llm/sdk/moderate.clj
++++ b/src/llm/sdk/moderate.clj
+@@ -19,12 +19,13 @@
+    only moderation) or {:type :text :text \"...\"} / {:type :image_url
+    :image_url \"https://...\"} maps. The OpenAI omni-moderation models
+    accept the multi-modal shape."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (let [parsed
+         (operation/run
+          {:provider-id provider-id
+           :request request
+           :config config
++    :retry retry
+           :validate-request schema/validate-moderation-request
+           :explain-request schema/explain-moderation-request
+           :invalid-error-type :schema/invalid-moderation-request
+diff --git a/src/llm/sdk/operation.clj b/src/llm/sdk/operation.clj
+index 2cb7986..ba67048 100644
+--- a/src/llm/sdk/operation.clj
++++ b/src/llm/sdk/operation.clj
+@@ -1,6 +1,6 @@
+ (ns llm.sdk.operation
+   "Shared synchronous request lifecycle for non-chat SDK operations."
+-  (:require [llm.sdk.errors :as errors]
++  (:require [llm.sdk.retry :as retry]
+             [llm.sdk.http :as http]
+             [llm.sdk.provider :as provider]))
+ 
+@@ -15,7 +15,7 @@
+            invalid-error-type invalid-message constructor-key
+            unsupported-message build-request request-effect sign-request
+            parse-response parse-error transport-error-message
+-           api-error-message]}]
++           api-error-message retry]}]
+   (let [profile (some-> (provider/get-provider provider-id)
+                         (provider/apply-runtime-config config))
+         profile (or profile
+@@ -34,21 +34,10 @@
+         native-request (if sign-request
+                          (sign-request profile native-request)
+                          native-request)
+-        response (try
+-                   ((or request-effect http/request) native-request)
+-                   (catch Exception cause
+-                     (throw (ex-info transport-error-message
+-                                     {:error (errors/classify-error
+-                                              cause :provider provider-id)
+-                                      :provider provider-id}
+-                                     cause))))
+-        status (:status response)
+-        body (:body response)]
+-    (if (and (number? status) (<= 200 status 299))
+-      (parse-response transport profile response)
+-      (let [error (parse-error transport profile status body)]
+-        (throw (ex-info api-error-message
+-                        {:error error
+-                         :status status
+-                         :body body
+-                         :provider provider-id}))))))
++        response (retry/request! (or request-effect http/request)
++                                 native-request
++                                 #(parse-error transport profile %1 %2)
++                                 provider-id retry
++                                 :transport-error-message transport-error-message
++                                 :api-error-message api-error-message)]
++    (parse-response transport profile response)))
+diff --git a/src/llm/sdk/rerank.clj b/src/llm/sdk/rerank.clj
+index 393ec3a..d3f530f 100644
+--- a/src/llm/sdk/rerank.clj
++++ b/src/llm/sdk/rerank.clj
+@@ -65,12 +65,13 @@
+    Documents are strings or maps; individual providers may require strings.
+    Optional: :rerank/top-n, :rerank/return-documents,
+    :rerank/next-token, :rerank/provider-options."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (let [parsed
+         (operation/run
+          {:provider-id provider-id
+           :request request
+           :config config
++    :retry retry
+           :validate-request schema/validate-rerank-request
+           :explain-request schema/explain-rerank-request
+           :invalid-error-type :schema/invalid-rerank-request
+diff --git a/src/llm/sdk/retry.clj b/src/llm/sdk/retry.clj
+index 7a87910..52becda 100644
+--- a/src/llm/sdk/retry.clj
++++ b/src/llm/sdk/retry.clj
+@@ -1,6 +1,7 @@
+ (ns llm.sdk.retry
+   "Data-driven retry policy with jittered backoff."
+-  (:require [clojure.string :as str])
++  (:require [clojure.string :as str]
++            [llm.sdk.errors :as errors])
+   (:import [java.time Duration Instant ZonedDateTime]
+            [java.time.format DateTimeFormatter]))
+ 
+@@ -19,9 +20,9 @@
+                    jitter-ratio 0.5}}]
+   (swap! jitter-counter inc)
+   (let [exponent (max 0 (dec attempt))
+-        delay (min (* base-delay-ms (bit-shift-left 1 exponent)) max-delay-ms)
++        delay (min (* (double base-delay-ms) (Math/pow 2 (min 62 exponent))) max-delay-ms)
+         jitter (int (* jitter-ratio delay (rand)))]
+-    (+ delay jitter)))
++    (long (min max-delay-ms (+ delay jitter)))))
+ 
+ ;; ---------------------------------------------------------------------------
+ ;; Policy
+@@ -34,6 +35,7 @@
+    :retry/base-delay-ms 2000
+    :retry/max-delay-ms 60000
+    :retry/jitter-ratio 0.5
++   :retry/budget-ms 120000
+    :retry/retryable? #(#{:rate-limit :timeout :server :overloaded :unknown
+                          :network :provider-bug}
+                        (:error/reason %))})
+@@ -77,3 +79,112 @@
+                           (.toInstant))]
+              (max 0 (.toMillis (Duration/between now date))))
+            (catch Exception _ nil)))))))
++
++(def ^:dynamic *clock-ms* #(quot (System/nanoTime) 1000000))
++(def ^:dynamic *sleep-fn* #(Thread/sleep (long %)))
++
++(defn normalize-policy [policy]
++  (when-not (or (nil? policy) (false? policy))
++    (when-not (or (true? policy) (map? policy))
++      (throw (ex-info "Invalid retry policy" {:error/type :request/invalid-retry})))
++    (let [p (merge (default-policy) (when (map? policy) policy))]
++      (when-not (and (pos-int? (:retry/max-attempts p))
++                     (pos-int? (:retry/budget-ms p))
++                     (nat-int? (:retry/base-delay-ms p))
++                     (nat-int? (:retry/max-delay-ms p))
++                     (number? (:retry/jitter-ratio p))
++                     (<= 0 (:retry/jitter-ratio p) 1)
++                     (ifn? (:retry/retryable? p)))
++        (throw (ex-info "Invalid retry policy" {:error/type :request/invalid-retry})))
++      p)))
++
++(defn- header [response wanted]
++  (some (fn [[k v]] (when (= wanted (str/lower-case (name k)))
++                     (if (sequential? v) (first v) v)))
++        (:headers response)))
++
++(defn- close-body! [response]
++  (when (instance? java.io.Closeable (:body response))
++    (.close ^java.io.Closeable (:body response))))
++
++(defn- cancellation-cause [error]
++  (some #(when (or (instance? InterruptedException %)
++                    (instance? java.util.concurrent.CancellationException %)) %)
++        (take-while some? (iterate ex-cause error))))
++
++(defn request!
++  "Run only the HTTP effect with bounded opt-in retries. Parsing and response
++   validation belong outside this loop: malformed successes must not be replayed.
++   Request effects must reopen multipart files on each attempt."
++  [send-request request parse-error provider-id policy
++   & {:keys [transport-error-message api-error-message]
++      :or {transport-error-message "Provider transport error"
++           api-error-message "Provider API error"}}]
++  (let [policy (normalize-policy policy)
++        deadline (when policy (+ (*clock-ms*) (:retry/budget-ms policy)))]
++    (when (and policy (> (:retry/max-attempts policy) 1)
++               (some #(instance? java.io.InputStream %)
++                     (tree-seq coll? seq (select-keys request [:body :multipart]))))
++      (throw (ex-info "Retries require replayable request bodies"
++                      {:error/type :request/non-replayable-body :provider provider-id})))
++    (loop [attempt 1]
++      (when (.isInterrupted (Thread/currentThread))
++        (throw (InterruptedException. "Provider request interrupted")))
++      (let [remaining (when deadline (- deadline (*clock-ms*)))]
++        (when (and remaining (not (pos? remaining)))
++          (throw (ex-info "Provider retry deadline exceeded"
++                          {:error/type :retry/deadline :provider provider-id
++                           :attempts (dec attempt)})))
++        (let [req (cond-> request remaining
++                    (assoc :timeout-ms (min (or (:timeout-ms request) 120000) remaining)))
++              outcome (try {:response (send-request req)}
++                           (catch InterruptedException e
++                             (.interrupt (Thread/currentThread)) (throw e))
++                           (catch java.util.concurrent.CancellationException e (throw e))
++                           (catch Exception e
++                             (if-let [cancel (cancellation-cause e)]
++                               (do (when (instance? InterruptedException cancel)
++                                     (.interrupt (Thread/currentThread)))
++                                   (throw cancel))
++                               {:exception e})))
++              response (:response outcome)
++              status (:status response)]
++          (if (and (number? status) (<= 200 status 299))
++            (if (and deadline (>= (*clock-ms*) deadline))
++              (do (close-body! response)
++                  (throw (ex-info "Provider retry deadline exceeded"
++                                  {:error/type :retry/deadline :provider provider-id
++                                   :attempts attempt})))
++              response)
++            (let [cause (:exception outcome)
++                  error (try
++                          (cond
++                            cause (errors/classify-error cause :provider provider-id)
++                            (number? status) (parse-error status (:body response))
++                            :else {:error/reason :provider-bug :error/retryable false})
++                          (finally (close-body! response)))
++                  retry-after (parse-retry-after (header response "retry-after"))
++                  data (cond-> {:error error :provider provider-id :attempts attempt}
++                         response (assoc :status status :headers (:headers response)
++                                         :body (:body response))
++                         retry-after (assoc :retry-after-ms retry-after)
++                         (header response "x-request-id")
++                         (assoc :request-id (header response "x-request-id"))
++                         (header response "request-id")
++                         (assoc :request-id (header response "request-id")))
++                  transient? (and (not= false (:error/retryable error))
++                                  (or cause (#{408 429 500 502 503 504 524 529} status)))
++                  decision (when (and policy transient?)
++                             (should-retry? error policy attempt))
++                  wait-ms (when (:retry? decision)
++                            (max (or retry-after 0) (:delay-ms decision)))
++                  exhausted? (and wait-ms (>= wait-ms (- deadline (*clock-ms*))))]
++              (if (and wait-ms (not exhausted?))
++                (do
++                  (try (*sleep-fn* wait-ms)
++                       (catch InterruptedException e
++                         (.interrupt (Thread/currentThread)) (throw e)))
++                  (recur (inc attempt)))
++                (throw (ex-info (if cause transport-error-message api-error-message)
++                                (cond-> data exhausted? (assoc :error/type :retry/deadline))
++                                cause))))))))))
+diff --git a/src/llm/sdk/speak.clj b/src/llm/sdk/speak.clj
+index f1d1855..e15bdbd 100644
+--- a/src/llm/sdk/speak.clj
++++ b/src/llm/sdk/speak.clj
+@@ -10,7 +10,6 @@
+ 
+    Providers without a speak transport throw ex-info on call."
+   (:require [cheshire.core :as json]
+-            [hato.client :as hc]
+             [llm.sdk.http :as http]
+             [llm.sdk.operation :as operation]
+             [llm.sdk.pricing :as pricing]
+@@ -34,7 +33,7 @@
+   "Execute a buffered request whose successful body is raw audio bytes."
+   [{:keys [method url headers body] :as request}]
+   (let [response
+-        (hc/request
++        (http/buffered-request
+          (merge (http/request-options request)
+                 {:method method
+                  :url url
+@@ -69,11 +68,12 @@
+   "Send a canonical SpeakRequest and return a SpeakResponse.
+ 
+    The response contains nonempty :audio/bytes and its content type."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (operation/run
+    {:provider-id provider-id
+     :request request
+     :config config
++    :retry retry
+     :validate-request schema/validate-speak-request
+     :explain-request schema/explain-speak-request
+     :invalid-error-type :schema/invalid-speak-request
+diff --git a/src/llm/sdk/transcribe.clj b/src/llm/sdk/transcribe.clj
+index 797278c..e89d4ec 100644
+--- a/src/llm/sdk/transcribe.clj
++++ b/src/llm/sdk/transcribe.clj
+@@ -5,7 +5,6 @@
+    Providers without a transcribe transport throw ex-info on call so
+    the missing capability surfaces at the call site."
+   (:require [clojure.string :as str]
+-            [hato.client :as hc]
+             [llm.sdk.http :as http]
+             [llm.sdk.operation :as operation]
+             [llm.sdk.pricing :as pricing]
+@@ -51,7 +50,7 @@
+    JSON is decoded opportunistically; plain text, SRT, and VTT remain strings."
+   [{:keys [method url headers multipart] :as request} response-format]
+   (let [response
+-        (hc/request
++        (http/buffered-request
+          (merge (http/request-options request)
+                 {:method method
+                  :url url
+@@ -87,11 +86,12 @@
+    Multipart audio input is sent through the shared HTTP client resolver.
+    JSON responses are decoded regardless of Content-Type spelling; text,
+    SRT, and VTT response bodies are preserved verbatim."
+-  [provider-id request & {:keys [config]}]
++  [provider-id request & {:keys [config retry]}]
+   (operation/run
+    {:provider-id provider-id
+     :request request
+     :config config
++    :retry retry
+     :validate-request schema/validate-transcribe-request
+     :explain-request schema/explain-transcribe-request
+     :invalid-error-type :schema/invalid-transcribe-request
+diff --git a/test/llm/sdk/http_test.clj b/test/llm/sdk/http_test.clj
+index f74ae09..ea45617 100644
+--- a/test/llm/sdk/http_test.clj
++++ b/test/llm/sdk/http_test.clj
+@@ -40,6 +40,29 @@
+         (.stop server 0)
+         (.shutdownNow executor)))))
+ 
++(deftest buffered-deadlines-include-continuously-arriving-bodies
++  (doseq [as [:string :byte-array]]
++    (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
++      (.createContext server "/drip"
++                      (reify HttpHandler
++                        (handle [_ exchange]
++                          (.sendResponseHeaders exchange 200 0)
++                          (try
++                            (with-open [out (.getResponseBody exchange)]
++                              (dotimes [_ 40]
++                                (.write out (int 32))
++                                (.flush out)
++                                (Thread/sleep 25)))
++                            (catch java.io.IOException _)))))
++      (.start server)
++      (try
++        (is (thrown? HttpTimeoutException
++                     (http/buffered-request {:method :get :as as :timeout 200
++                                             :http-client (http/client)
++                                             :url (str "http://127.0.0.1:"
++                                                       (.getPort (.getAddress server)) "/drip")})))
++        (finally (.stop server 0))))))
++
+ (deftest streaming-query-parameters-reach-the-server
+   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
+     (.createContext server "/events"
+diff --git a/test/llm/sdk/operation_retry_test.clj b/test/llm/sdk/operation_retry_test.clj
+new file mode 100644
+index 0000000..f6605fc
+--- /dev/null
++++ b/test/llm/sdk/operation_retry_test.clj
+@@ -0,0 +1,160 @@
++(ns llm.sdk.operation-retry-test
++  (:require [clojure.test :refer [deftest is]]
++            [hato.client :as hc]
++            [llm.sdk :as sdk]
++            [llm.sdk.errors :as errors]
++            [llm.sdk.http :as http]
++            [llm.sdk.retry :as retry])
++  (:import [java.io ByteArrayInputStream]
++           [java.time Instant]))
++
++
++(defn classify [status body]
++  (errors/classify-error nil :status status :body body :provider :openai))
++
++
++(def policy
++  {:retry/max-attempts  3
++   :retry/base-delay-ms 0
++   :retry/max-delay-ms  10000
++   :retry/jitter-ratio  0
++   :retry/budget-ms     5000})
++
++
++(defn failure [f]
++  (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
++
++
++(deftest metadata-and-retry-budget
++  (let [clock    (atom 0)
++        sent     (atom [])
++        sleeps   (atom [])
++        response {:status  429
++                  :headers {"Retry-After" "2" "X-Request-ID" "req-1"}
++                  :body    {:error {:message "Rate limited"}}}
++        send     (fn [req] (swap! sent conj req) response)]
++    (binding [retry/*clock-ms* #(deref clock)
++              retry/*sleep-fn* #(do (swap! sleeps conj %) (swap! clock + %))]
++      (let [error (failure #(retry/request! send {:timeout-ms 9000} classify :openai policy))]
++        (is (= 3 (:attempts error)))
++        (is (= 429 (:status error)))
++        (is (= "req-1" (:request-id error)))
++        (is (= 2000 (:retry-after-ms error)))
++        (is (= [5000 3000 1000] (mapv :timeout-ms @sent)))
++        (is (= [2000 2000] @sleeps))))))
++
++
++(deftest never-retry-before-retry-after
++  (binding [retry/*sleep-fn* (fn [_] (throw (AssertionError. "must not sleep")))]
++    (let [error (failure #(retry/request! (constantly {:status 429 :headers {"retry-after" "20"}})
++                                          {}
++                                          classify
++                                          :openai
++                                          policy))]
++      (is (= :retry/deadline (:error/type error)))
++      (is (= 1 (:attempts error)))
++      (is (= 20000 (:retry-after-ms error)))))
++  (is (= 2000
++         (retry/parse-retry-after "Sun, 06 Nov 1994 08:49:32 GMT"
++                                  (Instant/parse "1994-11-06T08:49:30Z")))))
++
++
++(deftest nontransient-errors-and-response-cleanup
++  (doseq [[status body] [[401 {}] [402 {}] [400 {}] [413 {}] [422 {}]
++                        [429 {:error {:message "insufficient_quota"}}]]]
++    (let [calls (atom 0)]
++      (failure #(retry/request! (fn [_] (swap! calls inc) {:status status :body body})
++                                {}
++                                classify
++                                :openai
++                                policy))
++      (is (= 1 @calls) (str status))))
++  (let [closed (atom false)
++        body   (proxy [ByteArrayInputStream] [(byte-array 0)]
++                 (close [] (reset! closed true)))]
++    (failure #(retry/request! (constantly {:status 401 :body body}) {} classify :openai nil))
++    (is @closed)))
++
++
++(deftest cancellation-is-never-retried
++  (let [calls (atom 0)]
++    (try
++      (let [interrupted? (try
++                           (retry/request! (fn [_] (swap! calls inc) (throw (InterruptedException.)))
++                                           {} classify :openai policy)
++                           :not-thrown
++                           (catch InterruptedException _ (Thread/interrupted)))]
++        (is (true? interrupted?))
++        (is (= 1 @calls)))
++      (finally (Thread/interrupted)))))
++
++
++(deftest one-shot-default-and-malformed-success
++  (let [calls (atom 0)]
++    (with-redefs [http/request (fn [_] (swap! calls inc) {:status 200 :body {:data []}})]
++      (is (thrown? clojure.lang.ExceptionInfo
++                   (sdk/embed :openai {:embed/model "test" :embed/inputs ["a"]}
++                              :config {:api-key "test"}
++                              :retry policy)))
++      (is (= 1 @calls))))
++  (let [calls (atom 0)]
++    (with-redefs [http/request (fn [_] (swap! calls inc) {:status 503 :body {}})]
++      (is (thrown? clojure.lang.ExceptionInfo
++                   (sdk/embed :openai {:embed/model "test" :embed/inputs ["a"]}
++                              :config {:api-key "test"})))
++      (is (= 1 @calls)))))
++
++(deftest wrapped-interruption-is-never-replayed
++  (let [calls (atom 0)
++        interrupted? (try
++                       (retry/request! (fn [_]
++                                         (swap! calls inc)
++                                         (throw (java.io.IOException. "wrapped" (InterruptedException.))))
++                                       {} classify :openai policy)
++                       false
++                       (catch InterruptedException _ (Thread/interrupted)))]
++    (is interrupted?)
++    (is (= 1 @calls))))
++
++
++(deftest nonchat-json-multipart-and-binary-retries
++  (let [calls (atom 0)]
++    (binding [retry/*sleep-fn* (fn [_])]
++      (with-redefs [http/request (fn [_]
++                                   (if (= 1 (swap! calls inc))
++                                     {:status 503 :body {}}
++                                     {:status 200 :body {:model "test" :data [{:index 0 :embedding [0.1 0.2]}]}}))]
++        (is (= [[0.1 0.2]]
++               (:embed/vectors
++                (sdk/embed :openai {:embed/model "test" :embed/inputs ["a"]}
++                           :config {:api-key "test"}
++                           :retry policy)))))
++      (is (= 2 @calls))))
++  (doseq [operation [:transcribe :speak]]
++    (let [calls (atom [])]
++      (binding [retry/*sleep-fn* (fn [_])]
++        (with-redefs [hc/request (fn [request]
++                                   (swap! calls conj request)
++                                   (if (= 1 (count @calls))
++                                     {:status 503 :body "{}"}
++                                     {:status  200
++                                      :headers {"content-type" "audio/mpeg"}
++                                      :body    (if (= :transcribe operation) "{\"text\":\"hello\"}" (byte-array [1 2]))}))]
++          (if (= :transcribe operation)
++            (is (= "hello"
++                   (:transcription/text
++                    (sdk/transcribe :openai {:transcribe/model "test" :transcribe/file (byte-array [1 2])}
++                                    :config {:api-key "test"}
++                                    :retry policy))))
++            (is (= [1 2]
++                   (vec (:audio/bytes
++                         (sdk/speak :openai {:speak/model "test" :speak/input "hi" :speak/voice "alloy"}
++                                    :config {:api-key "test"}
++                                    :retry policy)))))))
++        (is (= 2 (count @calls))))))
++  (is (= :request/non-replayable-body
++         (:error/type (failure #(retry/request! (fn [_] (throw (AssertionError.)))
++                                                {:multipart [{:content (ByteArrayInputStream. (byte-array [1]))}]}
++                                                classify
++                                                :openai
++                                                policy))))))

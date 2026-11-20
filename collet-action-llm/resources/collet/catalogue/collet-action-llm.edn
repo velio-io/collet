@@ -1,0 +1,63 @@
+[{:type          :collet.actions.llm/openai
+  :purpose       "Ask an OpenAI-compatible model to transform or analyse data"
+  :effects       "network request; provider cost; tools may have other effects"
+  :package       "collet-action-llm"
+  :coordinate    "io.velio/collet-action-llm"
+  :namespace     "collet.actions.llm"
+  :params-schema [:map [:question :string] [:model :string] [:api-key :string] [:vars {:optional true} :map] [:images {:optional true} [:vector :any]] [:api-endpoint {:optional true} :string]
+                  [:organization {:optional true} :string] [:response-format {:optional true} :map] [:max-tokens {:optional true} :int] [:temperature {:optional true} number?] [:top-p {:optional true} number?]
+                  [:tools {:optional true} [:vector :any]] [:as {:optional true} [:enum :values]]]
+  :example       "{:name :summarize :type :collet.actions.llm/openai :selectors {key [:config :api-key]} :params {:question \"Summarize this report\" :model \"configured-model\" :api-key key}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type :collet.actions.llm/request
+  :purpose "Run a synchronous multi-provider LLM operation"
+  :effects "network request; provider cost"
+  :package "collet-action-llm"
+  :coordinate "io.velio/collet-action-llm"
+  :namespace "collet.actions.llm"
+  :params-schema
+  [:and
+   [:map [:provider :keyword] [:model [:string {:min 1}]]
+    [:connection {:optional true}
+     [:map {:closed true} [:api-key {:optional true} :string] [:auth-token {:optional true} :string] [:base-url {:optional true} :string] [:headers {:optional true} :map] [:timeout-ms {:optional true} [:int {:min 1}]]
+      [:connect-timeout-ms {:optional true} [:int {:min 1}]]]]
+    [:retry {:optional true}
+     [:map {:closed true} [:max-attempts {:optional true} [:int {:min 1}]] [:budget-ms {:optional true} [:int {:min 1}]] [:base-delay-ms {:optional true} [:int {:min 0}]] [:max-delay-ms {:optional true} [:int {:min 0}]]
+      [:jitter-ratio {:optional true} [:or [:int {:min 0 :max 1}] [:double {:min 0 :max 1}]]]]]
+    [:provider-options {:optional true} :map] [:raw? {:optional true} :boolean] [:max-media-bytes {:optional true} [:int {:min 1}]]]
+   [:multi {:dispatch :operation}
+    [:chat
+     [:map [:operation [:= :chat]]
+      [:messages
+       [:vector {:min 1}
+        [:map [:role [:enum :system :developer :user :assistant :tool]] [:content {:optional true} [:or :string [:vector :map]]] [:tool-calls {:optional true} [:vector :map]] [:tool-call-id {:optional true} :string]
+         [:name {:optional true} :string] [:provider-data {:optional true} :map]]]]
+      [:tools {:optional true} [:vector :map]] [:tool-choice {:optional true} :any] [:temperature {:optional true} number?] [:top-p {:optional true} number?] [:max-tokens {:optional true} [:int {:min 1}]]
+      [:stop {:optional true} [:or :string [:vector :string]]] [:response-format {:optional true} [:map [:type [:enum :malli :json-schema]] [:schema :any] [:name {:optional true} :string]]]
+      [:reasoning {:optional true} :map] [:cache {:optional true} :map] [:metadata {:optional true} :map]]]
+    [:decide
+     [:map [:operation [:= :decide]] [:input [:or :string :map [:vector :any]]]
+      [:questions [:map-of {:min 1} [:or :keyword :string] :map]] [:images {:optional true} [:map-of [:or :keyword :string] :map]]]]
+    [:embed
+     [:map [:operation [:= :embed]] [:input [:or :string [:vector {:min 1} :string]]]
+      [:dimensions {:optional true} [:int {:min 1}]] [:encoding-format {:optional true} [:enum :float :base64]] [:user {:optional true} :string]]]
+    [:moderate
+     [:map [:operation [:= :moderate]] [:input [:or :string [:vector {:min 1} [:or :string :map]]]]]]
+    [:rerank
+     [:map [:operation [:= :rerank]] [:input :string] [:documents [:vector {:min 1} :string]]
+      [:top-n {:optional true} [:int {:min 1}]] [:return-documents {:optional true} :boolean]]]
+    [:generate-image
+     [:map [:operation [:= :generate-image]] [:input :string] [:n {:optional true} [:int {:min 1}]] [:size {:optional true} :string]
+      [:quality {:optional true} :keyword] [:style {:optional true} :keyword] [:response-format {:optional true} [:enum :url :b64_json]] [:user {:optional true} :string]]]
+    [:transcribe
+     [:map [:operation [:= :transcribe]] [:file :any] [:filename {:optional true} :string] [:language {:optional true} :string]
+      [:prompt {:optional true} :string] [:temperature {:optional true} number?] [:response-format {:optional true} [:enum :json :text :srt :verbose_json :vtt :diarized_json]]
+      [:timestamp-granularities {:optional true} [:set [:enum :segment :word]]]]]
+    [:speak
+     [:map [:operation [:= :speak]] [:input :string] [:voice {:optional true} [:or :string :map]]
+      [:format {:optional true} [:enum :mp3 :opus :aac :flac :wav :pcm]] [:speed {:optional true} number?] [:instructions {:optional true} :string]]]]]
+  :example
+  "{:name :answer :type :collet.actions.llm/request :params {:operation :chat :provider :openai :model \"configured-model\" :messages [{:role :user :content \"Hello\"}] :connection {:api-key \"configured-key\"}} :return [:data]}"
+  :notes "One attempt by default. Explicit bounded retries; no streaming or automatic tool execution. SDK publication currently gates release."
+  :documentation "collet://docs/generic-actions"}]

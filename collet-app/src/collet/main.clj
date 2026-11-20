@@ -239,7 +239,7 @@
    (throw ex)))
 
 
-(defn -main
+(defn run-headless!
   "Main entry point for the collet application.
    Receives the pipeline spec and config as arguments.
    Pipeline spec and config can be provided as a file path (local or S3) or a raw Clojure map."
@@ -285,3 +285,25 @@
           (finally
            (stop-fn)
            (System/exit 0)))))))
+
+
+(def ui-cli-options
+  [[nil "--ui" "Start the local Workbench"]
+   [nil "--port PORT" "Workbench port" :default 8081 :parse-fn parse-long
+    :validate [#(and (integer? %) (< 0 % 65536)) "Port must be between 1 and 65535"]]])
+
+
+(defn -main [& args]
+  (if (some #{"--ui"} args)
+    (let [{:keys [options errors summary]} (tools.cli/parse-opts args ui-cli-options)]
+      (if errors
+        (do (println (first errors)) (println summary) (System/exit 1))
+        (let [server  ((requiring-resolve 'collet.workbench.http/start!)
+                       {:port     (:port options)
+                        :data-dir (get-env "COLLET_DATA_DIR" 'Str :or "./.collet")})
+              stopped (promise)
+              stop    #(do ((:stop server)) (deliver stopped true))]
+          (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable stop))
+          (println (str "Collet Workbench: http://127.0.0.1:" (:port server)))
+          @stopped)))
+    (apply run-headless! args)))

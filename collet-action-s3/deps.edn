@@ -2,20 +2,21 @@
  {:description       "S3 actions for Collet"
   :public-namespaces [collet.actions.s3]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-s3.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure         {:mvn/version "1.12.5"}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure         {:mvn/version "1.12.6"}
         io.velio/collet-core        {:local/root "../collet-core"}
         io.velio/collet-action-file {:local/root "../collet-action-file"}
         diehard/diehard             {:mvn/version "0.12.1"}
-        com.cognitect.aws/api       {:mvn/version "0.8.838"}
-        com.cognitect.aws/endpoints {:mvn/version "871.2.47.0"}
-        com.cognitect.aws/s3        {:mvn/version "871.2.46.17"}}
+        com.cognitect.aws/api       {:mvn/version "0.8.847"}
+        com.cognitect.aws/endpoints {:mvn/version "871.2.55.12"}
+        com.cognitect.aws/s3        {:mvn/version "871.2.55.11"}}
  :aliases
  {:test        {:extra-paths ["test"]
                 :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}
-                              com.cnuernber/charred         {:mvn/version "1.041"}}
+                              com.cnuernber/charred         {:mvn/version "1.043"}}
                 :jvm-opts    ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                               "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                               "--enable-native-access=ALL-UNNAMED"]

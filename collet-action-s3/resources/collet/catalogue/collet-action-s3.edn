@@ -1,0 +1,257 @@
+[{:package "collet-action-s3"
+  :purpose
+  "Upload records or a binary file to S3-compatible storage, including R2"
+  :type :collet.actions.s3/sink
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:file-name :string]
+   [:input :any]
+   [:format {:optional true} :keyword]
+   [:cat? {:optional true} :boolean]
+   [:csv-header? {:optional true} :boolean]
+   [:encoding {:optional true} :string]]
+  :result-schema
+  [:map
+   [:bucket :string]
+   [:key :string]
+   [:etag {:optional true} :string]]
+  :effects "network and object storage write"
+  :notes
+  "Select credentials from configuration. :aws-creds may include :endpoint-override {:protocol :https :hostname \"ACCOUNT_ID.r2.cloudflarestorage.com\" :port 443}. With an explicit endpoint, region \"auto\" uses R2's accepted \"us-east-1\" alias for SDK endpoint lookup and signing. :input accepts records, a local binary file path, or an input stream; omit :format for an existing file. Returns :bucket, :key and optional :etag from PutObject or completed multipart upload. Preserve :etag as an opaque value, including quotes; it is not necessarily an MD5 checksum. Supports :text, :bytes and :edn through the local serializer. Upload staging uses unique temporary paths and is cleaned up on success or failure."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :upload :type :collet.actions.s3/sink :selectors {creds [:config :aws]} :params {:aws-creds creds :bucket \"reports\" :file-name \"totals.json\" :input [{:total 10}] :format :json}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "List S3/R2 object metadata as a dataset"
+  :type :collet.actions.s3/list
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:prefix {:optional true} :string]
+   [:glob {:optional true} :string]
+   [:extensions {:optional true} [:sequential :string]]
+   [:min-size {:optional true} [:int {:min 0}]]
+   [:max-size {:optional true} [:int {:min 0}]]
+   [:modified-after {:optional true} :string]
+   [:modified-before {:optional true} :string]
+   [:page-size {:optional true} [:int {:min 1}]]
+   [:limit {:optional true} [:int {:min 0}]]]
+  :result-schema :any
+  :effects "network read"
+  :notes
+  "Uses ListObjectsV2 and follows all continuation tokens. :page-size is 1..1000 (default 1000); :limit applies after filtering. Prefix is sent to S3; other filters run locally on listing metadata, with no HeadObject calls. Returns :file-name, :path, :bucket, :key, :size-bytes, :modified-at and opaque :etag columns, including for empty results."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :list, :type :collet.actions.s3/list, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :prefix \"daily/\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose
+  "Read S3/R2 content into memory, a dataset, a local copy, or a stream"
+  :type :collet.actions.s3/read
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]
+   [:as {:optional true} [:enum :memory :dataset :file :stream]]
+   [:format {:optional true} [:enum :bytes :text :json :edn :csv]]
+   [:encoding {:optional true} :string]
+   [:keywordize {:optional true} :boolean]
+   [:csv-header? {:optional true} :boolean]
+   [:max-bytes {:optional true} [:int {:min 0}]]
+   [:destination {:optional true} :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema :any
+  :effects "network read; :as :file also writes locally"
+  :notes
+  "Same :as and :format options as file/read. Default :memory returns bytes. :file requires :destination. The caller closes :stream, releasing both response body and client; consume streams within the same task. Materialized reads support :max-bytes."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :read, :type :collet.actions.s3/read, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "Inspect S3/R2 object metadata"
+  :type :collet.actions.s3/stat
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]]
+  :result-schema :map
+  :effects "network read"
+  :notes
+  "Uses HeadObject. Includes listing fields plus available :content-type and :metadata. Missing objects fail; ETags are opaque."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :stat, :type :collet.actions.s3/stat, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "Check whether an S3/R2 object exists"
+  :type :collet.actions.s3/exists?
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]]
+  :result-schema :boolean
+  :effects "network read"
+  :notes
+  "Only a not-found response becomes false; permission and transport failures propagate."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :exists?, :type :collet.actions.s3/exists?, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "Copy an S3/R2 object on the server"
+  :type :collet.actions.s3/copy
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]
+   [:destination-bucket {:optional true} :string]
+   [:destination-key :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema
+  [:map
+   [:bucket :string]
+   [:key :string]
+   [:etag {:optional true} :string]]
+  :effects "object storage write"
+  :notes
+  "Destination bucket defaults to the source bucket. Copies up to 5 GB, pinned to the source ETag. Rejects an existing destination unless :overwrite? true; this check is best effort under concurrent writes."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :copy, :type :collet.actions.s3/copy, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\", :destination-key \"archive/daily.csv\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "Copy an S3/R2 object and then delete its source"
+  :type :collet.actions.s3/move
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]
+   [:destination-bucket {:optional true} :string]
+   [:destination-key :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema
+  [:map
+   [:bucket :string]
+   [:key :string]
+   [:etag {:optional true} :string]]
+  :effects "object storage write and delete"
+  :notes
+  "Uses the same limits as copy. Move is not atomic. A copy failure leaves the source; a deletion failure reports :copied, :source and :source-retained in exception data."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :move, :type :collet.actions.s3/move, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\", :destination-key \"archive/daily.csv\"}}"
+  :namespace "collet.actions.s3"}
+ {:package "collet-action-s3"
+  :purpose "Delete one S3/R2 object"
+  :type :collet.actions.s3/delete
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:aws-creds
+    [:map
+     [:aws-region :string]
+     [:aws-key :string]
+     [:aws-secret :string]
+     [:endpoint-override
+      {:optional true}
+      [:map
+       [:protocol [:enum :http :https]]
+       [:hostname :string]
+       [:port :int]]]]]
+   [:bucket :string]
+   [:key :string]]
+  :result-schema [:map [:bucket :string] [:key :string]]
+  :effects "object storage delete"
+  :notes
+  "Deletes the exact key, not a prefix. Returns a receipt; deleting a missing key is idempotent."
+  :coordinate "io.velio/collet-action-s3"
+  :example
+  "{:name :delete, :type :collet.actions.s3/delete, :params {:aws-creds {:aws-region \"us-east-1\", :aws-key \"EXAMPLE_KEY\", :aws-secret \"EXAMPLE_SECRET\"}, :bucket \"reports\", :key \"daily.csv\"}}"
+  :namespace "collet.actions.s3"}]

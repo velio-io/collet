@@ -11,6 +11,7 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
   version, which is a compatibility break from previous releases.
 - Clojure CLI.
 - Babashka.
+- Node.js 22 and npm for the bundled Workbench in `collet-app`.
 - zprint is pinned by the repository and runs through `bb fmt:check` and
   `bb fmt:fix`; no standalone formatter installation is required.
 - `clj-paren-repair` for the agent Clojure workflow.
@@ -21,6 +22,11 @@ artifact contract in its own `deps.edn` under `:collet/artifact`.
 
 The workspace pins Kmono and its CLI to 4.12.3, Kaven to 1.0.0, and
 `tools.build` to 0.10.14.
+
+The generic LLM integration currently needs `bb dev:llm-sdk` before dependency
+resolution. This clones the pinned upstream checkout, applies the reviewed
+lifecycle patch, runs its offline tests and installs a distinct local snapshot.
+It does not publish. See [the SDK release gate](./llm-and-sparql.md#sdk-development-dependency).
 
 ## Source and published dependencies
 
@@ -36,6 +42,12 @@ Do not edit generated POMs or introduce internal Maven pins into source `deps.ed
 files. Versions are derived from package tags; there is no source version file,
 manual version-bump command, or supported `bb version` task.
 
+A genuinely new package may declare `:initial-release? true` in its artifact
+contract to use the workspace bootstrap version before its first tag exists.
+Once tagged, ordinary Kmono version resolution takes precedence. An untagged
+existing package without this declaration remains an error. This declaration
+does not create a tag or publish an artifact.
+
 ## Repository commands
 
 Run build, workspace, verification, and release commands from the repository root:
@@ -50,6 +62,7 @@ Run build, workspace, verification, and release commands from the repository roo
 | `bb test:integration` | Builds app/CLI outputs, then runs only integration tests in integration-bearing packages; Docker is required. |
 | `bb test` | Runs the complete unit and integration suite; Docker is intentionally required. |
 | `bb test:module <module>` | Runs one package's complete `:test` alias in its own JVM; Docker may be required. Cognitect test-runner options may follow the module. |
+| `bb workbench:prepare` | Writes the ignored source Workbench compatibility manifest; no UI/JAR builds or dependency installation. Run before startup and regenerate/restart after package-version changes. |
 | `bb build [module]` | Builds one package and its dependencies, or every package, in dependency order. |
 | `bb install [module]` | Installs one publishable package and its dependencies, or all publishable packages, into the local Maven repository. |
 | `bb verify` | Builds artifacts and checks their public POM coordinates/internal dependency versions, namespace entries, executable entrypoints, CLI archive layout/modes, and Vega golden output. |

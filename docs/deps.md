@@ -23,19 +23,31 @@ These dependencies will be fetched at runtime just before the pipeline execution
 Collet's optional actions use normal Maven coordinates as well. Prefer the smallest
 module that contains the namespaces a pipeline needs:
 
-```clojure
-{:deps {:coordinates [[io.velio/collet-action-http "VERSION"]]
-        :requires [[collet.actions.http]]}}
-```
+Use `collet_describe_action` to obtain the exact `dependencyEdn` for an action,
+then merge its `:coordinates` and `:requires` into the pipeline's `:deps`.
+Packages have independent versions; preserve each returned pin. The compatibility
+aggregate `io.velio/collet-actions` remains available for legacy consumers.
 
-Use `[io.velio/collet-actions "VERSION"]` when compatibility with all legacy action
-namespaces is more important than classpath size. `VERSION` always means the
-version published for that specific coordinate; Collet modules are independently
-versioned and their versions do not need to match. The aggregate's generated POM
-pins the exact compatible versions of all action modules transitively, so consumers
-must not add or synchronize those internal versions themselves. See the
-[module graph](./module-migration.md#module-graph) for every coordinate and its direct
-internal dependencies.
+Generic LLM operations belong to `io.velio/collet-action-llm`; SPARQL formatting,
+query and update belong to `io.velio/collet-action-sparql`. Their catalogue entries
+include the corresponding schemas and dependency recipes. The LLM implementation
+currently has an [unpublished SDK dependency](./llm-and-sparql.md#sdk-development-dependency);
+source development requires `bb dev:llm-sdk`, and distributable releases remain gated.
+
+`:coordinates` supplies Maven libraries, `:requires` loads namespaces, and
+`:imports` exposes Java classes. Namespace/class declarations do not install a
+library. Include coordinates even if the action is `classpath-present`, which
+reports availability in the current process only. A successful Workbench or saved
+run does not prove deployment portability. Test outside the checkout with the
+intended deployment artifacts.
+
+For source Workbench, run `bb workbench:prepare` before startup. It uses the build
+version resolver to write `target/workbench-knowledge/collet/knowledge/compatibility.edn`
+without building UI/JARs or installing dependencies. Packaged manifests take
+precedence. Regenerate and restart after changing package versions. Without a
+manifest, MCP returns null `version` and `dependencyEdn` plus preparation guidance;
+never invent a version. Exact development versions must also be staged or
+installed in the deployment's Maven repository.
 
 These are consumer dependencies. Inside this repository, package `deps.edn` files
 use top-level `:local/root` entries for other Collet packages, so a checkout uses its

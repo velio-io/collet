@@ -27,5 +27,5 @@ Here's some examples:
 [:contains [:user :roles] "admin"]
 
 ;; Check if the user's email is a gmail account
-[:regex [:user :email] #"@gmail.com$"]
+[:regex [:user :email] #rgx "@gmail.com$"]
 ```

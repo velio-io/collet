@@ -15,6 +15,7 @@
    [org.apache.arrow.vector.types TimeUnit]
    [org.apache.arrow.vector VectorSchemaRoot]
    [org.apache.arrow.memory RootAllocator]
+   [org.apache.arrow.vector.ipc ArrowReader]
    [org.apache.arrow.vector.complex ListVector]))
 
 
@@ -22,6 +23,34 @@
 
 
 (declare with-arrow-file)
+
+
+(deftest returned-dataset-stream-owns-its-reader-lifetime
+  (with-open [allocator (RootAllocator.)
+              reader    (proxy [ArrowReader] [allocator]
+                          (readSchema [] (Schema. []))
+                          (loadNextBatch [] false)
+                          (bytesRead [] 0)
+                          (closeReadSource [] nil))]
+    (let [closed (atom 0)
+          stream (sut/reader->dataset-seq reader [] #(swap! closed inc))]
+      (is (:ds-seq (meta stream)))
+      (is (empty? stream))
+      ((:collet/close (meta stream)))
+      (is (= 1 @closed)))))
+
+
+(deftest surviving-tail-keeps-reader-open
+  (with-arrow-file
+   (fn [file]
+     (let [schema (sut/infer-schema! [{:v "first"}])]
+       (with-open [out (sut/make-writer file schema)]
+         (doseq [v ["first" "second"]] (sut/write out [{:v v}])))
+       (let [tail (rest (sut/read-arrow-record-batches file schema))]
+         (dotimes [_ 4]
+           (System/gc)
+           (Thread/sleep 50))
+         (is (= [[{:v "second"}]] (vec tail))))))))
 
 
 (deftest test-ds->columns

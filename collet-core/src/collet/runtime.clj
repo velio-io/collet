@@ -4,6 +4,7 @@
    [collet.artifact :as artifact]
    [collet.store :as store]
    [collet.store.datalevin :as datalevin]
+   [collet.stream :as stream]
    [collet.utils :as utils]
    [com.brunobonacci.mulog :as ml]
    [tech.v3.dataset :as ds]
@@ -28,9 +29,6 @@
   (arrow/read-dataset
    (.-file arrow-task-result)
    (.-columns arrow-task-result)))
-
-
-(def ^:private arrow-batch-size 4096)
 
 
 (defn- batch-candidate?
@@ -86,16 +84,24 @@
           (arrow/infer-schema! records))))))
 
 
+(defn- logical-rows [batch schema]
+  (if (ds/dataset? batch)
+    (let [columns (or schema (:arrow-columns (meta batch)))]
+      (cond->> (ds/rows batch) columns (map #(arrow/prep-record % columns))))
+    batch))
+
+
 (defn- write-arrow-result!
   [task-name data schema batches?]
-  (let [file ^File (File/createTempFile (name task-name) ".arrow")]
+  (let [file ^File (File/createTempFile (str "collet-" (name task-name)) ".arrow")]
     (.deleteOnExit file)
     (with-open [writer (arrow/make-writer file schema)]
       (if batches?
         (doseq [batch data
                 :when (nonempty-batch? batch)]
-          (arrow/write writer batch))
-        (doseq [batch (partition-all arrow-batch-size data)
+          (doseq [rows (stream/chunks (clojure.lang.RT/iter (logical-rows batch schema)) stream/row-limit)]
+            (arrow/write writer rows)))
+        (doseq [batch (stream/chunks (clojure.lang.RT/iter data) stream/row-limit)
                 :when (nonempty-batch? batch)]
           (arrow/write writer batch))))
     (ArrowTaskResult. task-name schema file)))
@@ -335,7 +341,11 @@
              :type    (some-> root
                               class
                               .getName)}
-      (:action data) (assoc :action (:action data)))))
+      (:action data) (assoc :action (:action data))
+      (:code data) (assoc :code (:code data))
+      (:collet.error/type data) (assoc :code (:collet.error/type data))
+      (= :collet.error/arrow-invalid-value (:collet.error/type data))
+      (merge (select-keys data [:path :expected :actual-class :reason :hint])))))
 
 
 (defn- safe-callback
@@ -373,13 +383,15 @@
                 :message (ex-message error))))))
 
 
-(defn- deliver-run!
-  [ctx run-id run]
+(defn- log-run-state! [ctx run]
+  (ml/with-context (:trace (get @(:runs ctx) (:run/id run)))
+                   (ml/log :collet/run-state :run-id (:run/id run) :status (:run/status run))))
+
+
+(defn- deliver-run! [ctx run-id run]
   (when-let [runtime (get @(:runs ctx) run-id)]
-    (swap! (:runs ctx)
-      update
-      run-id
-      #(select-keys % completed-runtime-keys))
+    (log-run-state! ctx run)
+    (swap! (:runs ctx) update run-id #(select-keys % completed-runtime-keys))
     (deliver (:completion runtime) {:run run})))
 
 
@@ -422,7 +434,9 @@
     (let [failure {:message "Pipeline persistence failed."
                    :type    (some-> error
                                     class
-                                    .getName)}]
+                                    .getName)
+                   :cause   (sanitized-error error nil)}]
+      (ml/log :collet/persistence-failed :run-id run-id :error failure)
       (try
         (let [run (store/update-run! (:store ctx)
                                      run-id
@@ -504,32 +518,101 @@
                   (assoc data :collet.error/type :collet.error/non-durable-output))))
 
 
-(defn- write-dataset-output!
-  [task-name data schema-override]
-  (let [source data
-        data   (if (ds/dataset? data) [data] data)
-        {:keys [batches? first-batch]} (result-layout data)
-        schema (or (some-> schema-override
-                           arrow/normalize-schema)
-                   (result-schema data batches? first-batch))]
-    (when (skip-arrow-conversion? source)
-      (non-durable-output!
-       "A retained record dataset cannot skip Arrow conversion."
-       {:task task-name}))
-    (when-not schema
-      (non-durable-output!
-       "A retained record dataset needs an explicit :arrow-columns schema."
-       {:task task-name}))
-    (write-arrow-result! task-name data schema batches?)))
+(defn- stream-output!
+  "Reduce rows once. Infer from the first bounded buffer, then reuse the Arrow writer."
+  [task-name schema-override consume]
+  (let [file   (delay (File/createTempFile (str "collet-" (name task-name)) ".arrow"))
+        schema (volatile! schema-override)
+        writer (volatile! nil)
+        mode   (volatile! (when schema-override :dataset))
+        buffer (volatile! [])
+        bytes  (volatile! 0)
+        flush! (fn []
+                 (when-not @writer
+                   (when-not @schema (vreset! schema (arrow/infer-schema! @buffer)))
+                   (vreset! writer (arrow/make-writer @file @schema)))
+                 (when (seq @buffer) (arrow/write @writer @buffer))
+                 (vreset! buffer [])
+                 (vreset! bytes 0))
+        accept (fn [_ row]
+                 (when (and (nil? @mode) (some? row))
+                   (vreset! mode (if (map? row) :dataset :scalar)))
+                 (if (= :dataset @mode)
+                   (let [width (stream/estimated-bytes row)]
+                     (when (and (seq @buffer)
+                                (or (> (+ @bytes width) stream/byte-target)
+                                    (>= (count @buffer) (if @writer stream/row-limit 200))))
+                       (flush!))
+                     (vswap! bytes + width)
+                     (vswap! buffer conj row))
+                   (vswap! buffer conj row))
+                 nil)]
+    (try
+      (try
+        (consume accept)
+        (if (= :dataset @mode)
+          (do (flush!)
+              {:output/kind :dataset :output/file @file :output/schema @schema})
+          {:output/kind :scalar :output/value @buffer})
+        (finally (when @writer (.close ^java.io.Closeable @writer))))
+      (catch Throwable t (when (realized? file) (.delete ^File @file)) (throw t)))))
 
 
-(defn- format-task-output
+(defn- accept-flat [accept item path]
+  (cond
+    (ds/dataset? item)
+    (throw (ex-info "A flattened task output contains a nested dataset batch."
+                    {:collet.error/type :collet.error/arrow-invalid-value
+                     :path              path
+                     :expected          "row map"
+                     :actual-class      "dataset batch"
+                     :reason            :nested-dataset-batch
+                     :hint              "Emit rows before flattening, for example with collet.stream/rows."}))
+    (sequential? item)
+    (reduce (fn [index child]
+              (accept-flat accept child (conj path index))
+              (inc index))
+            0
+            item)
+    :else (accept nil item)))
+
+
+(defn- retained-iterator-output [task result]
+  (let [spec (:spec task)]
+    (stream-output! (:name task)
+                    (:arrow-columns spec)
+                    (fn [accept]
+                      (reduce (fn [index item]
+                                (cond
+                                  (ds/dataset? item) (reduce accept nil (logical-rows item (:arrow-columns spec)))
+                                  (= :flatten (:state-format task)) (accept-flat accept item [index])
+                                  :else (accept nil item))
+                                (inc index))
+                              0
+                              result)))))
+
+
+(defn- write-dataset-output! [task-name data schema-override]
+  (let [batched? (or (ds/dataset? data) (utils/ds-seq? data) (record-batch? (first data)))
+        batches  (if (ds/dataset? data) [data] data)
+        schema   (or schema-override (:arrow-columns (meta data)))
+        output   (stream-output! task-name
+                                 schema
+                                 (fn [accept]
+                                   (if batched?
+                                     (reduce (fn [_ batch]
+                                               (reduce accept nil (logical-rows batch schema)))
+                                             nil
+                                             batches)
+                                     (reduce accept nil data))))]
+    (when-not (= :dataset (:output/kind output))
+      (non-durable-output! "A retained record dataset needs an explicit :arrow-columns schema." {:task task-name}))
+    output))
+
+
+(defn- format-sequence-output
   [runtime task result]
-  (let [result             (if (-> result
-                                   meta
-                                   :iteration)
-                             (seq result)
-                             result)
+  (let [result             (if (:iteration (meta result)) (iterator-seq (clojure.lang.RT/iter result)) result)
         sequential-result? (sequential? result)
         state-format       (:state-format task)
         formatted          (cond
@@ -556,27 +639,79 @@
            {:task (:name task)}))
         (if (and (get-in runtime [:pipeline :use-arrow])
                  record-dataset?)
-          (let [arrow-result (write-dataset-output! (:name task)
-                                                    formatted
-                                                    schema-override)]
-            (cond-> {:output/kind   :dataset
-                     :output/file   (.-file ^ArrowTaskResult arrow-result)
-                     :output/schema (.-columns ^ArrowTaskResult arrow-result)}
+          (let [live-dataset (when (ds/dataset? formatted) formatted)
+                output       (write-dataset-output! (:name task) formatted schema-override)]
+            (cond-> output
               ;; Preserve the existing in-process surface for actions that
               ;; naturally return one TMD dataset. It is cached only after the
               ;; durable completion transaction below; task inputs always read
               ;; the artifact instead.
-              (ds/dataset? formatted)
-              (assoc :output/live-value formatted)))
+              live-dataset
+              (assoc :output/live-value live-dataset)))
           {:output/kind  :scalar
            :output/value (handle-task-result (:name task)
                                              formatted
                                              {:use-arrow   false
                                               :keep-result true})}))
       {:output/kind  :transient
-       :output/value (if sequential-result?
+       :output/value (if (sequential? formatted)
                        (doall formatted)
                        formatted)})))
+
+
+(defn- format-task-output [runtime task result]
+  (try
+    (cond
+      (not (:iteration (meta result))) (format-sequence-output runtime task result)
+      (= :latest (:state-format task))
+      (format-sequence-output runtime (dissoc task :state-format) (reduce (fn [_ item] item) nil result))
+      (and (get-in runtime [:pipeline :use-arrow])
+           (or (:keep-state task) (has-dependants? (:name task) (:graph runtime))))
+      (retained-iterator-output task result)
+      :else (format-sequence-output runtime task result))
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :collet.error/arrow-invalid-value (:collet.error/type (ex-data e)))
+        (let [spec   (:spec task)
+              path   (:return spec)
+              action (or (when (and (vector? path) (= :state (first path))) (second path))
+                         (:name (last (:actions spec))))]
+          (throw (ex-info (ex-message e) (merge {:task (:name task) :action action} (ex-data e)) e)))
+        (throw e)))))
+
+
+(defn scratch-output!
+  "Apply normal task handoff in an owned transient artifact area, without Store writes."
+  [artifact-dir pipeline task result]
+  (let [retained? (or (:keep-state task) (some #(some #{(:name task)} (:inputs %)) (:tasks pipeline)))
+        output    (format-task-output {:pipeline (update pipeline :use-arrow #(if (nil? %) true %)) :graph (dep/graph)}
+                                      (assoc task
+                                        :spec (or (:spec task) task)
+                                        :keep-state retained?)
+                                      result)]
+    (try
+      (let [publication (when (#{:dataset :scalar} (:output/kind output))
+                          (artifact/publish-output! artifact-dir (java.util.UUID/randomUUID) (java.util.UUID/randomUUID) output))]
+        (cond-> {:artifact-dir   artifact-dir
+                 :readers        (atom [])
+                 :representation (if (= :dataset (:output/kind output)) "dataset-batches" "value")}
+          publication (assoc :artifact (:artifact publication))
+          (nil? publication) (assoc :value (:output/value output))))
+      (finally (when-let [file (:output/file output)] (.delete ^File file))))))
+
+
+(defn read-scratch-output [output]
+  (let [value (if-let [artifact (:artifact output)]
+                (artifact/read-artifact (:artifact-dir output) artifact)
+                (:value output))]
+    (when-let [close (:collet/close (meta value))] (swap! (:readers output) conj close))
+    value))
+
+
+(defn close-scratch-output! [output]
+  (when output
+    (doseq [close @(:readers output)] (close))
+    (reset! (:readers output) [])
+    (when (:artifact output) (artifact/delete-artifacts! (:artifact-dir output) [(:artifact output)]))))
 
 
 (defn- handle-task-error!
@@ -614,22 +749,35 @@
 
 (defn- execute-run-task!
   [ctx run-id task]
-  (let [runtime   (get @(:runs ctx) run-id)
-        task-name (:name task)
-        config    (:config runtime)
-        outcome   (try
-                    (let [input-refs (input-output-refs ctx run-id task)
-                          task-ctx   {:config config
-                                      :state  {}
-                                      :inputs (task-inputs ctx task input-refs)
-                                      :store  (:store ctx)}]
-                      {:output (->> ((:task-fn task) task-ctx)
-                                    (format-task-output runtime task))})
-                    (catch Throwable error
-                      {:error error}))]
+  (let [runtime     (get @(:runs ctx) run-id)
+        task-name   (:name task)
+        config      (:config runtime)
+        retry-count (atom 0)
+        outcome     (try
+                      (stream/with-resources
+                       (let [input-refs (input-output-refs ctx run-id task)
+                             trace      (assoc (:trace runtime)
+                                          :run-id run-id
+                                          :task-id (:task/id task)
+                                          :task task-name
+                                          :pipeline (get-in runtime [:pipeline :name])
+                                          :version (get-in runtime [:pipeline :version]))
+                             task-ctx   {:config          config
+                                         :collet/on-retry (fn []
+                                                            (let [n (swap! retry-count inc)]
+                                                              (store/update-task! (:store ctx) (:task/id task) {:task/retry-count n})))
+                                         :state           {}
+                                         :inputs          (task-inputs ctx task input-refs)
+                                         :store           (:store ctx)}]
+                         (ml/with-context trace
+                                          {:output (->> ((:task-fn task) task-ctx)
+                                                        (format-task-output runtime task))})))
+                      (catch Throwable error
+                        {:error error}))]
     (try
       (if-let [error (:error outcome)]
-        (handle-task-error! ctx run-id task error)
+        (do (store/update-task! (:store ctx) (:task/id task) {:task/retry-count @retry-count})
+            (handle-task-error! ctx run-id task error))
         (let [output (:output outcome)]
           (if (= :stopped (:run/status (store/get-run (:store ctx) run-id)))
             (store/update-task! (:store ctx)
@@ -645,10 +793,13 @@
                                (:store ctx)
                                (:task/id task)
                                (cond-> {:task/status      :completed
+                                        :task/retry-count @retry-count
                                         :task/outcome     :computed
                                         :task/finished-at (System/currentTimeMillis)}
                                  publication
-                                 (merge publication)))]
+                                 (merge publication
+                                        {:task/output-records (get-in publication [:artifact :artifact/records])
+                                         :task/output-bytes   (get-in publication [:artifact :artifact/bytes])})))]
               ;; A dependant can only resolve this after the completion
               ;; transaction has made its output reference durable. Terminal
               ;; results without dependants remain process-local and create no
@@ -671,6 +822,7 @@
       (catch Throwable error
         (infrastructure-failure! ctx run-id error))
       (finally
+       (when-let [file (get-in outcome [:output :output/file])] (.delete ^File file))
        (swap! (:task-futures runtime) dissoc task-name)))))
 
 
@@ -680,6 +832,7 @@
         task'   (store/update-task! (:store ctx)
                                     (:task/id task)
                                     {:task/status :running
+                                     :task/retry-count 0
                                      :task/started-at
                                      (System/currentTimeMillis)})]
     (safe-callback (:on-task-start ctx) task')
@@ -805,7 +958,9 @@
                             :task/created-at now})
                          (:tasks pipeline))
         runtime    (merge prepared-runtime
-                          {:config       config
+                          {:pipeline     pipeline
+                           :trace        (ml/local-context)
+                           :config       config
                            :results      (atom {})
                            :task-futures (atom {})
                            :scheduler    (atom nil)
@@ -814,6 +969,7 @@
         run-handle (Run. ctx run-id)]
     (store/create-run! store run task-runs)
     (swap! (:runs ctx) assoc run-id runtime)
+    (log-run-state! ctx run)
     (try
       (reset! (:scheduler runtime)
         (.submit ^ExecutorService (:executor ctx)
@@ -847,7 +1003,7 @@
   (let [ctx (run-context run)
         id  (run-id run)]
     (when (= :running (:run/status (store/get-run (:store ctx) id)))
-      (store/update-run! (:store ctx) id {:run/status :paused}))
+      (log-run-state! ctx (store/update-run! (:store ctx) id {:run/status :paused})))
     run))
 
 
@@ -856,7 +1012,7 @@
   (let [ctx (run-context run)
         id  (run-id run)]
     (when (= :paused (:run/status (store/get-run (:store ctx) id)))
-      (store/update-run! (:store ctx) id {:run/status :running}))
+      (log-run-state! ctx (store/update-run! (:store ctx) id {:run/status :running})))
     run))
 
 
@@ -898,6 +1054,34 @@
     run))
 
 
+(defn delete-pipeline!
+  "Delete a version, or a whole pipeline with :latest-version, and its completed runs."
+  [ctx name options]
+  (ensure-open-context! ctx)
+  (let [busy-run? (:busy-run? options)
+        result    (store/delete-pipeline! (:store ctx)
+                                          name
+                                          (assoc options
+                                            :busy-run?
+                                            (fn [id]
+                                              (or (and busy-run? (busy-run? id))
+                                                  (when-let [runtime (get @(:runs ctx) id)]
+                                                    (or (and (:completion runtime) (not (realized? (:completion runtime))))
+                                                        (seq (some-> runtime
+                                                                     :task-futures
+                                                                     deref))))))))
+        ids       (set (:run-ids result))]
+    (swap! (:runs ctx) #(apply dissoc % ids))
+    (try
+      (artifact/delete-runs! (:artifact-dir ctx) ids)
+      result
+      (catch Exception error
+        (ml/log :collet/artifact-cleanup-failed :run-ids ids :message (ex-message error))
+        (assoc result
+          :cleanup-warning
+          "History was deleted, but some internal output files could not be removed. Check the server logs.")))))
+
+
 (defn close
   "Stops active runs, closes the executor, and always closes the Store."
   [ctx]
@@ -924,8 +1108,10 @@
                  (ml/log :collet/artifact-cleanup-failed
                          :run-id run-id
                          :message (ex-message error)))))
+
            (when-let [results (:results runtime)]
              (reset! results {}))
+
            (when (and (:completion runtime)
                       (not (realized? (:completion runtime))))
              (deliver-run! ctx run-id run)))))

@@ -45,6 +45,58 @@
                 :p3 [1 2 "state-value"]}))))))
 
 
+(deftest action-params-data-mode-test
+  (let [spec {:collet/params-mode :data
+              :params             '{:query {:select [?s]
+                                            :where  [[?s :ex/score ?score]
+                                                     [:filter (> ?score threshold)]]}}
+              :selectors          '{threshold [:config :threshold]}}]
+    (is (= '{:query {:select [?s]
+                     :where  [[?s :ex/score ?score]
+                              [:filter (> ?score 0.5)]]}}
+           (sut/compile-action-params spec {:config {:threshold 0.5} :state {}} (utils/eval-ctx)))))
+  (is (= {:value 3}
+         (sut/compile-action-params {:params '{:value (+ 1 2)}}
+                                    {:config {} :state {}}
+                                    (utils/eval-ctx)))))
+
+
+(deftest action-params-resolve-selectors-in-expanded-forms
+  (let [spec {:params    '{:name (symbol "n")
+                           :data (quote {n [unknown missing disabled alias]})
+                           :form (list (quote +) (quote n) 1)}
+              :selectors '{n [:config :n] missing [:config :missing] disabled [:config :disabled] alias [:config :alias]}}]
+    (is (= '{:name 42 :data {42 [unknown nil false n]} :form (+ 42 1)}
+           (sut/compile-action-params spec
+                                      (sut/->context '{:n 42 :disabled false :alias n})
+                                      (utils/eval-ctx))))))
+
+
+(deftest action-parameter-forms-preserve-runtime-values
+  (let [dataset   (ds/->dataset [{:id 42}])
+        consumed? (atom false)
+        batches   (lazy-seq (reset! consumed? true) (list dataset))
+        spec      {:params    '{:dataset (or rows [])
+                                :batches (identity pages)
+                                :option  (:enabled? settings)
+                                :mixed   (vector rows pages (quote settings))
+                                :names   (map (constantly (quote settings)) pages)}
+                   :selectors '{rows [:state :dataset] pages [:state :batches] settings [:config :settings]}}
+        params    (sut/compile-action-params spec
+                                             {:config {:settings {:enabled? true}}
+                                              :state  {:dataset dataset :batches batches}}
+                                             (utils/eval-ctx))]
+    (is (identical? dataset (:dataset params)))
+    (is (identical? batches (:batches params)))
+    (is (true? (:option params)))
+    (let [[rows pages settings] (:mixed params)]
+      (is (identical? dataset rows))
+      (is (identical? batches pages))
+      (is (= {:enabled? true} settings)))
+    (is (false? @consumed?))
+    (is (= [{:enabled? true}] (:names params)))))
+
+
 (deftest compile-action-test
   (testing "Compiles an action spec into a function"
     (let [action-spec {:type :clj/select-keys
@@ -372,3 +424,101 @@
              :events  [{:kind "created"}]}
             {:id 2 :profile nil :events []}]
            (mapv #(arrow/prep-record % schema) (ds/rows sliced))))))
+
+
+(deftest action-tracing-preserves-the-callers-context-shape
+  (let [action  (sut/compile-action (utils/eval-ctx) {:name :value :type :clj/identity :params [42]})
+        context {:config {} :state {}}]
+    (is (= {:config {} :state {:value 42}} (action context)))
+    (let [caller-id (random-uuid)]
+      (is (= caller-id (::caller (action (assoc context ::caller caller-id))))))))
+
+
+(deftest failing-action-evaluates-parameters-once
+  (let [counter (atom 0)
+        action  (sut/compile-action (utils/eval-ctx)
+                                    '{:name      :fail
+                                      :type      :clj/nth
+                                      :selectors {calls [:config :calls]}
+                                      :params    [[0] (swap! calls inc)]})
+        error   (try (action {:config {:calls counter} :state {}})
+                     (catch Exception e e))]
+    (is (= 1 @counter))
+    (is (= :fail (:action (ex-data error))))
+    (is (= [[0] 1] (:params (ex-data error))))))
+
+
+(deftest action-dependencies-include-setup-and-nested-switches
+  (is (= #{['collet.actions.http] ['collet.actions.jdbc]}
+         (set (sut/get-actions-deps
+               [{:setup   [{:name :token :type :collet.actions.http/oauth2}]
+                 :actions [{:name   :route
+                            :type   :switch
+                            :params {:case [{:condition :default
+                                             :actions   [{:name :write :type :collet.actions.jdbc/execute}]}]}}]}])))))
+
+
+(deftest retry-backoff-normalizes-integer-multipliers
+  (doseq [factor [2 2.0]]
+    (let [calls (atom 0)
+          task  (:task-fn (sut/compile-task (utils/eval-ctx)
+                                            {:name    :retry
+                                             :retry   {:max-retries 1 :backoff-ms [1 5 factor]}
+                                             :actions [{:name :value
+                                                        :type :custom
+                                                        :fn   (fn [] (if (= 1 (swap! calls inc)) (throw (ex-info "retry" {})) 42))}]}))]
+      (is (= 42 (task {:state {} :config {}})))
+      (is (= 2 @calls)))))
+
+
+(deftest config-spec-reports-paths-without-values
+  (let [pipeline {:config-spec [:map [:service [:map [:secret :int]]]]}
+        failure  (try (sut/validate-config! pipeline {:service {:secret "private-value"}})
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (= "invalid-configuration" (:code failure)))
+    (is (not (contains? failure :status)))
+    (is (= [:config :service :secret] (get-in failure [:errors 0 :path])))
+    (is (not (.contains (pr-str failure) "private-value")))
+    (is (nil? (sut/validate-config! pipeline {:service {:secret 42}})))))
+
+
+(deftest invalid-config-spec-reports-code-and-path
+  (doseq [schema [::unknown-schema [:int {:default/fn '(fn [] 1)}]]]
+    (is (= {:code "invalid-config-spec" :path [:config-spec]}
+           (try (sut/compile-config-spec schema)
+                (catch clojure.lang.ExceptionInfo e (ex-data e)))))))
+
+
+(deftest config-spec-fills-literal-defaults-before-validation
+  (let [pipeline {:config-spec [:map
+                                [:service
+                                 [:map [:url {:optional true} [:re {:default "https://fixture.invalid"} "\\Ahttps://[^/]+\\z"]]
+                                  [:token :string]]]]}
+        config   {:service {:token "synthetic" :other "preserved"}}
+        default  (assoc-in config [:service :url] "https://fixture.invalid")
+        override (assoc-in config [:service :url] "https://other.invalid")]
+    (is (= default (sut/prepare-config! pipeline config)))
+    (is (= override (sut/prepare-config! pipeline override)))
+    (is (= {:service {:url "https://fixture.invalid"}} (sut/config-with-defaults pipeline {:service {}})))
+    (is (= [:config :service :url]
+           (try (sut/prepare-config! pipeline (assoc-in override [:service :url] "https://other.invalid/"))
+                (catch clojure.lang.ExceptionInfo e (get-in (ex-data e) [:errors 0 :path])))))
+    (is (thrown-with-msg? Exception
+                          #"literal"
+                          (sut/compile-config-spec [:string {:default/fn '(fn [] "unsafe")}])))))
+
+
+(deftest action-error-preserves-the-cause-with-empty-dataset-batches
+  (let [action {:name      :require-rows
+                :type      :custom
+                :selectors {'rows [:state :pages]}
+                :params    ['rows]
+                :fn        (fn [_] (throw (ex-info "No matching rows." {})))}
+        error  (try
+                 (sut/execute-action action {} {:state {:pages (with-meta [] {:ds-seq true})}})
+                 (catch Exception e e))]
+    (is (= "No matching rows."
+           (some-> error
+                   ex-cause
+                   ex-message)))
+    (is (= [[]] (:params (ex-data error))))))

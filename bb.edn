@@ -27,6 +27,10 @@
              "-e" ":integration"))
 
     (defn test-integration! []
+      (shell "clojure" "-T:build" "prepare-workbench")
+      (shell "clojure" "-T:build" "build" ":module" ":collet-action-s3")
+      (shell "clojure" "-T:build" "build" ":module" ":collet-action-llm")
+      (shell "clojure" "-T:build" "build" ":module" ":collet-action-sparql")
       (shell "clojure" "-T:build" "build" ":module" ":collet-cli")
       (shell "clojure" "-P" "-X:build-test")
       (shell "clojure" "-M:kmono"
@@ -38,6 +42,10 @@
   kmono
   {:doc  "Run the pinned Kmono CLI"
    :task (apply shell (into ["clojure" "-M:kmono"] *command-line-args*))}
+
+  dev:llm-sdk
+  {:doc  "Test and install the pinned, patched SDK development checkout (no publication)"
+   :task (no-args! "dev:llm-sdk" *command-line-args* ["bb" "scripts/prepare-llm-sdk.bb"])}
 
   spike:45
   {:doc  "Run the isolated Issue #45 dataset-artifact spike"
@@ -80,6 +88,12 @@
                        {:args args})))
      (when (#{"collet-app" "collet-cli"} module)
        (shell "clojure" "-T:build" "build" ":module" (str ":" module)))
+     (when (= "collet-app" module)
+       (shell "clojure" "-T:build" "prepare-workbench")
+       (shell "clojure" "-T:build" "build" ":module" ":collet-action-http")
+       (shell "clojure" "-T:build" "build" ":module" ":collet-action-llm")
+       (shell "clojure" "-T:build" "build" ":module" ":collet-action-sparql")
+       (shell "clojure" "-T:build" "build" ":module" ":collet-action-s3"))
      (apply shell
             (into ["clojure" "-M:kmono" "run" "-F"
                    (str ":io.velio/" module) "--M" ":test"]
@@ -89,6 +103,12 @@
   build
   {:doc  "Build one module (defaults to all modules)"
    :task (module-command! "build" "build" *command-line-args*)}
+
+  workbench:prepare
+  {:doc  "Prepare pinned dependency recipes for a source Workbench without building artifacts"
+   :task (no-args! "workbench:prepare"
+                   *command-line-args*
+                   ["clojure" "-T:build" "prepare-workbench"])}
 
   install
   {:doc  "Install one module and its dependencies (defaults to all libraries)"

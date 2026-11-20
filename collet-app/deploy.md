@@ -124,3 +124,22 @@ Repository release tasks never push Docker images. Docker publication remains an
 explicit operation from the app package tag. Return to the original checkout before
 running `git worktree remove "$docker_worktree"`. A Docker push failure does not
 change Maven publication, the CLI GitHub release, or any package version tag.
+
+## Packaged authoring knowledge
+
+The JAR contains the browser, MCP endpoint, documentation, authoring schemas,
+and all action descriptors. The build writes `collet/knowledge/compatibility.edn`
+with each catalogue package's resolved version. Optional integration code is
+still loaded explicitly; catalogue reads do not download or require it.
+
+Docker's default compatibility versions are `0.0.0-local`. For release images,
+pass `COLLET_COMPATIBILITY_VERSIONS` as an EDN map from every optional action
+coordinate to its independently resolved version, alongside `COLLET_VERSION`
+and `COLLET_CORE_VERSION`. A missing coordinate fails the build. These artifacts
+must be available in the configured Maven repository; a local development
+version requires installing the corresponding packages first.
+
+`--ui --port 8081` starts Workbench and `/mcp` in the same JVM.
+The listener remains loopback-only. In a container, access it from the same
+network namespace (or through an explicitly configured loopback tunnel); Docker
+port publishing alone does not expose a loopback-bound server.

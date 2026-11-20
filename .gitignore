@@ -32,3 +32,11 @@ CLAUDE.md
 .serena
 .DS_Store
 /dev/playground.clj
+/.dev-deps/
+/.pal
+/.playwright-mcp
+.openai
+/collet-app/ui/design
+package-lock.json
+.codex
+.claude

@@ -4,6 +4,7 @@
    [clojure.java.io :as io]
    [clojure.string :as string]
    [collet.action :as action]
+   [collet.actions.llm.client :as client]
    [collet.utils :as utils]
    [malli.json-schema :as json-schema]
    [wkok.openai-clojure.api :as openai])
@@ -11,6 +12,22 @@
    [java.io ByteArrayOutputStream InputStream]
    [java.util Base64]
    [org.apache.tika Tika]))
+
+
+(def request client/request)
+
+
+(defmethod action/prep ::request
+  [spec]
+  (assoc spec :collet/sensitive? true))
+
+
+(defmethod action/prep ::openai
+  [spec]
+  (assoc spec :collet/sensitive? true))
+
+
+(defmethod action/action-fn ::request [_] request)
 
 
 (defn question->msgs
@@ -86,10 +103,12 @@
                       :api-key api-key
                       :api-endpoint api-endpoint
                       :organization organization))]
-    (-> completions
-        :choices
-        first
-        :message)))
+    (let [message (get-in completions [:choices 0 :message])]
+      (when (or (:error completions)
+                (not (or (string? (:content message)) (seq (:tool_calls message)))))
+        (throw (ex-info "OpenAI returned an error or malformed response."
+                        {:code :llm/invalid-response :collet/redact-params true})))
+      message)))
 
 
 (defn parse-arguments
@@ -325,4 +344,10 @@
 
 (defmethod action/action-fn ::openai
   [_]
-  ask-openai)
+  (fn [params]
+    (try (ask-openai params)
+         (catch InterruptedException _
+           (.interrupt (Thread/currentThread))
+           (throw (InterruptedException. "LLM request interrupted.")))
+         (catch Exception _
+           (throw (ex-info "OpenAI action failed." {:code :llm/request-failed :collet/redact-params true}))))))

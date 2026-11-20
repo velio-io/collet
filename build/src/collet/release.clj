@@ -122,12 +122,26 @@
     {:packages packages :selected (build/release-packages packages)}))
 
 
+(defn release-blockers [packages selected]
+  (let [reachable (set (mapcat #(tree-seq (fn [id] (seq (:depends-on (packages id))))
+                                          (fn [id] (:depends-on (packages id)))
+                                          %)
+                        (keys selected)))]
+    (into {}
+          (keep (fn [id]
+                  (when-let [reason (get-in packages [id :deps-edn :collet/artifact :release-blocker])]
+                    [id reason])))
+          reachable)))
+
+
 (defn plan
   "Print the changed-package plan without building or publishing."
   [{:keys [root] :or {root "."}}]
-  (let [{:keys [selected] :as result} (candidates root)]
+  (let [{:keys [packages selected] :as result} (candidates root)]
     (println (format-plan selected))
-    result))
+    (doseq [[id reason] (release-blockers packages selected)]
+      (println "BLOCKED" id "-" reason))
+    (assoc result :blocked (release-blockers packages selected))))
 
 
 (defn release
@@ -140,6 +154,8 @@
     (if (empty? selected)
       (do (println "No packages require release.") {:tags [] :deployed []})
       (do
+        (when-let [blocked (not-empty (release-blockers packages selected))]
+          (fail! "Release dependencies are not distributable" {:blocked blocked}))
         (ensure-target-tags-absent! root selected)
         (quality-gate! root "test")
         (quality-gate! root "verify")

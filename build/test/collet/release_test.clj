@@ -58,6 +58,13 @@
     (is (= message (ex-message (exception #(release/validate-preflight! state)))))))
 
 
+(deftest unpublished-dependency-blocks-transitive-consumers
+  (let [blocked (assoc-in packages ['example/pkg-a :deps-edn :collet/artifact :release-blocker] "Publish the SDK fix")]
+    (is (= {'example/pkg-a "Publish the SDK fix"}
+           (release/release-blockers blocked (select-keys blocked ['example/pkg-cli]))))
+    (is (empty? (release/release-blockers packages packages)))))
+
+
 (deftest kaven-deploy-reuses-the-built-jar-and-pom
   (let [called   (atom nil)
         package  (get packages 'example/pkg-a)

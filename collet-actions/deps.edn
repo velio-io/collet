@@ -4,13 +4,13 @@
                       collet.actions.odata collet.actions.jdbc
                       collet.actions.jdbc-pg collet.actions.s3
                       collet.actions.queue collet.actions.jslt
-                      collet.actions.llm collet.actions.vega
+                      collet.actions.llm collet.actions.sparql collet.actions.vega
                       collet.actions.lucene]
   :publish?          true
   :kind              :library}
 
  :paths []
- :deps {org.clojure/clojure           {:mvn/version "1.12.5"}
+ :deps {org.clojure/clojure           {:mvn/version "1.12.6"}
         io.velio/collet-action-http   {:local/root "../collet-action-http"}
         io.velio/collet-action-file   {:local/root "../collet-action-file"}
         io.velio/collet-action-odata  {:local/root "../collet-action-odata"}
@@ -19,6 +19,7 @@
         io.velio/collet-action-queue  {:local/root "../collet-action-queue"}
         io.velio/collet-action-jslt   {:local/root "../collet-action-jslt"}
         io.velio/collet-action-llm    {:local/root "../collet-action-llm"}
+        io.velio/collet-action-sparql {:local/root "../collet-action-sparql"}
         io.velio/collet-action-vega   {:local/root "../collet-action-vega"}
         io.velio/collet-action-lucene {:local/root "../collet-action-lucene"}}
  :aliases

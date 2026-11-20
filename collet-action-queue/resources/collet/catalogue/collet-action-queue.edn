@@ -1,0 +1,10 @@
+[{:type          :collet.actions.queue/enqueue
+  :purpose       "Append records to a persistent queue"
+  :effects       "filesystem write; opens queue during preparation"
+  :package       "collet-action-queue"
+  :coordinate    "io.velio/collet-action-queue"
+  :namespace     "collet.actions.queue"
+  :params-schema [:map [:input :any] [:queue-name :keyword] [:queue-path {:optional true} :string] [:roll-cycle {:optional true} :keyword]]
+  :example       "{:name :enqueue :type :collet.actions.queue/enqueue :params {:input [{:total 10}] :queue-name :totals}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}]

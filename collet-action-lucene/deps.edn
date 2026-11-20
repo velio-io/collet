@@ -2,16 +2,17 @@
  {:description       "Lucene actions for Collet"
   :public-namespaces [collet.actions.lucene]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-lucene.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure                  {:mvn/version "1.12.5"}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure                  {:mvn/version "1.12.6"}
         io.velio/collet-core                 {:local/root "../collet-core"}
-        metosin/malli                        {:mvn/version "0.20.1"}
-        techascent/tech.ml.dataset           {:mvn/version "8.024"}
-        org.apache.lucene/lucene-core        {:mvn/version "10.5.0"}
-        org.apache.lucene/lucene-queryparser {:mvn/version "10.5.0"}
-        org.apache.lucene/lucene-analysis-common {:mvn/version "10.5.0"}}
+        metosin/malli                        {:mvn/version "0.20.3"}
+        techascent/tech.ml.dataset           {:mvn/version "8.027"}
+        org.apache.lucene/lucene-core        {:mvn/version "10.5.2"}
+        org.apache.lucene/lucene-queryparser {:mvn/version "10.5.2"}
+        org.apache.lucene/lucene-analysis-common {:mvn/version "10.5.2"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}

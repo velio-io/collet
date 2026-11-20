@@ -1,6 +1,7 @@
 (ns collet.arrow
   (:require
    [clojure.core.protocols :as clj-proto]
+   [collet.stream :as stream]
    [malli.core :as m]
    [malli.transform :as mt]
    [tech.v3.dataset :as ds]
@@ -8,12 +9,12 @@
    [tech.v3.datatype :as dtype]
    [tech.v3.datatype.casting :as casting]
    [tech.v3.datatype.packing :as packing]
-   [tech.v3.libs.arrow :as arrow]
-   [tech.v3.resource :as resource])
+   [tech.v3.libs.arrow :as arrow])
   (:import
-   (clojure.lang BigInt ExceptionInfo)
+   [clojure.lang BigInt ExceptionInfo RT]
    [java.io Closeable File FileOutputStream]
-   (java.lang AutoCloseable)
+   [java.lang AutoCloseable]
+   [java.lang.ref Reference]
    [java.math BigDecimal BigInteger RoundingMode]
    [java.nio.channels FileChannel SeekableByteChannel]
    [java.nio.file OpenOption Path Paths StandardOpenOption]
@@ -730,7 +731,7 @@
           (range (min 200 (ds/row-count data))))
 
     :else
-    (vec (take 200 (or (seq data) ())))))
+    (first (stream/chunks (RT/iter (or data ())) 200))))
 
 
 (defn- scalar-inference
@@ -1858,27 +1859,19 @@
 
 (defn- reader-batch-seq
   "Lazily load and detach one Arrow record batch per sequence element."
-  [^ArrowReader reader close! root->batch]
-  (let [closed?       (atom false)
-        close-reader! (fn []
-                        (when (compare-and-set! closed? false true)
-                          (close!)))
-        step          (fn step []
-                        (lazy-seq
-                         (try
-                           (if (.loadNextBatch reader)
-                             (cons (root->batch (.getVectorSchemaRoot reader))
-                                   (step))
-                             (do
-                               (close-reader!)
-                               nil))
-                           (catch Throwable error
-                             (close-reader!)
-                             (throw error)))))]
-    (resource/track
-     (step)
-     {:track-type :gc
-      :dispose-fn close-reader!})))
+  [^ArrowReader reader close! root->batch metadata]
+  (let [[owner close-reader!] (stream/owned close!)
+        step (fn step []
+               (lazy-seq
+                (try
+                  (if (.loadNextBatch reader)
+                    (cons (root->batch (.getVectorSchemaRoot reader)) (step))
+                    (do (close-reader!) nil))
+                  (catch Throwable error
+                    (close-reader!)
+                    (throw error))
+                  (finally (Reference/reachabilityFence owner)))))]
+    (with-meta (step) (assoc metadata :collet/close close-reader!))))
 
 
 (defn- nested-dataset-seq
@@ -1892,7 +1885,8 @@
         (close-quietly! reader)
         (close-quietly! channel)
         (close-quietly! allocator))
-     #(root->dataset % schema))))
+     #(root->dataset % schema)
+     {:ds-seq true :arrow-columns schema})))
 
 
 (defn reader->dataset-seq
@@ -1903,10 +1897,10 @@
   logical schema, such as Parquet fixed-size embeddings."
   [^ArrowReader reader columns close!]
   (let [schema (normalize-schema columns)]
-    (with-meta
-      (reader-batch-seq reader close! #(root->dataset % schema))
-      {:ds-seq        true
-       :arrow-columns schema})))
+    (reader-batch-seq reader
+                      close!
+                      #(root->dataset % schema)
+                      {:ds-seq true :arrow-columns schema})))
 
 
 (defn reader->record-batches
@@ -1916,7 +1910,7 @@
   format adapter rewrites their physical representation."
   [^ArrowReader reader columns close!]
   (let [schema (normalize-schema columns)]
-    (reader-batch-seq reader close! #(root->records % schema))))
+    (reader-batch-seq reader close! #(root->records % schema) nil)))
 
 
 (defn read-arrow-record-batches
@@ -1945,12 +1939,11 @@
         arrow-schema (create-schema schema)
         path         (file-path file-or-path)]
     (validate-file-schema! path arrow-schema)
-    (with-meta
-      (if (nested-schema? schema)
+    (stream/managed-view
+     #(if (nested-schema? schema)
         (nested-dataset-seq path schema)
         (arrow/stream->dataset-seq path {:open-type :mmap :key-fn keyword}))
-      {:ds-seq        true
-       :arrow-columns schema})))
+     {:arrow-columns schema})))
 
 
 (defn- logical-nested-value?

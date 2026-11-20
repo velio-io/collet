@@ -1,0 +1,103 @@
+{:name :orders-enrichment
+ :deps {:requires [[clojure.string] [tech.v3.dataset]]}
+ :max-parallelism 2
+ :tasks
+ [{:name       :load-orders
+   :keep-state true
+   :actions    [{:name   :orders
+                 :type   :clj/identity
+                 :params [[{:order-id "ORD-1041" :customer-id "C-281" :amount 129.90 :currency "eur" :country "ES"}
+                           {:order-id "ORD-1042" :customer-id "C-282" :amount 84.50 :currency "eur" :country "DE"}
+                           {:order-id "ORD-1043" :customer-id "C-283" :amount 210.00 :currency "gbp" :country "GB"}
+                           {:order-id "ORD-1044" :customer-id "C-284" :amount 56.00 :currency "eur" :country "FR"}
+                           {:order-id "ORD-1045" :customer-id "C-285" :amount 315.00 :currency "eur" :country "ES"}
+                           {:order-id "ORD-1046" :customer-id "C-286" :amount 48.25 :currency "gbp" :country "DE"}
+                           {:order-id "ORD-1047" :customer-id "C-287" :amount 129.90 :currency "eur" :country "GB"}
+                           {:order-id "ORD-1048" :customer-id "C-288" :amount 84.50 :currency "eur" :country "FR"}
+                           {:order-id "ORD-1049" :customer-id "C-289" :amount 210.00 :currency "gbp" :country "ES"}
+                           {:order-id "ORD-1050" :customer-id "C-290" :amount 56.00 :currency "eur" :country "DE"}
+                           {:order-id "ORD-1051" :customer-id "C-291" :amount 315.00 :currency "eur" :country "GB"}
+                           {:order-id "ORD-1052" :customer-id "C-292" :amount 48.25 :currency "gbp" :country "FR"}
+                           {:order-id "ORD-1053" :customer-id "C-293" :amount 129.90 :currency "eur" :country "ES"}
+                           {:order-id "ORD-1054" :customer-id "C-294" :amount 84.50 :currency "eur" :country "DE"}
+                           {:order-id "ORD-1055" :customer-id "C-295" :amount 210.00 :currency "gbp" :country "GB"}
+                           {:order-id "ORD-1056" :customer-id "C-296" :amount 56.00 :currency "eur" :country "FR"}
+                           {:order-id "ORD-1057" :customer-id "C-297" :amount 315.00 :currency "eur" :country "ES"}
+                           {:order-id "ORD-1058" :customer-id "C-298" :amount 48.25 :currency "gbp" :country "DE"}
+                           {:order-id "ORD-1059" :customer-id "C-299" :amount 129.90 :currency "eur" :country "GB"}
+                           {:order-id "ORD-1060" :customer-id "C-300" :amount 84.50 :currency "eur" :country "FR"}
+                           {:order-id "ORD-1061" :customer-id "C-301" :amount 210.00 :currency "gbp" :country "ES"}
+                           {:order-id "ORD-1062" :customer-id "C-302" :amount 56.00 :currency "eur" :country "DE"}
+                           {:order-id "ORD-1063" :customer-id "C-303" :amount 315.00 :currency "eur" :country "GB"}
+                           {:order-id "ORD-1064" :customer-id "C-304" :amount 48.25 :currency "gbp" :country "FR"}]]}]}
+  {:name :normalize
+   :inputs [:load-orders]
+   :keep-state true
+   :actions
+   [{:name      :parse-amount
+     :type      :slicer
+     :selectors {rows [:inputs :load-orders]}
+     :params    {:sequence rows}}
+    {:name      :normalize-currency
+     :type      :slicer
+     :selectors {rows [:state :parse-amount]}
+     :params    {:sequence rows
+                 :apply    [[:map {:with (fn [row] (update row :currency clojure.string/upper-case))}]]}}
+    {:name      :validate-order
+     :type      :slicer
+     :selectors {rows [:state :normalize-currency]}
+     :params    {:sequence rows
+                 :apply    [[:map
+                             {:with (fn [row]
+                                      (when-not (pos? (:amount row))
+                                        (throw (ex-info "Order amount must be positive." (select-keys row [:order-id :amount]))))
+                                      row)}]]}}]}
+  {:name :enrich-customers
+   :inputs [:normalize]
+   :keep-state true
+   :retry {:max-retries 2 :backoff-ms [300 600]}
+   :setup [{:name :attempts :type :clj/atom :params [0]}
+           {:name      :orders-data
+            :type      :slicer
+            :selectors {rows [:inputs :normalize]}
+            :params    {:sequence rows}}]
+   :actions
+   [{:name      :check-customer-service
+     :type      :custom
+     :selectors {attempts [:state :attempts] mode [:config :failure-mode]}
+     :params    [attempts mode]
+     :fn        (fn [attempts mode]
+                  (let [attempt (swap! attempts inc)]
+                    (when (or (= mode :always) (and (= mode :once) (= 1 attempt)))
+                      (throw (ex-info "Customer lookup unavailable (demo 503)."
+                                      {:status 503 :service :customer-directory :retryable true})))
+                    :ready))}
+    {:name      :customer-segments
+     :type      :slicer
+     :selectors {rows [:state :orders-data]}
+     :params    {:sequence rows
+                 :apply    [[:map {:with (fn [row] (assoc row :segment (if (> (:amount row) 100) "Priority" "Standard")))}]]}}]}
+  {:name :daily-totals
+   :inputs [:normalize]
+   :keep-state true
+   :actions
+   [{:name      :totals
+     :type      :slicer
+     :selectors {rows [:inputs :normalize]}
+     :params    {:sequence rows
+                 :apply    [[:fold {:by :currency :columns {:orders :row-count :total [:sum :amount]}}]
+                            [:order {:by :currency :comp (fn [a b] (compare a b))}]]}}]}
+  {:name :report
+   :inputs [:enrich-customers :daily-totals]
+   :keep-state true
+   :actions
+   [{:name      :report
+     :type      :custom
+     :selectors {customers [:inputs :enrich-customers] totals [:inputs :daily-totals]}
+     :params    [customers totals]
+     :fn        (fn [customers totals]
+                  (letfn [(records [value]
+                            (cond (tech.v3.dataset/dataset? value) (tech.v3.dataset/rows value)
+                                  (and (sequential? value) (tech.v3.dataset/dataset? (first value))) (mapcat tech.v3.dataset/rows value)
+                                  :else value))]
+                    {:orders (count (records customers)) :totals (vec (records totals)) :status :ready}))}]}]}

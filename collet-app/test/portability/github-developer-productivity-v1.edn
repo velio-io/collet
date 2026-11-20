@@ -1,0 +1,214 @@
+{:name :github-developer-productivity
+ :deps {:coordinates [[io.velio/collet-action-http "0.2.8"]
+                      [io.velio/collet-action-file "0.2.8"]]
+        :requires    [[collet.actions.http] [collet.actions.file]]
+        :imports     [java.time.Instant]}
+ ;; Set :org-name and :gh-token in Workbench Configuration.
+ ;; :report-dir defaults to "./reports", relative to the Workbench process.
+ ;; Each run overwrites its four report filenames there.
+ :config-spec [:map
+               [:org-name [:re "[A-Za-z0-9][A-Za-z0-9-]*"]]
+               [:gh-token [:string {:min 1}]]
+               [:report-dir {:optional true :default "./reports"} [:string {:min 1}]]]
+ :tasks
+ [{:name :repositories
+   :arrow-columns [[:name "name" :string]]
+   :actions
+   [{:name              :list-repositories
+     :type              :collet.actions.http/request
+     :collet/sensitive? true
+     :selectors         {org   [:config :org-name]
+                         token [:config :gh-token]}
+     :params            {:url           ["https://api.github.com/orgs/%s/repos" org]
+                :method        :get
+                :headers       {"Accept" "application/vnd.github+json"
+                                "X-GitHub-Api-Version" "2022-11-28"}
+                :auth          {:type :bearer :value token}
+                :query-params  {:per_page 100}
+                :as            :json
+                :pagination    {:mode :link :max-pages 1000}
+                :retry         {:max-retries 3 :transport? true}
+                :empty-body    :error
+                :response-spec [:sequential [:map [:name [:string {:min 1}]]]]}
+     :return            [:body]}
+    {:name      :repository-names
+     :type      :slicer
+     :selectors {pages [:state :list-repositories]}
+     :params    {:sequence pages
+                 :apply    [[:select {:columns [:name]}]]}}]}
+
+  {:name          :pull-requests
+   :inputs        [:repositories]
+   :state-format  :flatten
+   :arrow-columns [[:id "id" :int64]
+                   [:user-id "user-id" :string]
+                   [:year-month "year-month" :string]
+                   [:merged-id "merged-id" :int64]
+                   [:merge-seconds "merge-seconds" :int64]]
+   :iterator      {:next [:true? [:$mapper/has-next-item]]}
+   :actions
+   [{:name      :each-repository
+     :type      :mapper
+     :selectors {repositories [:inputs :repositories]}
+     :params    {:sequence repositories}}
+    {:name              :list-closed-pull-requests
+     :type              :collet.actions.http/request
+     :collet/sensitive? true
+     :selectors         {org   [:config :org-name]
+                         token [:config :gh-token]
+                         repo  [:$mapper/item :name]}
+     :params            {:url           ["https://api.github.com/repos/%s/%s/pulls" org repo]
+                :method        :get
+                :headers       {"Accept" "application/vnd.github+json"
+                                "X-GitHub-Api-Version" "2022-11-28"}
+                :auth          {:type :bearer :value token}
+                :query-params  {:per_page 100 :state "closed" :sort "created" :direction "asc"}
+                :as            :json
+                :pagination    {:mode :link :max-pages 1000}
+                :retry         {:max-retries 3 :transport? true}
+                :empty-body    :error
+                :response-spec [:sequential
+                                 [:map
+                                  [:id :int]
+                                  [:user [:maybe [:map [:login :string]]]]
+                                  [:created_at :string]
+                                  [:closed_at :string]
+                                  [:merged_at [:maybe :string]]]]}
+     :return            [:body]}
+    {:name      :report-fields
+     :type      :slicer
+     :selectors {pages [:state :list-closed-pull-requests]}
+     :params    {:sequence pages
+                 :apply    [[:map
+                             {:with (fn [{:keys [id user created_at closed_at merged_at]}]
+                                      {:user-id       (or (:login user) "[deleted]")
+                                       :year-month    (subs closed_at 0 7)
+                                       :merged-id     (if merged_at id 0)
+                                       :merge-seconds (if merged_at
+                                                        (- (.getEpochSecond (Instant/parse merged_at))
+                                                           (.getEpochSecond (Instant/parse created_at)))
+                                                        0)})}]
+                            [:select {:columns [:id :user-id :year-month
+                                                :merged-id :merge-seconds]}]]}}
+    {:name      :pull-request-rows
+     :type      :custom
+     :selectors {batches [:state :report-fields]}
+     :params    [batches]
+     :fn        collet.stream/rows}]}
+
+  {:name          :total-prs-by-member
+   :inputs        [:pull-requests]
+   :keep-state    true
+   :arrow-columns [[:user-id "user-id" :string]
+                   [:pulls-count "pulls-count" :int64]]
+   :return        [:state :report]
+   :actions
+   [{:name      :report
+     :type      :slicer
+     :when      [:not-empty? [:inputs :pull-requests]]
+     :selectors {pulls [:inputs :pull-requests]}
+     :params    {:sequence pulls
+                 :apply    [[:fold {:by :user-id :columns {:pulls-count [:count-distinct :id]}}]
+                            [:select {:columns [:user-id :pulls-count]}]]}}
+    {:name      :write-report
+     :type      :collet.actions.file/sink
+     :selectors {rows [:state :report]
+                 dir  [:config :report-dir]}
+     :params    {:folder      dir
+                 :file-name   "total-prs-by-member.csv"
+                 :format      (if rows :csv :text)
+                 :csv-header? true
+                 :input       (or rows "user-id,pulls-count\n")}}]}
+
+  {:name          :monthly-prs-by-member
+   :inputs        [:pull-requests]
+   :keep-state    true
+   :arrow-columns [[:user-id "user-id" :string]
+                   [:pulls-count "pulls-count" :int64]
+                   [:year-month "year-month" :string]]
+   :return        [:state :report]
+   :actions
+   [{:name      :report
+     :type      :slicer
+     :when      [:not-empty? [:inputs :pull-requests]]
+     :selectors {pulls [:inputs :pull-requests]}
+     :params    {:sequence pulls
+                 :apply    [[:fold {:by [:user-id :year-month]
+                                    :columns {:pulls-count [:count-distinct :id]}}]
+                            [:select {:columns [:user-id :pulls-count :year-month]}]]}}
+    {:name      :write-report
+     :type      :collet.actions.file/sink
+     :selectors {rows [:state :report]
+                 dir  [:config :report-dir]}
+     :params    {:folder      dir
+                 :file-name   "monthly-prs-by-member.csv"
+                 :format      (if rows :csv :text)
+                 :csv-header? true
+                 :input       (or rows "user-id,pulls-count,year-month\n")}}]}
+
+  {:name          :merge-ratio-by-member
+   :inputs        [:pull-requests]
+   :keep-state    true
+   :arrow-columns [[:user-id "user-id" :string]
+                   [:merge-ratio "merge-ratio" :int64]]
+   :return        [:state :report]
+   :actions
+   [{:name      :report
+     :type      :slicer
+     :when      [:not-empty? [:inputs :pull-requests]]
+     :selectors {pulls [:inputs :pull-requests]}
+     :params    {:sequence pulls
+                 :apply    [[:fold {:by :user-id
+                                    :columns {:total-count [:count-distinct :id]
+                                              :merged-ids   [:distinct :merged-id]}}]
+                            [:map {:with (fn [{:keys [total-count merged-ids]}]
+                                           (let [merged-count (count (remove zero? merged-ids))]
+                                             {:merge-ratio (long (+ 0.5 (/ (* 100.0 merged-count)
+                                                                             total-count)))}))}]
+                            [:select {:columns [:user-id :merge-ratio]}]]}}
+    {:name      :write-report
+     :type      :collet.actions.file/sink
+     :selectors {rows [:state :report]
+                 dir  [:config :report-dir]}
+     :params    {:folder      dir
+                 :file-name   "merge-ratio-by-member.csv"
+                 :format      (if rows :csv :text)
+                 :csv-header? true
+                 :input       (or rows "user-id,merge-ratio\n")}}]}
+
+  {:name          :average-time-to-merge
+   :inputs        [:pull-requests]
+   :keep-state    true
+   :arrow-columns [[:user-id "user-id" :string]
+                   [:average-ttm "average-ttm" :int64]]
+   :return        [:state :report]
+   :actions
+   [{:name      :report
+     :type      :slicer
+     :when      [:not-empty? [:inputs :pull-requests]]
+     :selectors {pulls [:inputs :pull-requests]}
+     :params    {:sequence pulls
+                 :apply    [[:fold {:by [:user-id :id]
+                                    :columns {:merged-id     :first-value
+                                              :merge-seconds :first-value}}]
+                            [:map {:with (fn [{:keys [merged-id]}]
+                                           {:is-merged (if (pos? merged-id) 1 0)})}]
+                            [:fold {:by :user-id
+                                    :columns {:merged-count [:sum :is-merged]
+                                              :seconds      [:sum :merge-seconds]}}]
+                            [:map {:with (fn [{:keys [seconds merged-count]}]
+                                           {:average-ttm (if (pos? merged-count)
+                                                           (long (/ seconds merged-count))
+                                                           0)})}]
+                            [:filter {:by :merged-count :predicate (fn [n] (pos? n))}]
+                            [:select {:columns [:user-id :average-ttm]}]]}}
+    {:name      :write-report
+     :type      :collet.actions.file/sink
+     :selectors {rows [:state :report]
+                 dir  [:config :report-dir]}
+     :params    {:folder      dir
+                 :file-name   "average-time-to-merge.csv"
+                 :format      (if rows :csv :text)
+                 :csv-header? true
+                 :input       (or rows "user-id,average-ttm\n")}}]}
+ ]}

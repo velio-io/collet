@@ -2,6 +2,7 @@
   "Smoke checks for Collet's public build artifacts."
   (:require
    [clojure.data.xml :as xml]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
@@ -186,6 +187,10 @@
            {:package (:fqn package) :path (str path)})
   (let [entries (jar-entries path)]
     (verify-pom! context package (jar-entry path (pom-entry package)))
+    (when-let [catalogue (:catalogue (artifact package))]
+      (ensure! (contains? entries catalogue)
+               "Library JAR lacks its action catalogue"
+               {:package (:fqn package) :catalogue catalogue}))
     (when (seq (get-in package [:deps-edn :paths]))
       (doseq [namespace (:public-namespaces (artifact package))]
         (ensure! (contains? entries (namespace-entry namespace))
@@ -265,6 +270,24 @@
              "Deployable entrypoint changed"
              {:package (:fqn package) :expected main :actual (main-class uberjar)})
     (verify-pom! context package (jar-entry uberjar (pom-entry package)))
+    (when (:knowledge (artifact package))
+      (let [index   (edn/read-string (jar-entry uberjar "collet/knowledge/index.edn"))
+            entries (set (jar-entries uberjar))]
+        (let [manifest (edn/read-string (jar-entry uberjar (get-in (artifact package) [:knowledge :compatibility])))]
+          (ensure! (= (:version package) (get-in manifest [:build :version])) "Incorrect application compatibility version" {})
+          (doseq [module (:catalogues index)
+                  :let   [coordinate (symbol "io.velio" module)]]
+            (ensure! (= (get-in context [:packages coordinate :version]) (get-in manifest [:packages (str coordinate) :version]))
+                     "Incorrect catalogue compatibility version"
+                     {:coordinate coordinate})))
+        (doseq [path (concat (map #(str "collet/knowledge/docs/" (:id %) ".md") (:docs index))
+                             (map #(str "collet/catalogue/" % ".edn") (:catalogues index))
+                             (vals (get-in (artifact package) [:knowledge :examples])))]
+          (ensure! (contains? entries path) "Bundled authoring knowledge is missing" {:path path}))))
+    (when-let [resource-root (get-in (artifact package) [:ui :resource-root])]
+      (ensure! (contains? (set (jar-entries uberjar)) (str resource-root "/index.html"))
+               "Workbench frontend is missing from the application JAR"
+               {:package (:fqn package)}))
     (when (= :distribution kind)
       (verify-archive! package)))
   true)

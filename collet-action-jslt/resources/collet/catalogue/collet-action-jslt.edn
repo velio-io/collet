@@ -1,0 +1,10 @@
+[{:type          :collet.actions.jslt/apply
+  :purpose       "Transform JSON with a JSLT template"
+  :effects       "pure transformation"
+  :package       "collet-action-jslt"
+  :coordinate    "io.velio/collet-action-jslt"
+  :namespace     "collet.actions.jslt"
+  :params-schema [:map [:input :string] [:template :string] [:as {:optional true} [:enum :string :clj]]]
+  :example       "{:name :transform :type :collet.actions.jslt/apply :params {:input \"{}\" :template \".\" :as :clj}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}]

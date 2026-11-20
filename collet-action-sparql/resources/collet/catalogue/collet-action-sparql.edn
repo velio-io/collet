@@ -1,0 +1,34 @@
+[{:type          :collet.actions.sparql/format
+  :purpose       "Validate and format Flint SPARQL data"
+  :effects       "none"
+  :package       "collet-action-sparql"
+  :coordinate    "io.velio/collet-action-sparql"
+  :namespace     "collet.actions.sparql"
+  :params-schema [:map [:query {:optional true} [:or :string :map]] [:query-kind {:optional true} [:enum :select :ask :construct :describe]]
+                  [:update {:optional true} [:or :string :map [:vector :map]]] [:pretty? {:optional true} :boolean]]
+  :example       "{:name :render :type :collet.actions.sparql/format :params {:query {:select [?s] :where [[?s \"<urn:label>\" \"hello\"]]}}}"
+  :notes         "Flint EDN is primary. Raw query strings need :query-kind. JSON-LD requires a graph query. Update retries require :retry-safe? true."
+  :documentation "collet://docs/generic-actions"}
+ {:type          :collet.actions.sparql/query
+  :purpose       "Execute SELECT, ASK, CONSTRUCT or DESCRIBE"
+  :effects       "network request"
+  :package       "collet-action-sparql"
+  :coordinate    "io.velio/collet-action-sparql"
+  :namespace     "collet.actions.sparql"
+  :params-schema [:map [:url :string] [:query [:or :string :map]] [:query-kind {:optional true} [:enum :select :ask :construct :describe]] [:as {:optional true} [:enum :rdf :clj :jsonld]]
+                  [:method {:optional true} [:enum :get :post]] [:auth {:optional true} :map] [:headers {:optional true} :map] [:timeout {:optional true} [:int {:min 1}]] [:retry {:optional true} :map]
+                  [:max-response-bytes {:optional true} [:int {:min 1}]]]
+  :example       "{:name :query :type :collet.actions.sparql/query :params {:url \"https://example.test/sparql\" :query {:ask [] :where []}}}"
+  :notes         "Flint EDN is primary. Raw query strings need :query-kind. JSON-LD requires a graph query. Update retries require :retry-safe? true."
+  :documentation "collet://docs/generic-actions"}
+ {:type          :collet.actions.sparql/update
+  :purpose       "Execute one or ordered SPARQL updates"
+  :effects       "network request; RDF store mutation"
+  :package       "collet-action-sparql"
+  :coordinate    "io.velio/collet-action-sparql"
+  :namespace     "collet.actions.sparql"
+  :params-schema [:map [:url :string] [:update [:or :string :map [:vector {:min 1} :map]]] [:retry-safe? {:optional true} :boolean] [:auth {:optional true} :map] [:headers {:optional true} :map]
+                  [:timeout {:optional true} [:int {:min 1}]] [:retry {:optional true} :map] [:max-response-bytes {:optional true} [:int {:min 1}]]]
+  :example       "{:name :insert :type :collet.actions.sparql/update :params {:url \"https://example.test/sparql\" :update {:insert-data [[\"<urn:s>\" \"<urn:p>\" \"hello\"]]}}}"
+  :notes         "Flint EDN is primary. Raw query strings need :query-kind. JSON-LD requires a graph query. Update retries require :retry-safe? true."
+  :documentation "collet://docs/generic-actions"}]

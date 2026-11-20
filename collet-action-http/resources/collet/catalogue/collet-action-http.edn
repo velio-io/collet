@@ -1,0 +1,43 @@
+[{:type :collet.actions.http/request
+  :purpose "Fetch data from an HTTP service"
+  :effects "network; may write depending on method"
+  :package "collet-action-http"
+  :coordinate "io.velio/collet-action-http"
+  :namespace "collet.actions.http"
+  :params-schema [:map [:url [:or :string [:vector :any]]] [:method {:optional true} [:enum :get :post :put :delete :head :options :trace]] [:headers {:optional true} :map] [:query-params {:optional true} :map]
+                  [:unexceptional-status {:optional true} [:set :int]] [:body {:optional true} :any] [:keywordize {:optional true} :boolean]
+                  [:as {:optional true} [:enum :json :auto :text :stream :byte-array]] [:content-type {:optional true} [:enum :json]] [:accept {:optional true} [:enum :json]] [:rate {:optional true} number?]
+                  [:auth {:optional true} :map] [:pagination {:optional true} :map] [:retry {:optional true} :map]
+                  [:empty-body {:optional true} [:enum :nil :error]] [:response-spec {:optional true} :any]
+                  [:basic-auth {:optional true} [:tuple :string :string]]]
+  :example "{:name :orders :type :collet.actions.http/request :params {:url \"https://example.test/orders?limit=20\" :method :get :as :json} :return [:body]}"
+  :notes
+  "HTTP returns a response map. Use top-level :return [:body] for the decoded records. Select credentials from configuration and pass :basic-auth [username password]; Collet encodes the UTF-8 Authorization header. A preview display limit does not restrict HTTP response size. Use :auth for managed OAuth2 and bearer/API-key/Basic authentication. Use :pagination for page, offset, cursor or next-link traversal. See HTTP pagination and polling in the action guide."
+  :documentation "collet://docs/actions"}
+ {:type          :collet.actions.http/oauth2
+  :purpose       "Obtain an OAuth2 access token"
+  :effects       "network request"
+  :package       "collet-action-http"
+  :coordinate    "io.velio/collet-action-http"
+  :namespace     "collet.actions.http"
+  :params-schema [:map [:url [:or :string [:vector :any]]] [:method {:optional true} [:enum :get :post]] [:client-id {:optional true} :string] [:client-secret {:optional true} :string]
+                  [:scope {:optional true} [:or :string [:vector :any]]] [:grant-type {:optional true} :string] [:auth-data {:optional true} :map]
+                  [:basic-auth {:optional true} [:tuple :string :string]]]
+  :example       "{:name :token :type :collet.actions.http/oauth2 :selectors {secret [:config :client-secret]} :params {:url \"https://example.test/token\" :client-secret secret}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type :collet.actions.http/poll
+  :purpose "Poll an HTTP endpoint until a response matches a condition"
+  :effects "network request"
+  :package "collet-action-http"
+  :coordinate "io.velio/collet-action-http"
+  :namespace "collet.actions.http"
+  :params-schema
+  [:map [:url [:or :string [:vector :any]]]
+   [:poll
+    [:map [:until [:vector :any]] [:fail-when {:optional true} [:vector :any]]
+     [:interval-ms {:optional true} [:int {:min 1}]]
+     [:deadline-ms {:optional true} [:int {:min 1}]]]]]
+  :example "{:name :wait :type :collet.actions.http/poll :params {:url \"https://example.test/job/1\" :as :json :poll {:until [:= [:body :status] \"done\"]}} :return [:body]}"
+  :notes "Uses the HTTP request options. The deadline covers all attempts and waits. Conditions read the full response map."
+  :documentation "collet://docs/actions"}]

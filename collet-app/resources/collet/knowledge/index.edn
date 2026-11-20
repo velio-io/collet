@@ -1,0 +1,45 @@
+{:catalogues ["collet-core"
+              "collet-action-http"
+              "collet-action-file"
+              "collet-action-s3"
+              "collet-action-queue"
+              "collet-action-jslt"
+              "collet-action-llm"
+              "collet-action-sparql"
+              "collet-action-odata"
+              "collet-action-jdbc"
+              "collet-action-vega"
+              "collet-action-lucene"]
+ :docs       [{:id "generic-actions" :title "Multi-provider LLM and SPARQL actions" :path "docs/llm-and-sparql.md"}
+              {:id "dash-images" :title "Dash API image analysis, R2 originals and RDFox provenance" :path "docs/dash-image-analysis.md"}
+              {:id "arrow" :title "Task output representations and nested schemas" :path "docs/arrow.md"}
+              {:id "extensibility" :title "SCI, core functions and file-backed actions" :path "docs/agent-extensibility.md"}
+              {:id "recipes" :title "Tested row processing and retry recipes" :path "docs/agent-recipes.md"}
+              {:id "module-migration" :title "Optional packages and compatibility" :path "docs/module-migration.md"}
+              {:id    "getting-started"
+               :title "Authoring with humans and agents"
+               :path  "docs/agent-authoring.md"}
+              {:id    "production-checklist"
+               :title "Pipeline completion and production readiness checklist"
+               :path  "docs/pipeline-production-checklist.md"}
+              {:id    "pipeline"
+               :title "Pipelines, tasks, actions, setup and execution"
+               :path  "README.md"}
+              {:id    "actions"
+               :title "Action reference"
+               :path  "docs/actions.md"}
+              {:id    "selectors"
+               :title "Selector syntax"
+               :path  "docs/select-syntax.md"}
+              {:id    "conditions"
+               :title "Condition syntax"
+               :path  "docs/condition-syntax.md"}
+              {:id    "dependencies"
+               :title "Dependency declarations"
+               :path  "docs/deps.md"}
+              {:id    "workbench"
+               :title "Drafts, versions, configuration and result lifetime"
+               :path  "docs/workbench.md"}
+              {:id    "integrations"
+               :title "SQL, charting and search examples"
+               :path  "docs/action-integrations.md"}]}

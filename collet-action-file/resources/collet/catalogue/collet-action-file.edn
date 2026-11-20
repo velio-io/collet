@@ -1,0 +1,300 @@
+[{:package "collet-action-file"
+  :purpose "Write records to a local file"
+  :type :collet.actions.file/sink
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:input :any]
+   [:file-name :string]
+   [:folder {:optional true} :string]
+   [:format {:optional true} :keyword]
+   [:cat? {:optional true} :boolean]
+   [:csv-header? {:optional true} :boolean]
+   [:encoding {:optional true} :string]
+   [:request-options {:optional true} :map]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write"
+  :notes
+  "Supports CSV/JSON datasets, explicit :text, :bytes (byte array), :edn, existing paths, input streams, and URL downloads. Explicit :text always writes literal text. UTF-8 is the default encoding. Existing files are overwritten. Input streams are closed."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :write :type :collet.actions.file/sink :params {:input [{:total 10}] :file-name \"totals.json\" :format :json}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "List local file metadata as a dataset"
+  :type :collet.actions.file/list
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:recursive? {:optional true} :boolean]
+   [:prefix {:optional true} :string]
+   [:glob {:optional true} :string]
+   [:extensions {:optional true} [:sequential :string]]
+   [:min-size {:optional true} [:int {:min 0}]]
+   [:max-size {:optional true} [:int {:min 0}]]
+   [:modified-after {:optional true} :string]
+   [:modified-before {:optional true} :string]
+   [:page-size {:optional true} [:int {:min 1}]]
+   [:limit {:optional true} [:int {:min 0}]]]
+  :result-schema :any
+  :effects "filesystem read"
+  :notes
+  "All matching files are returned in path order; :limit applies after filters. :page-size is accepted for interface compatibility; local traversal has no storage pages. Symlinks are excluded. Empty listings preserve columns."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :list, :type :collet.actions.file/list, :params {:path \"./inbox\", :extensions [\"csv\"]}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose
+  "Read a local file into memory, a dataset, a local copy, or a raw stream"
+  :type :collet.actions.file/read
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path {:optional true} :string]
+   [:input {:optional true} :any]
+   [:as {:optional true} [:enum :memory :dataset :file :stream]]
+   [:format {:optional true} [:enum :bytes :text :json :edn :csv]]
+   [:encoding {:optional true} :string]
+   [:keywordize {:optional true} :boolean]
+   [:csv-header? {:optional true} :boolean]
+   [:max-bytes {:optional true} [:int {:min 0}]]
+   [:destination {:optional true} :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema :any
+  :effects "filesystem read; :as :file also writes"
+  :notes
+  "Default :as :memory with :format :bytes. :dataset defaults to CSV with a header; JSON/EDN must contain records. UTF-8 and keyword keys are defaults. Materialized reads support :max-bytes. :file requires :destination and rejects overwrite by default. The caller closes :stream; consume it within the same task rather than publishing it as task output."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :read, :type :collet.actions.file/read, :params {:path \"./input.csv\", :as :dataset}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Inspect local file metadata without following symlinks"
+  :type :collet.actions.file/stat
+  :documentation "collet://docs/actions"
+  :params-schema [:map [:path :string]]
+  :result-schema :map
+  :effects "filesystem read"
+  :notes
+  "Returns :file-name, :path, :size-bytes, :modified-at (ISO UTC), and :type (:file, :directory, or :symlink). Missing paths fail."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :stat, :type :collet.actions.file/stat, :params {:path \"./input.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Check whether a local path exists"
+  :type :collet.actions.file/exists?
+  :documentation "collet://docs/actions"
+  :params-schema [:map [:path :string]]
+  :result-schema :boolean
+  :effects "filesystem read"
+  :notes "Checks the path itself, including a dangling symlink."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :exists?, :type :collet.actions.file/exists?, :params {:path \"./input.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Copy a local file or directory"
+  :type :collet.actions.file/copy
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]
+   [:recursive? {:optional true} :boolean]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write"
+  :notes
+  "Directories require :recursive? true. Symbolic links are rejected. Existing destinations require :overwrite? true."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :copy, :type :collet.actions.file/copy, :params {:path \"./input.csv\", :destination \"./backup.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Move or rename a local file or directory"
+  :type :collet.actions.file/move
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]
+   [:recursive? {:optional true} :boolean]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write and delete"
+  :notes
+  "Directories require :recursive? true. Existing destinations require :overwrite? true."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :move, :type :collet.actions.file/move, :params {:path \"./input.csv\", :destination \"./archive.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Delete a local file or directory"
+  :type :collet.actions.file/delete
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map [:path :string] [:recursive? {:optional true} :boolean]]
+  :result-schema :boolean
+  :effects "filesystem delete"
+  :notes
+  "Returns whether the path was removed; missing paths return false. Nonempty directories require :recursive? true. Does not follow directory symlinks."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :delete, :type :collet.actions.file/delete, :params {:path \"./temporary.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Create a local directory and its parents"
+  :type :collet.actions.file/mkdir
+  :documentation "collet://docs/actions"
+  :params-schema [:map [:path :string]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write"
+  :notes "An existing directory succeeds."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :mkdir, :type :collet.actions.file/mkdir, :params {:path \"./reports\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Create a unique temporary file"
+  :type :collet.actions.file/temp-file
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:folder {:optional true} :string]
+   [:prefix {:optional true} :string]
+   [:suffix {:optional true} :string]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write"
+  :notes
+  "Uses the system temporary directory unless :folder is supplied. The caller removes the file."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :temp-file, :type :collet.actions.file/temp-file, :params {}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Create a unique temporary directory"
+  :type :collet.actions.file/temp-dir
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:folder {:optional true} :string]
+   [:prefix {:optional true} :string]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem write"
+  :notes
+  "Uses the system temporary directory unless :folder is supplied. The caller removes the directory."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :temp-dir, :type :collet.actions.file/temp-dir, :params {}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Compute a streaming file checksum"
+  :type :collet.actions.file/checksum
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map [:path :string] [:algorithm {:optional true} :string]]
+  :result-schema
+  [:map [:algorithm :string] [:checksum :string] [:path :string]]
+  :effects "filesystem read"
+  :notes
+  "Defaults to SHA-256; :algorithm is a Java MessageDigest algorithm name. Returns lowercase hexadecimal."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :checksum, :type :collet.actions.file/checksum, :params {:path \"./input.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Create a ZIP archive from a file or directory"
+  :type :collet.actions.file/zip
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem read and write"
+  :notes
+  "Directory contents use relative entry names. Symlinks and a destination inside the source are rejected. Existing destinations require :overwrite? true."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :zip, :type :collet.actions.file/zip, :params {:path \"./reports\", :destination \"./reports.zip\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Extract a ZIP archive safely"
+  :type :collet.actions.file/unzip
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]
+   [:max-entries {:optional true} [:int {:min 1}]]
+   [:max-bytes {:optional true} [:int {:min 0}]]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem read and write"
+  :notes
+  "Rejects absolute paths, traversal, and symbolic-link destinations. Defaults to 10000 entries and 1 GiB total expanded bytes. Existing files require :overwrite? true. A failed extraction can leave earlier completed entries."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :unzip, :type :collet.actions.file/unzip, :params {:path \"./reports.zip\", :destination \"./reports\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Compress one file with gzip"
+  :type :collet.actions.file/gzip
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem read and write"
+  :notes
+  "Writes through a staging file. Existing destinations require :overwrite? true."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :gzip, :type :collet.actions.file/gzip, :params {:path \"./input.csv\", :destination \"./input.csv.gz\"}}"
+  :namespace "collet.actions.file"}
+ {:package "collet-action-file"
+  :purpose "Decompress one gzip file"
+  :type :collet.actions.file/gunzip
+  :documentation "collet://docs/actions"
+  :params-schema
+  [:map
+   [:path :string]
+   [:destination :string]
+   [:overwrite? {:optional true} :boolean]
+   [:max-bytes {:optional true} [:int {:min 0}]]]
+  :result-schema [:map [:file-name :string] [:path :string]]
+  :effects "filesystem read and write"
+  :notes
+  "Defaults to 1 GiB expanded bytes. Writes through staging; existing destinations require :overwrite? true."
+  :coordinate "io.velio/collet-action-file"
+  :example
+  "{:name :gunzip, :type :collet.actions.file/gunzip, :params {:path \"./input.csv.gz\", :destination \"./input.csv\"}}"
+  :namespace "collet.actions.file"}
+ {:type          :collet.actions.file/inspect-image
+  :purpose       "Read and validate a PNG or JPEG and describe its original bytes"
+  :effects       "reads input path or stream"
+  :package       "collet-action-file"
+  :coordinate    "io.velio/collet-action-file"
+  :namespace     "collet.actions.file"
+  :params-schema [:map [:input {:optional true} :any] [:path {:optional true} :string]
+                  [:max-bytes {:optional true} [:int {:min 1}]]
+                  [:max-pixels {:optional true} [:int {:min 1}]] [:base64? {:optional true} :boolean]]
+  :example       "{:name :image :type :collet.actions.file/inspect-image :params {:path \"./sample.jpg\" :max-bytes 3000000}}"
+  :notes         "Accepts a path, byte array or owned input stream. Returns detected format, MIME type, dimensions, size and SHA-256. Set :base64? to also encode the original bytes."
+  :documentation "collet://docs/actions"}
+ {:type          :collet.actions.file/decode-base64
+  :purpose       "Decode base64 text into original bytes"
+  :effects       "pure"
+  :package       "collet-action-file"
+  :coordinate    "io.velio/collet-action-file"
+  :namespace     "collet.actions.file"
+  :params-schema [:map [:input :string]]
+  :example       "{:name :bytes :type :collet.actions.file/decode-base64 :params {:input \"aGk=\"}}"
+  :notes         "Returns a byte array. Pass :format :bytes to file or S3 sinks."
+  :documentation "collet://docs/actions"}]

@@ -9,6 +9,7 @@ making it easier to manage complex data workflows.
 
 - [Quick start](#quick-start)
 - [Collet CLI tool](#collet-cli-tool)
+- [Collet Workbench](docs/workbench.md)
 - [Pipeline Configuration](#pipeline-configuration)
 - [Pipeline specification](#pipeline-specification)
 - [Tasks](#tasks)
@@ -55,6 +56,10 @@ tool.
 It provides a more interactive way to build and run pipelines, in the step by step manner.
 Check the instructions [here](./collet-cli/README.md).
 
+For visual authoring, [Collet Workbench](docs/workbench.md) pairs an EDN editor
+with a task graph and data inspector. Run individual actions, inspect samples,
+then build the next step. Start the application with `--ui` to use it locally.
+
 ### Pipeline Configuration
 
 To run a Collet pipeline, you need to provide two things: a pipeline specification and, optionally, a pipeline
@@ -84,85 +89,35 @@ In this case Collet has a special reader - `#env` for reading environment variab
 
 ### Pipeline specification
 
-Here's a complete example of a real world pipeline specification.
-Don't worry if you don't understand everything at once, we will explain it step by step.
+This complete example uses built-in actions to filter orders and aggregate daily
+totals. It runs with the standalone app and needs no optional libraries.
 
 ```clojure
-{:name  :comments-sentiment-analysis
- ;; include the compatibility library with all prebuilt actions
- :deps  {:coordinates [[io.velio/collet-actions "VERSION"]]
-         ;; you'll need to require namespaces with actions we're going to use
-         :requires    [[collet.actions.jdbc-pg]]} ;; postgres specific bindings
- ;; define the pipeline tasks
- ;; first task will fetch all comments for the specific post from the postgres database
- :tasks [{:name    :post-comments
-          :actions [{:name      :comments
-                     :type      :collet.actions.jdbc/query
-                     ;; with selectors map you can pick values from the pipeline state
-                     :selectors {post-id           [:config :post-id]
-                                 postgres-jdbc-url [:config :postgres-jdbc-url]}
-                     ;; then you can reference them in the params map
-                     :params    {:connection {:jdbcUrl postgres-jdbc-url}
-                                 :query      {:select [:id :text]
-                                              :from   :comments
-                                              :where  [:= :post-id post-id]}}}]}
-
-         ;; second task will analyze the sentiment of each comment using Google Cloud NLP API
-         {:name     :comments-sentiment
-          :inputs   [:post-comments] ;; this task will depend on the previous one
-          :retry    {:max-retries 3} ;; if some of the actions will throw an error we will retry that task again
-          :actions  [{:name      :for-each-comment
-                      :type      :mapper
-                      :selectors {post-comments [:inputs :post-comments]}
-                      :params    {:sequence post-comments}}
-
-                     {:name      :sentiment-request
-                      :type      :collet.actions.http/request
-                      :selectors {comment-text    [:$mapper/item :text]
-                                  gc-access-token [:config :gc-access-token]}
-                      :params    {:url          "https://language.googleapis.com/v2/documents:analyzeSentiment"
-                                  :method       :post
-                                  :rate         5 ;; rate limit requests to 5 per second
-                                  :oauth-token  gc-access-token
-                                  :content-type :json ;; send as json
-                                  :body         {:encodingType "UTF8"
-                                                 :document     {:type    "PLAIN_TEXT"
-                                                                :content comment-text}}
-                                  :as           :json} ;; read response as json
-                      :return    [:documentSentiment]}]
-          ;; we will iterate over all comments one by one until we processed all of them
-          :iterator {:next [:true? [:$mapper/has-next-item]]}
-          ;; returned data will be a map with keys :comment-id, :magnitude and :score
-          :return   [{:comment-id [:$mapper/item :id]
-                      :magnitude  [:state :sentiment-request :magnitude]
-                      :score      [:state :sentiment-request :score]}]}
-
-         ;; third task will store the sentiment analysis report to the S3 bucket
-         {:name    :report
-          :inputs  [:comments-sentiment]
-          :actions [{:name      :store-report
-                     :type      :collet.actions.s3/sink
-                     :selectors {sentiments  [:inputs :comments-sentiment]
-                                 s3-bucket   [:config :s3-bucket]
-                                 report-path [:config :report-path]}
-                     :params    {:aws-creds   {:aws-region "eu-west-1"}
-                                 :input       sentiments
-                                 :format      :csv
-                                 :bucket      s3-bucket
-                                 :file-name   report-path
-                                 :csv-header? true}}]}]}
+{:name :daily-sales
+ :tasks
+ [{:name :orders :keep-state true
+   :actions [{:name :rows :type :clj/identity
+              :params [[{:day "2026-11-01" :currency "EUR" :amount 12 :status "paid"}
+                        {:day "2026-11-01" :currency "EUR" :amount 8 :status "paid"}
+                        {:day "2026-11-01" :currency "USD" :amount 9 :status "paid"}
+                        {:day "2026-11-01" :currency "EUR" :amount 99 :status "cancelled"}]]}]}
+  {:name :totals :inputs [:orders] :keep-state true
+   :actions [{:name :daily :type :slicer
+              :selectors {rows [:inputs :orders]}
+              :params {:sequence rows
+                       :apply [[:filter {:by :status :predicate #{"paid"}}]
+                               [:fold {:by [:day :currency]
+                                       :columns {:total [:sum :amount]}}]]}}]}]}
 ```
 
-If you will run the pipeline listed above it will do the following things:
-
-- Validate the pipeline spec on correctness
-- Fetch required dependencies from Maven or Clojars
-- Query the Postgres database and return data from `comments` table
-- Map over each comment and make an HTTP request to Google API
-- Store the data from all requests into S3 bucket as a CSV file
-
-More of it you can run multiple pipelines in parallel for different posts or even for different databases.
-You just need to run it with different environment variables.
+The `orders` task supplies records. `totals` selects paid orders and sums their
+amounts by day and currency. Its output contains EUR 20 and USD 9. For actual
+HTTP, database and S3 integrations, discover the built-in action and merge its
+pinned `dependencyEdn` into `:deps`; see [working recipes](docs/agent-recipes.md).
+Prefer catalogue actions, then `:clj/*` core functions, and reserve inline EDN
+functions for domain logic. `:requires` loads namespaces, `:imports` exposes
+classes, and Maven `:coordinates` supplies external libraries. Availability in
+Workbench's current process does not prove clean-process deployment portability.
 
 Now you can see some of the benefits of using Collet, it will take care of:
 
@@ -175,7 +130,7 @@ Now you can see some of the benefits of using Collet, it will take care of:
 Let's dive in into some pipeline implementation details.
 The basic structure of pipeline spec can be represented as follows:
 
-```clojure
+```text
 {:name :my-pipeline
  :deps  {...}
  :max-parallelism 10
@@ -204,6 +159,11 @@ Collet stores compiled pipeline revisions, run/task lifecycle state, task input
 references, and active Artifact metadata in Datalevin. It does not create
 snapshot or lineage-edge entities, and never stores runtime configuration,
 secrets, payload values, callbacks, futures, or exceptions.
+
+Iterator record output targets 8 MiB or 4,096 rows per Arrow batch. A row
+larger than the target occupies its own batch. Wide datasets use ordered Parquet
+parts so each branch can open, read, and release one part at a time. Existing
+single-file artifacts remain readable.
 
 Collet is designed to work with large datasets. Dataset handoff converts the
 task's Arrow IPC output to ZSTD Parquet in bounded batches rather than loading
@@ -308,7 +268,8 @@ Here is an example of running task in parallel:
 {:name     :parallel-task
  :actions  [{:name   :print-item
              :type   :clj/println
-             :params [:$parallel/item]}]
+             :selectors {item [:$parallel/item]}
+             :params [item]}]
  :parallel {:threads 2
             :items   [:state :some-collection]}}
 ```
@@ -319,7 +280,8 @@ Using the range property:
 {:name     :parallel-task
  :actions  [{:name   :print-item
              :type   :clj/println
-             :params [:$parallel/item]}]
+             :selectors {item [:$parallel/item]}
+             :params [item]}]
  :parallel {:threads 2
             :range   {:start 10 :end 100 :step 5}}}
 ```
@@ -329,7 +291,8 @@ It allows you to split the pipeline into multiple files and include them in the 
 This way you can create reusable tasks or actions and inject them into different pipelines.
 Include path could be a local file (absolute or relative to the main spec file path), HTTP URL or S3 key.
 
-```clojure
+```text
+;; Schematic include syntax (replace ellipses with real actions).
 ;; ./tasks/common-task.edn
 {:name    :task-2
  :actions [...]}
@@ -349,7 +312,7 @@ Include path could be a local file (absolute or relative to the main spec file p
 If you need to override some parameters in the included block, you can use a vector with two elements.
 First element should be a path to the file and second is a map with the parameters you want to override.
 
-```clojure
+```text
 {:actions [{:name :first-action
             ...}
 
@@ -393,11 +356,11 @@ Apart from the predefined actions, you can define your own custom actions or ref
 external libraries.
 
 ```clojure
-{:name :my-custom-action
+{:name :convert-temperature
  :type :custom
- ;; you have to provide an implementation of the action
- :fn   (fn []
-         (+1 2))}
+ :params [{:sensor "A" :celsius 0}]
+ :fn (fn [row] {:sensor (:sensor row)
+                :fahrenheit (+ 32 (* 1.8 (:celsius row)))})}
 ```
 
 ```clojure
@@ -415,7 +378,8 @@ Basic structure of the action map is:
 - `:when` (optional): A "condition vector" that represents whether the action should be executed
 - `:keep-state` (optional): A boolean value that represents whether the action should keep the state from the previous
   execution if it was skipped due to `:when` condition. false by default.
-- `:fn` (optional): If you want to define a custom action you can provide a regular Clojure function
+- `:fn` (optional): An EDN function form or qualified function symbol for custom domain logic.
+  These are durable data; live function objects and closures cannot be saved.
 - `:params` (optional): Represents the parameters (function arguments) for the action
 - `:selectors` (optional): You can bind any value in the pipeline state to the specific symbol and refer to it in the
   params
@@ -638,6 +602,7 @@ the CLI GitHub release and pushing the Docker image are later, explicit operatio
 from their respective package tags.
 
 ```shell
+bb dev:llm-sdk
 clojure -M:dev:nrepl
 bb kmono query
 bb fmt:check
@@ -651,6 +616,10 @@ bb verify
 bb release:plan
 bb release
 ```
+
+The generic LLM action currently uses a tested local SDK patch. `bb dev:llm-sdk`
+prepares it without publishing; a fixed upstream Maven release remains a
+[shipping prerequisite](./docs/llm-and-sparql.md#sdk-development-dependency).
 
 See [development](./docs/development.md), the agent
 [REPL workflow](./docs/repl-workflow.md),

@@ -1,0 +1,299 @@
+{
+  "title": "Collet Workbench MCP-only field trial",
+  "date": "2026-11-14",
+  "method": {
+    "endpoint": "http://127.0.0.1:8083/mcp",
+    "server_advertised_version": "1",
+    "initial_state": "Fresh database; list_drafts returned an empty list. Three new pipeline drafts were authored from exposed documentation.",
+    "boundary": "All Collet discovery, edits, validation, inspection, preparation/execution, saving and recovery used MCP. No Collet source, nREPL, direct Collet function calls, browser app API, or prebuilt pipeline contexts were used. Shell access booted the packaged server and recorded/analysed MCP messages.",
+    "harness_note": "A terminal line-length limit interrupted one long request before it reached MCP. The client was reconnected with that limit disabled. This was excluded from product findings.",
+    "scope_limit": "Behavioural usability trial on a local single-user server, not a throughput or concurrency load benchmark."
+  },
+  "pipelines": [
+    {
+      "name": "trial-sales-summary",
+      "draft_id": "f791dd04-08b8-4f2c-985b-27c15f4d53f7",
+      "saved_version": 2,
+      "successful_run_id": "6a6774c4-e66d-4ec8-a216-482b9ec519fb",
+      "result": "Paid orders grouped by day/currency: USD 9 and EUR 20.",
+      "workaround": "Disable Arrow for ordinary row-function handoff after default normal run failed.",
+      "source_edn": "{:name :trial-sales-summary,\n :use-arrow false,\n :tasks\n [{:name :orders,\n   :keep-state true,\n   :actions\n   [{:name :rows,\n     :type :clj/identity,\n     :params\n     [[{:day \"2026-11-01\", :currency \"EUR\", :amount 12, :status \"paid\"}\n       {:day \"2026-11-01\", :currency \"EUR\", :amount 8, :status \"paid\"}\n       {:day \"2026-11-01\", :currency \"USD\", :amount 9, :status \"paid\"}\n       {:day \"2026-11-02\",\n        :currency \"EUR\",\n        :amount 20,\n        :status \"cancelled\"}]]}]}\n  {:name :daily-totals,\n   :inputs [:orders],\n   :keep-state true,\n   :actions\n   [{:name :paid,\n     :type :custom,\n     :fn\n     (fn [rows] (filterv (fn [row] (= \"paid\" (:status row))) rows)),\n     :selectors {rows [:inputs :orders]},\n     :params [rows]}\n    {:name :aggregate,\n     :type :slicer,\n     :selectors {rows [:state :paid]},\n     :params\n     {:sequence rows,\n      :apply\n      [[:fold\n        {:by [:day :currency], :columns {:total [:sum :amount]}}]]}}]}]}\n",
+      "result_evidence": [
+        27,
+        45,
+        70
+      ]
+    },
+    {
+      "name": "trial-http-export",
+      "draft_id": "c1ae8368-193b-4500-9d6e-773dec0bb8f3",
+      "saved_version": 1,
+      "successful_run_id": "92ec0457-a910-4faa-93e9-e3413f40e49e",
+      "result": "Downloaded public sample users, wrote 5,645 characters, read the file back, and verified exact equality.",
+      "workaround": "Use discovered core I/O actions because native optional integration dependency setup was incomplete; move slurp out of the custom fn.",
+      "source_edn": "{:name :trial-http-export,\n :tasks\n [{:name :fetch,\n   :keep-state true,\n   :actions\n   [{:name :download,\n     :type :clj/slurp,\n     :params [\"https://jsonplaceholder.typicode.com/users\"]}\n    {:name :write,\n     :type :clj/spit,\n     :selectors {body [:state :download]},\n     :params [\"/tmp/collet-mcp-field-trial-users.json\" body]}\n    {:name :read-back,\n     :type :clj/slurp,\n     :params [\"/tmp/collet-mcp-field-trial-users.json\"]}\n    {:name :verify,\n     :type :custom,\n     :selectors {body [:state :download], copy [:state :read-back]},\n     :params [body copy],\n     :fn\n     (fn\n      [body copy]\n      {:characters (count body), :file-matches (= body copy)})}]}]}\n",
+      "result_evidence": [
+        65,
+        75,
+        109
+      ]
+    },
+    {
+      "name": "trial-sensor-iterator",
+      "draft_id": "24c615f3-d95b-4ddd-897d-1cbf735ad19a",
+      "saved_version": 3,
+      "successful_run_id": "fbb21ede-863e-48fb-9e29-99a48cff2c7b",
+      "result": "Iterated three sensor readings and returned Fahrenheit 32, 50 and 68.",
+      "workaround": "Use default retry backoff and explicitly select the draft configuration for the saved run.",
+      "source_edn": "{:name :trial-sensor-iterator,\n :tasks\n [{:name :convert,\n   :keep-state true,\n   :retry {:max-retries 2},\n   :actions\n   [{:name :each-reading,\n     :type :mapper,\n     :selectors {rows [:config :readings]},\n     :params {:sequence rows}}\n    {:name :fahrenheit,\n     :type :custom,\n     :selectors {row [:$mapper/item]},\n     :params [row],\n     :fn\n     (fn\n      [row]\n      {:sensor (:sensor row),\n       :fahrenheit (+ 32 (* 1.8 (:celsius row)))})}],\n   :iterator {:next [:true? [:$mapper/has-next-item]]}}]}\n",
+      "configuration_edn": "{:readings [{:sensor \"A\" :celsius 0} {:sensor \"B\" :celsius 10} {:sensor \"C\" :celsius 20}]}",
+      "result_evidence": [
+        76,
+        91,
+        93
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "MCP-01",
+      "priority": "P1",
+      "title": "Authoring success does not predict a normal saved run",
+      "observed": "The paid-orders pipeline returned USD 9 and EUR 20 from both Run action and Run task. Saving that definition and running v1 failed with Failed to find column :day. Adding the documented top-level :use-arrow false and saving v2 produced the correct normal-run totals.",
+      "evidence": [
+        27,
+        30,
+        34,
+        38,
+        41,
+        45,
+        50,
+        51,
+        54,
+        60,
+        70
+      ],
+      "impact": "An agent can validate actual results in the authoring loop and still save a failing pipeline. The inspected upstream rows did not explain the difference.",
+      "recommendation": "Make authoring and normal-run input representations compatible, or explicitly surface the representation difference and provide a tested normalization recipe. Add an acceptance test covering ordinary row functions across a task boundary.",
+      "confidence": "Observed behaviour and workaround verified. Internal implementation cause was not inspected."
+    },
+    {
+      "id": "MCP-02",
+      "priority": "P1",
+      "title": "Saved-pipeline and run listing tools fail",
+      "observed": "collet_list_pipelines({}) and collet_list_runs({}) returned isError true with Wrong number of args (1) passed to collet.workbench.mcp/tools/fn. Listing pipelines failed again after a fresh MCP connection.",
+      "evidence": [
+        97,
+        100,
+        101,
+        102
+      ],
+      "impact": "A newly connected agent cannot rediscover saved definitions or run history, even after successfully creating them.",
+      "recommendation": "Repair the advertised no-argument tool handlers and invoke every advertised tool in wire-level acceptance tests, including reconnect-and-resume."
+    },
+    {
+      "id": "MCP-03",
+      "priority": "P1",
+      "title": "add-task silently ignores taskEdn",
+      "observed": "update_draft with op add-task and taskEdn naming :daily-totals with :inputs [:orders] succeeded but inserted :task-1 containing an identity/nil action and no inputs. The accepted history summary still said Add a daily totals task. Replacing the generated task explicitly worked.",
+      "evidence": [
+        11,
+        14
+      ],
+      "impact": "A successful edit can create different source than the agent requested.",
+      "recommendation": "Apply taskEdn for add-task, or reject the unsupported field. Specify required arguments per structural operation and test the actual accepted source."
+    },
+    {
+      "id": "MCP-04",
+      "priority": "P2",
+      "title": "Optional action discovery lacks a usable dependency setup recipe",
+      "observed": "HTTP and file descriptors reported dependency-present false and only unversioned coordinates. Bundled dependency examples use VERSION placeholders. The linked module-migration guide was not available through the documentation tool. Running the HTTP action failed because collet.actions.http could not be found.",
+      "evidence": [
+        20,
+        21,
+        22,
+        25,
+        28,
+        31
+      ],
+      "impact": "The native HTTP-to-file workflow could not be completed from the exposed setup information alone. The trial used documented :clj/slurp and :clj/spit actions instead.",
+      "recommendation": "Expose compatible tested coordinate/version pairs, a complete dependency EDN snippet, availability state, and all referenced setup documentation. Optional dependencies can remain optional; their installation recipe must be actionable.",
+      "confidence": "Classpath failure and missing information verified. No external package registry or repository internals were consulted."
+    },
+    {
+      "id": "MCP-05",
+      "priority": "P2",
+      "title": "Literal DSL errors escape validation and retry diagnostics are opaque",
+      "observed": "The literal slicer reducer :summ passed validation and failed at execution. Retry :backoff-ms [10 10 1] also passed validation; both that tuple and [10 100 2] failed with Invalid input from :retry/retry-block. Trying a floating multiplier was rejected by the exposed integer-vector schema. Removing backoff-ms made the iterator succeed. The runtime spec problems were replaced by a deferred-sequence placeholder.",
+      "evidence": [
+        16,
+        19,
+        29,
+        55,
+        61,
+        62,
+        63,
+        69,
+        73,
+        76
+      ],
+      "impact": "An agent must run and guess corrections for static options, and the actual rejection constraints are unavailable in the error.",
+      "recommendation": "Validate nested slicer operation enums and the exact retry contract. Return bounded concrete spec diagnostics with EDN paths instead of hiding them as deferred data.",
+      "confidence": "The tested failures and recovery are verified; the complete valid backoff domain was not inferred from implementation."
+    },
+    {
+      "id": "MCP-06",
+      "priority": "P2",
+      "title": "Routine tool responses repeatedly return the whole workspace",
+      "observed": "A four-action pipeline processing a 5,645-character HTTP response produced a 154,151-byte get_execution response. Saving its 679-character source returned 154,597 bytes. structuredContent alone was about 67 KB; the content text repeated it as JSON. The two main guides required about 30 KB and 35 KB with no server-side section selector.",
+      "evidence": [
+        5,
+        8,
+        27,
+        65,
+        68
+      ],
+      "impact": "Response size, repeated data, and repair turns dominate the observed agent cost. Small edits and status reads consume context proportional to retained results.",
+      "recommendation": "Return compact mutation acknowledgements and status-only polling by default. Fetch selected task/action results separately, offer limits/projections and sectioned documentation, and use concise text summaries alongside structured results."
+    },
+    {
+      "id": "MCP-07",
+      "priority": "P2",
+      "title": "Saved-run configuration selection is easy to miss",
+      "observed": "The sensor task succeeded with its draft configuration. Executing the saved pipeline with name/version but without draft id failed with a NullPointerException. The same saved version succeeded when draft id and configurationRevision were supplied. The Workbench guide explains this choice, but the execute tool description and flat schema do not explain the conditional argument contract.",
+      "evidence": [
+        2,
+        76,
+        81,
+        85,
+        86,
+        90,
+        91,
+        93,
+        106
+      ],
+      "impact": "Run version appears to lose an already-supplied configuration and reports an action failure instead of the missing input.",
+      "recommendation": "Describe configuration selection directly in the tool schema and examples. Report missing known configuration selectors before execution, or require an explicit configuration source/empty configuration choice."
+    },
+    {
+      "id": "MCP-08",
+      "priority": "P2",
+      "title": "Error responses are harder to consume than success responses",
+      "observed": "Draft conflicts, invalid edits, missing documentation, and listing failures returned JSON encoded inside content[0].text with no structuredContent error envelope. Every advertised outputSchema is only type object. Some diagnostics expose internal class/function names rather than the actionable cause.",
+      "evidence": [
+        2,
+        25,
+        55,
+        63,
+        64,
+        79,
+        101,
+        102
+      ],
+      "impact": "Clients need an extra JSON parse and ad hoc knowledge of inconsistent payload shapes to recover.",
+      "recommendation": "Publish useful result schemas and a consistent structured error envelope with code, path, current revision, and recovery information. Keep human-facing text concise."
+    },
+    {
+      "id": "MCP-09",
+      "priority": "P2",
+      "title": "Custom-code capabilities differ from advertised Clojure actions without a clear guide",
+      "observed": "describe_action clj/slurp reported it available and it executed successfully. The same slurp symbol inside a custom fn failed preparation with Unable to resolve symbol: slurp. The custom descriptor only says Evaluate :fn during preparation; runtime checks required. Describing clj/spit returns an identity example.",
+      "evidence": [
+        32,
+        33,
+        39,
+        53,
+        57,
+        58,
+        65,
+        105
+      ],
+      "impact": "New agents cannot tell which functions are available inside custom code, even after discovering equivalent actions.",
+      "recommendation": "Document the custom-code evaluation environment and supported namespace/function bindings, and return action-specific examples and constraints."
+    },
+    {
+      "id": "MCP-10",
+      "priority": "P2",
+      "title": "Execution tool annotations understate possible effects",
+      "observed": "collet_execute advertises destructiveHint false and idempotentHint false. The same tool can run the catalogued filesystem, queue, and arbitrary SQL actions; its required request key does deduplicate an identical start within the app instance.",
+      "evidence": [
+        2,
+        21,
+        82,
+        87
+      ],
+      "impact": "Clients receive misleading hints about confirmation and retry behaviour.",
+      "recommendation": "Mark potentially destructive execution conservatively and align retry/idempotency documentation and annotations with the instance-scoped key contract."
+    }
+  ],
+  "worked": [
+    {
+      "behaviour": "Standard client initializes and discovers tools/resources; documentation is readable through both resources and tools.",
+      "evidence": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "behaviour": "Input inspection exposed actual upstream fields and clearly marked previous context after source edits.",
+      "evidence": [
+        15
+      ]
+    },
+    {
+      "behaviour": "Literal HTTP URL type errors are detected even when another parameter is dynamic.",
+      "evidence": [
+        88,
+        89
+      ]
+    },
+    {
+      "behaviour": "Restoration created a new revision, retained intervening history, and rejected a stale edit without overwriting.",
+      "evidence": [
+        77,
+        78,
+        79,
+        80,
+        84
+      ]
+    },
+    {
+      "behaviour": "Repeating the same execution key returned the existing execution; different valid arguments with that key were rejected.",
+      "evidence": [
+        71,
+        82,
+        87
+      ]
+    },
+    {
+      "behaviour": "Incomplete source was stored verbatim and restored; reconnecting the MCP client preserved drafts and executions.",
+      "evidence": [
+        49,
+        94,
+        95,
+        96,
+        98,
+        100
+      ]
+    }
+  ],
+  "measurements": {
+    "protocol_records": 110,
+    "tool_calls": 94,
+    "response_bytes_total": 964148,
+    "median_tool_request_ms": 7.0,
+    "p95_tool_request_ms": 32,
+    "max_tool_request_ms": 523,
+    "max_response_bytes": 154597,
+    "notes": "Latency is local client-observed MCP request latency; asynchronous starts exclude pipeline execution duration. Tool counts include exploratory probes and recovery, not a minimum required workflow."
+  },
+  "evidence": {
+    "transcript": "/tmp/collet-mcp-field-trial-20261114.jsonl",
+    "format": "One JSON object per line; seq N is line N and includes exact request, full response, timestamp, elapsed milliseconds, and serialized response size."
+  },
+  "next_priority": "Fix saved-run parity, list-tool failures, and add-task semantics first. Then make optional dependency setup actionable and reduce routine response volume.",
+  "trial_server": "Left running at http://127.0.0.1:8083 for inspection of the three drafts and retained runs."
+}

@@ -3,20 +3,21 @@
    [clojure.edn :as edn]
    [clojure.string :as string]
    [collet.arrow :as arrow]
-   [collet.durable :as durable])
+   [collet.durable :as durable]
+   [collet.stream :as stream])
   (:import
    [java.io BufferedReader BufferedWriter InputStreamReader OutputStream OutputStreamWriter
-    PushbackReader]
+            PushbackReader]
    [java.lang AutoCloseable]
    [java.nio.channels FileChannel]
    [java.nio.charset StandardCharsets]
-   [java.nio.file FileVisitOption Files LinkOption OpenOption Path Paths StandardCopyOption
-    StandardOpenOption]
+   [java.nio.file FileVisitResult SimpleFileVisitor Files LinkOption OpenOption Path Paths StandardCopyOption
+                  StandardOpenOption]
    [java.nio.file.attribute FileAttribute]
    [java.security DigestInputStream DigestOutputStream MessageDigest]
    [java.sql DriverManager]
    [java.time Duration Instant LocalDate LocalDateTime LocalTime]
-   [java.util Base64 HexFormat UUID]
+   [java.util Base64 HexFormat UUID Properties]
    [java.util.regex Pattern]
    [org.apache.arrow.c ArrowArrayStream Data]
    [org.apache.arrow.memory RootAllocator]
@@ -112,16 +113,6 @@
   (str "sha256:" (.formatHex (HexFormat/of) bytes)))
 
 
-(defn- sha256-file
-  [^Path path]
-  (let [digest (MessageDigest/getInstance "SHA-256")]
-    (with-open [in (DigestInputStream.
-                    (Files/newInputStream path no-open-options)
-                    digest)]
-      (.transferTo in (OutputStream/nullOutputStream)))
-    (checksum (.digest digest))))
-
-
 (defn- force-file!
   [^Path path]
   (with-open [channel (->> (into-array OpenOption [StandardOpenOption/WRITE])
@@ -133,11 +124,15 @@
 (defn- delete-tree!
   [^Path path]
   (when (exists? path)
-    (with-open [paths (Files/walk path (make-array FileVisitOption 0))]
-      (doseq [entry (sort-by str
-                             #(compare %2 %1)
-                             (iterator-seq (.iterator paths)))]
-        (Files/deleteIfExists ^Path entry)))))
+    (Files/walkFileTree path
+                        (proxy [SimpleFileVisitor] []
+                          (visitFile [file _]
+                            (Files/deleteIfExists file)
+                            FileVisitResult/CONTINUE)
+                          (postVisitDirectory [directory error]
+                            (when error (throw error))
+                            (Files/deleteIfExists directory)
+                            FileVisitResult/CONTINUE)))))
 
 
 (defn- scalar-error!
@@ -240,13 +235,18 @@
                                 :collet.error/invalid-scalar-artifact
                                 "Scalar artifact contains an invalid regex value."
                                 {:tag 'collet/regex :value value})))
-   'collet/local-date      #(parse-tagged-string 'collet/local-date LocalDate/parse %)
-   'collet/local-time      #(parse-tagged-string 'collet/local-time LocalTime/parse %)
-   'collet/local-date-time #(parse-tagged-string
-                             'collet/local-date-time
-                             LocalDateTime/parse
-                             %)
+   'collet/local-date      #(parse-tagged-string 'collet/local-date ^[CharSequence] LocalDate/parse %)
+   'collet/local-time      #(parse-tagged-string 'collet/local-time ^[CharSequence] LocalTime/parse %)
+   'collet/local-date-time #(parse-tagged-string 'collet/local-date-time ^[CharSequence] LocalDateTime/parse %)
    'collet/duration        #(parse-tagged-string 'collet/duration Duration/parse %)})
+
+
+(defn encode-row [row]
+  (pr-str (portable-scalar [] row)))
+
+
+(defn decode-row [text]
+  (edn/read-string {:readers scalar-readers :default reject-scalar-tag} text))
 
 
 (defn- read-edn-file
@@ -383,12 +383,12 @@
   (let [physical-schema   (physical-schema schema)
         record-descriptor (assoc schema :type :struct)]
     (with-open [writer (arrow/make-writer target physical-schema)]
-      (reduce (fn [record-count batch]
+      (reduce (fn [[record-count max-width] batch]
                 (let [rows (mapv #(physical-value record-descriptor %) batch)]
                   (when (seq rows)
                     (arrow/write writer rows))
-                  (+ record-count (count rows))))
-              0
+                  [(+ record-count (count rows)) (reduce max max-width (map stream/estimated-bytes rows))]))
+              [0 1]
               (arrow/read-arrow-record-batches source schema)))))
 
 
@@ -403,31 +403,72 @@
     (Data/exportArrayStream allocator reader stream)
     (.registerArrowStream ^DuckDBConnection connection "input" stream)
     (with-open [statement (.createStatement connection)]
+      (.execute statement "SET threads=1")
+      (.execute statement "SET preserve_insertion_order=false")
+      (.execute statement "SET memory_limit='128MB'")
       (.execute statement
                 (str "COPY input TO "
                      (sql-literal target)
-                     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE "
-                     arrow-batch-size
-                     ")"))))
+                     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE_BYTES '8MB')"))))
   (force-file! target)
   target)
 
 
+(defn- part-path [^Path directory index]
+  (.resolve directory (str index ".parquet")))
+
+
+(defn- payload-stats [files]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        bytes  (reduce (fn [total path]
+                         (with-open [in (DigestInputStream. (Files/newInputStream path no-open-options) digest)]
+                           (+ total (.transferTo in (OutputStream/nullOutputStream)))))
+                       0
+                       files)]
+    {:checksum (checksum (.digest digest)) :bytes bytes}))
+
+
+(defn- payload-files [path artifact]
+  (if-let [n (:artifact/parts artifact)]
+    (map #(part-path path %) (range n))
+    [path]))
+
+
+(defn- write-parts! [ipc directory schema]
+  (Files/createDirectory directory no-file-attributes)
+  (let [source (arrow/read-arrow-record-batches ipc schema)
+        close  (:collet/close (meta source))
+        piece  (.resolveSibling ipc "part.arrow")]
+    (try
+      (reduce (fn [i rows]
+                (with-open [writer (arrow/make-writer piece schema)]
+                  (arrow/write writer rows))
+                (write-parquet! piece (part-path directory i))
+                (inc i))
+              0
+              source)
+      (finally
+        (close)
+        (Files/deleteIfExists piece)))))
+
+
 (defn- manifest
   [artifact]
-  {:collet.artifact/version 1
-   :artifact/id             (str (:artifact/id artifact))
-   :artifact/run-id         (str (:artifact/run-id artifact))
-   :artifact/task-id        (str (:artifact/task-id artifact))
-   :artifact/kind           (:artifact/kind artifact)
-   :artifact/format         (:artifact/format artifact)
-   :artifact/version        (:artifact/version artifact)
-   :artifact/data-file      (artifact-data-file artifact)
-   :artifact/checksum       (:artifact/checksum artifact)
-   :artifact/bytes          (:artifact/bytes artifact)
-   :artifact/records        (:artifact/records artifact)
-   :artifact/schema         (:artifact/schema artifact)
-   :artifact/created-at     (:artifact/created-at artifact)})
+  (cond-> {:collet.artifact/version 1
+           :artifact/id             (str (:artifact/id artifact))
+           :artifact/run-id         (str (:artifact/run-id artifact))
+           :artifact/task-id        (str (:artifact/task-id artifact))
+           :artifact/kind           (:artifact/kind artifact)
+           :artifact/format         (:artifact/format artifact)
+           :artifact/version        (:artifact/version artifact)
+           :artifact/data-file      (artifact-data-file artifact)
+           :artifact/checksum       (:artifact/checksum artifact)
+           :artifact/bytes          (:artifact/bytes artifact)
+           :artifact/records        (:artifact/records artifact)
+           :artifact/schema         (:artifact/schema artifact)
+           :artifact/created-at     (:artifact/created-at artifact)}
+    (:artifact/max-row-bytes artifact) (assoc :artifact/max-row-bytes (:artifact/max-row-bytes artifact))
+    (:artifact/parts artifact) (assoc :artifact/parts (:artifact/parts artifact))))
 
 
 (defn- read-manifest
@@ -460,8 +501,7 @@
        :collet.error/artifact-corrupt
        "Artifact payload is missing."
        {:artifact/id (:artifact/id artifact) :path (str data-path)}))
-    (let [actual-checksum (sha256-file data-path)
-          actual-bytes    (Files/size data-path)]
+    (let [{actual-checksum :checksum actual-bytes :bytes} (payload-stats (payload-files data-path artifact))]
       (when-not (= actual-checksum (:artifact/checksum artifact))
         (artifact-error!
          :collet.error/artifact-corrupt
@@ -482,9 +522,7 @@
 (defn- publish-directory!
   [^Path staging ^Path final]
   (Files/createDirectories (.getParent final) no-file-attributes)
-  (Files/move staging
-              final
-              (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
+  (Files/move staging final (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
   final)
 
 
@@ -511,20 +549,27 @@
         ipc         (.resolve staging "physical.arrow")
         parquet     (.resolve staging "data.parquet")]
     (try
-      (let [records (arrow->physical-ipc! (->path source) ipc schema)]
-        (write-parquet! ipc parquet)
+      (let [[records max-width] (arrow->physical-ipc! (->path source) ipc schema)
+            ;; DuckDB can coalesce many Arrow batches into a single native vector.
+            ;; For wide rows, each COPY and scan receives just one bounded IPC batch.
+            parts (if (> (* (min records 2048) max-width) stream/byte-target)
+                    (write-parts! ipc parquet (physical-schema schema))
+                    (do (write-parquet! ipc parquet) nil))
+            stats (payload-stats (payload-files parquet {:artifact/parts parts}))]
         (Files/deleteIfExists ipc)
-        (let [artifact {:artifact/id         artifact-id
-                        :artifact/run-id     run-id
-                        :artifact/task-id    task-id
-                        :artifact/kind       :dataset
-                        :artifact/format     :parquet
-                        :artifact/version    1
-                        :artifact/checksum   (sha256-file parquet)
-                        :artifact/schema     schema
-                        :artifact/records    records
-                        :artifact/bytes      (Files/size parquet)
-                        :artifact/created-at created-at}]
+        (let [artifact (cond-> {:artifact/id            artifact-id
+                                :artifact/run-id        run-id
+                                :artifact/task-id       task-id
+                                :artifact/kind          :dataset
+                                :artifact/format        :parquet
+                                :artifact/version       (if parts 2 1)
+                                :artifact/checksum      (:checksum stats)
+                                :artifact/schema        schema
+                                :artifact/records       records
+                                :artifact/max-row-bytes max-width
+                                :artifact/bytes         (:bytes stats)
+                                :artifact/created-at    created-at}
+                         parts (assoc :artifact/parts parts))]
           (write-manifest! staging artifact)
           (validate-artifact! staging artifact)
           (publish-directory! staging final)
@@ -600,6 +645,15 @@
     (delete-tree! (artifact-directory artifact-dir artifact))))
 
 
+(defn delete-runs!
+  "Delete internal run payloads after their Store metadata has been removed."
+  [artifact-dir run-ids]
+  (doseq [id run-ids]
+    (when-not (uuid? id)
+      (throw (ex-info "Expected a run UUID." {:run-id id})))
+    (delete-tree! (.resolve (->path artifact-dir) (str "runs/" id)))))
+
+
 (defn- read-scalar
   [artifact-dir artifact]
   (let [directory (artifact-directory artifact-dir artifact)]
@@ -622,18 +676,21 @@
           :version     (:collet.scalar/version envelope)})))))
 
 
-(defn- read-dataset
-  [artifact-dir artifact]
-  (let [directory  (artifact-directory artifact-dir artifact)
-        _ (validate-artifact! directory artifact)
-        data-path  (.resolve directory "data.parquet")
-        connection (DriverManager/getConnection "jdbc:duckdb:")
+(defn- open-part
+  [data-path artifact]
+  (let [connection (DriverManager/getConnection "jdbc:duckdb:" (doto (Properties.) (.setProperty "jdbc_stream_results" "true")))
         statement  (.createStatement connection)
+        _          (.execute statement "SET threads=1")
+        _          (.execute statement "SET memory_limit='128MB'")
         result-set ^DuckDBResultSet
                    (.executeQuery statement
                                   (str "SELECT * FROM read_parquet(" (sql-literal data-path) ")"))
         allocator  (RootAllocator.)
-        reader     (.arrowExportStream result-set allocator (int arrow-batch-size))
+        reader     (.arrowExportStream result-set
+                                       allocator
+                                       (int (if-let [width (:artifact/max-row-bytes artifact)]
+                                              (max 1 (min arrow-batch-size (quot stream/byte-target width)))
+                                              1)))
         close!     (fn []
                      (doseq [closeable [reader result-set statement connection allocator]]
                        (try
@@ -649,7 +706,18 @@
 (defn read-artifact
   [artifact-dir artifact]
   (case (:artifact/kind artifact)
-    :dataset (read-dataset artifact-dir artifact)
+    :dataset (do
+               (validate-artifact! (artifact-directory artifact-dir artifact) artifact)
+               (stream/managed-view #(let [scope stream/*resources*
+                                           path  (.resolve (artifact-directory artifact-dir artifact) "data.parquet")]
+                                       (letfn [(step [paths]
+                                                 (lazy-seq
+                                                  (when-let [s (seq paths)]
+                                                    (concat (binding [stream/*resources* scope] (open-part (first s) artifact))
+                                                            (step (rest s))))))]
+                                         (step (payload-files path artifact))))
+                                    {:arrow-columns (:artifact/schema artifact)
+                                     :rows-count    (:artifact/records artifact)}))
     :scalar (read-scalar artifact-dir artifact)
     (artifact-error!
      :collet.error/invalid-artifact

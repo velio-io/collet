@@ -7,6 +7,7 @@
    [collet.runtime :as runtime]
    [collet.store :as store]
    [collet.store.datalevin :as datalevin]
+   [collet.stream :as stream]
    [datalevin.core :as d]
    [tech.v3.dataset :as ds])
   (:import
@@ -107,6 +108,10 @@
      (store/load-pipeline delegate name))
    (load-pipeline [_ name version]
      (store/load-pipeline delegate name version))
+   (list-pipelines [_ limit]
+     (store/list-pipelines delegate limit))
+   (list-runs [_ limit]
+     (store/list-runs delegate limit))
    (create-run! [_ run task-runs]
      (store/create-run! delegate run task-runs))
    (get-run [_ run-id]
@@ -491,6 +496,7 @@
         (is (= :failed (:run/status result)))
         (is (= "Pipeline persistence failed."
                (get-in result [:run/error :message])))
+        (is (= "release failed" (get-in result [:run/error :cause :message])))
         (is (= :artifact/id (first output)))
         (is (= artifact (store/get-artifact db (second output))))
         (is (Files/exists directory (make-array LinkOption 0)))
@@ -809,21 +815,25 @@
                             :run/started-at
                             :run/finished-at}
                           (keys raw-run)))
-              (is (every?
-                   (fn [task]
-                     (every? #{:db/id
-                               :task/id
-                               :task/run
-                               :task/name
-                               :task/key
-                               :task/status
-                               :task/outcome
-                               :task/inputs
-                               :task/created-at
-                               :task/started-at
-                               :task/finished-at}
-                             (keys task)))
-                   raw-tasks))
+              (is
+               (every?
+                (fn [task]
+                  (every? #{:db/id
+                            :task/id
+                            :task/run
+                            :task/name
+                            :task/key
+                            :task/status
+                            :task/outcome
+                            :task/inputs
+                            :task/retry-count
+                            :task/output-records
+                            :task/output-bytes
+                            :task/created-at
+                            :task/started-at
+                            :task/finished-at}
+                          (keys task)))
+                raw-tasks))
               (is (not-any? #(contains? % :task/output) raw-tasks))
               (is (not-any? #(= "not-persisted" %)
                             (tree-seq coll? seq (cons raw-run raw-tasks)))))
@@ -1235,3 +1245,154 @@
       (finally
        (collet/close ctx)
        (delete-store! path)))))
+
+
+(deftest scratch-handoff-uses-normal-format-and-releases-artifacts
+  (let [path (temporary-store-path)]
+    (try
+      (doseq [[task values expected]
+              [[{:name :x :state-format :latest} [1 2 3] 3]
+               [{:name :x :keep-state true} [] []]
+               [{:name :x :keep-state true :state-format :flatten} [[1 2] [3]] [1 2 3]]]]
+        (let [output (runtime/scratch-output! path {:tasks [task]} task values)]
+          (try (is (= expected (runtime/read-scratch-output output)))
+               (finally (runtime/close-scratch-output! output)))))
+      (let [task   {:name          :x
+                    :keep-state    true
+                    :arrow-columns {:version 1
+                                    :fields  [{:key :id :name "id" :type :int64}
+                                              {:key    :nested
+                                               :name   "nested"
+                                               :type   :struct
+                                               :fields [{:key :code :name "code" :type :string}]}]}}
+            rows   [{:id 1 :nested {:code "a"}} {:id 2 :nested {:code "b"}}]
+            output (runtime/scratch-output! path {:tasks [task]} task rows)]
+        (try
+          (is (= "dataset-batches" (:representation output)))
+          (is (= rows (vec (mapcat ds/rows (runtime/read-scratch-output output)))))
+          (is (= rows (vec (mapcat ds/rows (runtime/read-scratch-output output)))))
+          (finally (runtime/close-scratch-output! output))))
+      (is (empty? (filter #(.isFile %) (file-seq (.toFile path)))))
+      (finally (delete-store! path)))))
+
+
+(deftest pipeline-cleanup-removes-only-selected-history-and-internal-payloads
+  (let [path (temporary-store-path)
+        ctx  (collet/context {:data-dir (str path)})]
+    (try
+      (let [first-run   @(collet/start ctx (basic-pipeline 1) {})
+            second-run  @(collet/start ctx (basic-pipeline 2) {})
+            first-id    (:run/id first-run)
+            second-id   (:run/id second-run)
+            tasks       (store/get-task-runs (:store ctx) first-id)
+            output-ref  (:task/output (first tasks))
+            first-path  (.resolve (:artifact-dir ctx) (str "runs/" first-id))
+            second-path (.resolve (:artifact-dir ctx) (str "runs/" second-id))]
+        (is (Files/exists first-path (make-array LinkOption 0)))
+        (is (= "pipeline-busy" (try (store/delete-pipeline! (:store ctx) :orders {:version 1 :busy-run? (constantly true)}) nil (catch Exception e (:code (ex-data e))))))
+        (is (= "pipeline-changed" (try (collet/delete-pipeline! ctx :orders {:latest-version 1}) nil (catch Exception e (:code (ex-data e))))))
+        (is (= [first-id] (:run-ids (collet/delete-pipeline! ctx :orders {:version 1}))))
+        (is (nil? (store/get-run (:store ctx) first-id)))
+        (is (empty? (store/get-task-runs (:store ctx) first-id)))
+        (is (nil? (store/get-artifact (:store ctx) (second output-ref))))
+        (is (not (contains? @(:runs ctx) first-id)))
+        (is (not (Files/exists first-path (make-array LinkOption 0))))
+        (is (store/get-run (:store ctx) second-id))
+        (is (Files/exists second-path (make-array LinkOption 0)))
+        (is (= [second-id] (:run-ids (collet/delete-pipeline! ctx :orders {:latest-version 2}))))
+        (is (empty? (store/list-runs (:store ctx) 100))))
+      (finally (collet/close ctx) (delete-store! path)))))
+
+
+(deftest active-runs-prevent-pipeline-cleanup
+  (let [path (temporary-store-path)
+        ctx  (collet/context {:data-dir (str path)})
+        gate (promise)]
+    (reset! task-gate gate)
+    (try
+      (let [plan (collet/compile-pipeline {:name :busy-delete :tasks [{:name :wait :actions [{:name :wait :type :custom :fn 'collet.runtime-test/gated-one}]}]})
+            run  (collet/start ctx plan {})]
+        (is (= "pipeline-busy" (try (collet/delete-pipeline! ctx :busy-delete {:version 1}) nil (catch Exception e (:code (ex-data e))))))
+        (is (store/load-pipeline (:store ctx) :busy-delete 1))
+        (deliver gate true)
+        (is (= :done (:run/status @run)))
+        (is (:deleted (collet/delete-pipeline! ctx :busy-delete {:version 1}))))
+      (finally (deliver gate true) (collet/close ctx) (delete-store! path)))))
+
+
+(deftest deletion-and-version-reservation-survive-context-recreation
+  (let [path     (temporary-store-path)
+        ctx      (collet/context {:data-dir (str path)})
+        external (.toFile (.resolve path "user-output.txt"))]
+    (try
+      (spit external "leave this output alone")
+      (let [run @(collet/start ctx (basic-pipeline 1) {})]
+        (collet/delete-pipeline! ctx :orders {:latest-version 1})
+        (collet/close ctx)
+        (let [reopened (collet/context {:data-dir (str path)})]
+          (try
+            (is (nil? (collet/load-pipeline reopened :orders 1)))
+            (is (nil? (store/get-run (:store reopened) (:run/id run))))
+            (is (empty? (store/list-pipelines (:store reopened) 100)))
+            (is (= 2 (:version (store/save-pipeline! (:store reopened) {} (dissoc (basic-pipeline 1) :version)))))
+            (is (= "leave this output alone" (slurp external)))
+            (finally (collet/close reopened)))))
+      (finally (collet/close ctx) (delete-store! path)))))
+
+
+(deftest cleanup-waits-for-task-completion-callbacks
+  (let [path    (temporary-store-path)
+        ready   (promise)
+        release (promise)
+        ctx     (collet/context {:data-dir         (str path)
+                                 :on-task-complete (fn [task]
+                                                     (when (= :load (:task/name task))
+                                                       (deliver ready true)
+                                                       @release))})]
+    (try
+      (let [run (collet/start ctx (basic-pipeline 1) {})]
+        (is (= true (deref ready 5000 false)))
+        (is (= "pipeline-busy" (try (collet/delete-pipeline! ctx :orders {:version 1}) nil (catch Exception e (:code (ex-data e))))))
+        (is (store/get-run (:store ctx) (:run/id run)))
+        (deliver release true)
+        (is (= :done (:run/status @run)))
+        (is (:deleted (collet/delete-pipeline! ctx :orders {:version 1}))))
+      (finally (deliver release true) (collet/close ctx) (delete-store! path)))))
+
+
+(deftest cleanup-reports-payload-failure-after-committing-history-deletion
+  (let [path (temporary-store-path)
+        ctx  (collet/context {:data-dir (str path)})]
+    (try
+      (let [run    @(collet/start ctx (basic-pipeline 1) {})
+            result (with-redefs [artifact/delete-runs! (fn [& _] (throw (java.io.IOException. "fixture failure")))]
+                     (collet/delete-pipeline! ctx :orders {:version 1}))]
+        (is (:deleted result))
+        (is (string? (:cleanup-warning result)))
+        (is (nil? (store/get-run (:store ctx) (:run/id run))))
+        (is (nil? (collet/load-pipeline ctx :orders 1)))
+        (is (not (contains? @(:runs ctx) (:run/id run)))))
+      (finally (collet/close ctx) (delete-store! path)))))
+
+
+(deftest wide-iterator-output-is-replayable-and-evaluated-once
+  (let [path   (temporary-store-path)
+        seen   (atom 0)
+        source (with-meta (iteration (fn [i] (when (< i 12) (swap! seen inc) i))
+                                     :initk 0
+                                     :kf inc
+                                     :vf (fn [i] [{:id i :text (apply str (repeat 800 "x"))}]))
+                          {:iteration true})
+        task   {:name :wide :keep-state true :state-format :flatten}]
+    (try
+      (with-redefs [stream/byte-target 2048]
+        (let [output (runtime/scratch-output! path {:tasks [task]} task source)]
+          (try
+            (is (= 12 @seen))
+            (is (= 6 (get-in output [:artifact :artifact/parts])))
+            (let [handle (runtime/read-scratch-output output)]
+              (dotimes [_ 2]
+                (is (= (range 12) (mapv :id (mapcat ds/rows handle)))))
+              (is (= 12 @seen)))
+            (finally (runtime/close-scratch-output! output)))))
+      (finally (delete-store! path)))))

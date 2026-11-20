@@ -3,5 +3,7 @@
 **/.cpcache
 **/.lsp
 **/target
+**/node_modules
+**/dist
 checkouts
 tmp

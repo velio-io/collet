@@ -4,23 +4,42 @@
   :publish?          true
   :kind              :uberjar
   :main              collet.main
-  :outputs           {:uberjar "target/collet.jar"}}
+  :outputs           {:uberjar "target/collet.jar"}
+  :ui                {:dir "ui" :resource-root "collet/workbench"}
+  :knowledge         {:index         "resources/collet/knowledge/index.edn"
+                      :compatibility "collet/knowledge/compatibility.edn"
+                      :examples      {:orders "collet/workbench/examples/orders.edn"}}}
 
  :paths ["src" "resources"]
- :deps {org.clojure/clojure                  {:mvn/version "1.12.5"}
+ :deps {org.clojure/clojure                  {:mvn/version "1.12.6"}
         org.clojure/java.jmx                 {:mvn/version "1.1.1"}
         org.clojure/tools.cli                {:mvn/version "1.4.256"}
         io.velio/collet-core                 {:local/root "../collet-core"}
+        com.cnuernber/charred                {:mvn/version "1.043"}
+        ring/ring-jetty-adapter              {:mvn/version "1.15.6"}
+        org.clojars.roklenarcic/mcp-server   {:mvn/version "0.3.61"}
+        djblue/portal                        {:mvn/version "0.68.1"}
+        zprint/zprint                        {:mvn/version "1.2.9"}
         com.brunobonacci/mulog               {:mvn/version "0.10.1"}
         com.brunobonacci/mulog-zipkin        {:mvn/version "0.10.1"}
         com.brunobonacci/mulog-elasticsearch {:mvn/version "0.10.1"}
-        org.slf4j/slf4j-nop                  {:mvn/version "2.0.18"}
-        com.cognitect.aws/api                {:mvn/version "0.8.838"}
-        com.cognitect.aws/endpoints          {:mvn/version "871.2.47.0"}
-        com.cognitect.aws/s3                 {:mvn/version "871.2.46.17"}}
+        org.slf4j/slf4j-nop                  {:mvn/version "2.0.20"}
+        com.cognitect.aws/api                {:mvn/version "0.8.847"}
+        com.cognitect.aws/endpoints          {:mvn/version "871.2.55.12"}
+        com.cognitect.aws/s3                 {:mvn/version "871.2.55.11"}}
  :aliases
  {:test        {:extra-paths ["test"]
-                :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}
+                :extra-deps  {io.velio/collet-test-fixtures           {:local/root "../test-fixtures"}
+                              io.velio/collet-action-http             {:local/root "../collet-action-http"}
+                              io.velio/collet-action-file             {:local/root "../collet-action-file"}
+                              io.velio/collet-action-jdbc             {:local/root "../collet-action-jdbc"}
+                              io.velio/collet-action-llm              {:local/root "../collet-action-llm"}
+                              io.velio/collet-action-s3               {:local/root "../collet-action-s3"}
+                              io.velio/collet-action-sparql           {:local/root "../collet-action-sparql"}
+                              ;; Dataset statistics use the pre-9 quantiles API; these graph tests do not use RDF4J sketches.
+                              org.eclipse.rdf4j/rdf4j-repository-sail {:mvn/version "6.1.0" :exclusions [org.apache.datasketches/datasketches-java]}
+                              org.eclipse.rdf4j/rdf4j-sail-memory     {:mvn/version "6.1.0" :exclusions [org.apache.datasketches/datasketches-java]}
+                              org.postgresql/postgresql               {:mvn/version "42.7.3"}}
                 :jvm-opts    ["--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
                               "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
                               "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED"

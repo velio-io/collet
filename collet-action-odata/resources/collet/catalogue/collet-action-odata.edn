@@ -1,0 +1,11 @@
+[{:type          :collet.actions.odata/request
+  :purpose       "Query an OData endpoint with filters and pagination"
+  :effects       "network request"
+  :package       "collet-action-odata"
+  :coordinate    "io.velio/collet-action-odata"
+  :namespace     "collet.actions.odata"
+  :params-schema [:map [:service-url :string] [:segment :any] [:filter {:optional true} :any] [:select {:optional true} :any] [:expand {:optional true} :any] [:order {:optional true} :any] [:top {:optional true} :int]
+                  [:skip {:optional true} :int] [:count {:optional true} :boolean] [:follow-next-link {:optional true} :boolean] [:get-total-count {:optional true} :boolean]]
+  :example       "{:name :orders :type :collet.actions.odata/request :params {:service-url \"https://example.test/odata\" :segment \"Orders\" :top 20}}"
+  :notes         "See the OData action guide for segment, filter, select and expand forms."
+  :documentation "collet://docs/actions"}]

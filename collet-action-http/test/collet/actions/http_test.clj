@@ -1,16 +1,57 @@
 (ns collet.actions.http-test
   (:require
+   [charred.api :as json]
    [clojure.test :refer :all]
    [collet.actions.http :as sut]
+   [collet.arrow :as arrow]
    [collet.core :as collet]
    [collet.test-fixtures :as tf]
    [collet.test-http-server :as http]
-   [tech.v3.dataset :as ds]))
+   [tech.v3.dataset :as ds])
+  (:import
+   [java.io Closeable]
+   [java.nio.file Files LinkOption Path]))
 
 
 (use-fixtures :once
               http/with-server
               (tf/instrument! 'collet.actions.http))
+
+
+(deftest basic-auth-uses-the-declared-credential-vector
+  (doseq [[username password :as credentials] [["operator" "p:a:ss word"] ["usér" "päss"] ["" ""]]]
+    (let [request  {:url        (http/url "/auth/basic")
+                    :as         :json
+                    :headers    {"X-Collet-Test" "preserved"}
+                    :basic-auth credentials}
+          expected (str "Basic "
+                        (.encodeToString (java.util.Base64/getEncoder)
+                                         (.getBytes (str username ":" password) "UTF-8")))]
+      (is (= {:authorization expected :custom-header "preserved"}
+             (:body (sut/make-request request))))))
+  (is (nil? (get-in (sut/make-request {:url (http/url "/auth/basic") :as :json}) [:body :authorization]))))
+
+
+(deftest oauth2-uses-the-same-basic-auth-contract
+  (is (= "Basic Y2xpZW50OnM6ZWNyZXQ="
+         (get-in (sut/get-oauth2-token {:url (http/url "/auth/basic") :basic-auth ["client" "s:ecret"]})
+                 [:body :authorization]))))
+
+
+(deftest basic-auth-resolves-credentials-from-pipeline-configuration
+  (let [spec   {:name  :native-basic-auth
+                :tasks [{:name       :fetch
+                         :keep-state true
+                         :actions    [{:name      :request
+                                       :type      :collet.actions.http/request
+                                       :selectors {'username [:config :username] 'password [:config :password]}
+                                       :params    {:url        (http/url "/auth/basic")
+                                                   :as         :json
+                                                   :basic-auth ['username 'password]}
+                                       :return    [:body :authorization]}]}]}
+        config {:username "operator" :password "password"}]
+    (is (= "Basic b3BlcmF0b3I6cGFzc3dvcmQ="
+           (:fetch (tf/run-pipeline! (collet/compile-pipeline spec) config))))))
 
 
 (deftest http-request-test
@@ -333,3 +374,169 @@
                           (<= 0 (:rating %) 5))
                     rated-events)
             "all ratings should be numbers")))))
+
+
+(deftest managed-pagination-follows-request-shapes
+  (doseq [[mode config second-request headers body]
+          [[:page {} [:query-params "page"] {} {}]
+           [:offset {:start 0 :step 2} [:query-params "offset"] {} {}]
+           [:body-cursor
+            {:next-path    [:body :next]
+             :cursor-param [:body :cursor]
+             :continuation {:url "http://fixture/continue" :body {}}}
+            [:body] {} {:next "cursor"}]
+           [:header-cursor {:next-header "X-Next"} [:query-params "cursor"] {"x-next" "cursor"} {}]
+           [:body-url {:next-path [:body :next]} [:url] {} {:next "/continue"}]
+           [:link {} [:url] {"Link" ["</previous>; rel=prev" "<?page=2>; type=\"application/json\"; rel=\"next\""]} {}]]]
+    (let [seen     (atom [])
+          expected (case mode
+                     (:page :offset) 2
+                     :body-cursor "{\"cursor\":\"cursor\"}"
+                     :header-cursor "cursor"
+                     :link "http://fixture/start?page=2"
+                     "http://fixture/continue")]
+      (with-redefs [sut/http-request
+                    (fn [request]
+                      (let [n (count (swap! seen conj request))]
+                        {:status  200
+                         :headers (if (= n 1) headers {})
+                         :body    (json/write-json-str
+                                   (if (= 1 n) (assoc body :items [{:id 1}]) {:items [{:id 2}] :done true}))}))]
+        (let [result (sut/request {:url          "http://fixture/start"
+                                   :as           :json
+                                   :content-type :json
+                                   :pagination   (merge {:mode       mode
+                                                         :items-path [:body :items]
+                                                         :until      [:true? [:body :done]]}
+                                                        config)})]
+          (is (= [1 2] (mapv :id (mapcat ds/rows (:body result)))))
+          (is (= expected (get-in (second @seen) second-request))))))))
+
+
+(deftest pagination-spools-pages-before-fetching-the-next
+  (let [paths        (atom [])
+        reads        (atom [])
+        written      (atom [])
+        make-writer  arrow/make-writer
+        read-batches arrow/read-arrow-record-batches
+        request      sut/http-request
+        exists?      #(Files/exists ^Path % (make-array LinkOption 0))]
+    (with-redefs [arrow/make-writer               (fn [path columns]
+                                                    (swap! paths conj path)
+                                                    (make-writer path columns))
+                  arrow/read-arrow-record-batches (fn [path columns]
+                                                    (swap! reads conj path)
+                                                    (read-batches path columns))
+                  sut/http-request                (fn [options]
+                                                    (swap! written conj (count (filter exists? @paths)))
+                                                    (request options))]
+      (let [{:keys [status headers body]}
+            (sut/request {:url        (http/url "/pagination/batches")
+                          :as         :json
+                          :pagination {:mode :page :items-path [:body :items]}})]
+        (with-open [pages ^Closeable body]
+          (is (= 200 status))
+          (is (= "41" (get headers "x-page")))
+          (is (= (vec (range 41)) @written))
+          (is (= 40 (count pages)))
+          (is (:ds-seq (meta pages)))
+          (is (empty? @reads))
+          (let [first-page (first pages)]
+            (is (= [1 nil "two"] (get-in (first (ds/rows first-page)) [:a/b (keyword "key with space")])))
+            (is (= [(first @paths)] @reads))
+            (is (not (identical? first-page (first pages)))))
+          (let [second-page (second pages)]
+            (is (= #{:id :new-column} (set (ds/column-names second-page))))
+            (is (= [nil] (vec (:new-column second-page)))))
+          (is (= (vec (range 1 41)) (mapv #(get (first (ds/rows %)) :id) pages))))
+        (is (every? (complement exists?) @paths))
+        (is (not (exists? (.getParent ^Path (first @paths)))))))))
+
+
+(deftest paginated-arrow-pages-preserve-string-keys-and-empty-results
+  (let [options {:url        (http/url "/pagination/batches")
+                 :as         :json
+                 :keywordize false
+                 :pagination {:mode :page :items-path [:body "items"] :until [:always-true]}}]
+    (with-open [pages ^Closeable (:body (sut/request options))]
+      (is (= [{"id" 1 "a/b" {"key with space" [1 nil "two"]}}]
+             (vec (ds/rows (first pages))))))
+    (let [empty-body (:body (sut/request (assoc-in options [:pagination :start] 41)))]
+      (is (empty? empty-body))
+      (is (:ds-seq (meta empty-body))))))
+
+
+(deftest pagination-cleans-up-pages-on-limit-failure
+  (let [directories (atom #{})
+        make-writer arrow/make-writer]
+    (with-redefs [arrow/make-writer (fn [^Path path columns]
+                                      (swap! directories conj (.getParent path))
+                                      (make-writer path columns))]
+      (is (= "http-page-limit"
+             (try
+               (sut/request {:url        (http/url "/pagination/batches")
+                             :as         :json
+                             :pagination {:mode :page :items-path [:body :items] :max-pages 2}})
+               (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))
+      (is (= 1 (count @directories)))
+      (is (not (Files/exists ^Path (first @directories) (make-array LinkOption 0)))))))
+
+
+(deftest managed-requests-distinguish-response-failures
+  (doseq [[status body options code]
+          [[200 "" {:empty-body :error} "empty-http-body"]
+           [200 "{" {:empty-body :error} "invalid-json"]
+           [200 "{\"x\":false}" {:response-spec [:map [:x :int]]} "invalid-http-response"]
+           [429 "{}" {:retry {:max-retries 0}} "http-status"]
+           [200 "{\"items\":[{\"id\":1}]}" {:pagination {:mode :page :items-path [:body :items] :max-pages 1}} "http-page-limit"]]]
+    (with-redefs [sut/http-request (constantly {:status status :headers {} :body body})]
+      (is (= code
+             (try (sut/request (merge {:url "http://fixture" :as :json} options))
+                  (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))))))
+
+
+(deftest managed-requests-refuse-to-send-authentication-to-another-origin
+  (let [seen (atom [])]
+    (with-redefs [sut/http-request (fn [request]
+                                     (swap! seen conj (:url request))
+                                     {:status  200
+                                      :headers {"Link" "<http://other.test/next>; rel=next"}
+                                      :body    "[{\"id\":1}]"})]
+      (is (= "http-origin-changed"
+             (try (sut/request {:url        "http://fixture"
+                                :as         :json
+                                :auth       {:type :bearer :value "synthetic"}
+                                :pagination {:mode :link}})
+                  (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))
+      (is (= ["http://fixture"] @seen)))))
+
+
+(deftest poll-deadline-includes-a-blocked-request
+  (with-redefs [sut/http-request (fn [_] (Thread/sleep 1000) {:status 200 :body "{}"})]
+    (is (= "http-poll-timeout"
+           (try (sut/poll {:url "http://fixture" :as :json :poll {:until [:always-true] :deadline-ms 20}})
+                (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))))
+
+
+(deftest oauth-refresh-is-shared-and-a-rejected-token-is-replaced-once
+  (let [grants  (atom [])
+        auth    {:type          :oauth2
+                 :token-url     "http://fixture/oauth"
+                 :client-id     (str (random-uuid))
+                 :client-secret "synthetic"
+                 :refresh-token "initial"}
+        request {:url "http://fixture/resource" :as :json :auth auth}]
+    (with-redefs [sut/http-request
+                  (fn [{:keys [url form-params headers]}]
+                    (if (= url (:token-url auth))
+                      (let [n (count (swap! grants conj (:refresh_token form-params)))]
+                        {:status 200
+                         :body   (json/write-json-str {:access_token  (str "token-" n)
+                                                       :refresh_token (str "refresh-" n)
+                                                       :expires_in    3600})})
+                      (if (= "Bearer token-1" (get headers "Authorization"))
+                        {:status 401 :body "{}"}
+                        {:status 200 :body "{\"ok\":true}"})))]
+      (let [jobs (mapv (fn [_] (future (sut/request request))) (range 8))]
+        (is (every? #(= {:ok true} (:body (deref % 5000 nil))) jobs))
+        (is (= ["initial" "refresh-1"] @grants))))))

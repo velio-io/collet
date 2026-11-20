@@ -2,13 +2,14 @@
  {:description       "HTTP actions for Collet"
   :public-namespaces [collet.actions.http]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-http.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure   {:mvn/version "1.12.5"}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure   {:mvn/version "1.12.6"}
         io.velio/collet-core  {:local/root "../collet-core"}
         hato/hato             {:mvn/version "1.0.0"}
-        com.cnuernber/charred {:mvn/version "1.041"}
+        com.cnuernber/charred {:mvn/version "1.043"}
         diehard/diehard       {:mvn/version "0.12.1"}}
  :aliases
  {:test {:extra-paths ["test"]

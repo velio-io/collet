@@ -29,7 +29,7 @@
  :paths []
 
  :deps
- {org.clojure/clojure           {:mvn/version "1.12.5"}
+ {org.clojure/clojure           {:mvn/version "1.12.6"}
   io.velio/collet-core          {:local/root "collet-core"}
   io.velio/collet-action-http   {:local/root "collet-action-http"}
   io.velio/collet-action-file   {:local/root "collet-action-file"}
@@ -39,6 +39,7 @@
   io.velio/collet-action-queue  {:local/root "collet-action-queue"}
   io.velio/collet-action-jslt   {:local/root "collet-action-jslt"}
   io.velio/collet-action-llm    {:local/root "collet-action-llm"}
+  io.velio/collet-action-sparql {:local/root "collet-action-sparql"}
   io.velio/collet-action-vega   {:local/root "collet-action-vega"}
   io.velio/collet-action-lucene {:local/root "collet-action-lucene"}
   io.velio/collet-actions       {:local/root "collet-actions"}
@@ -54,10 +55,10 @@
    :extra-deps  {io.velio/collet-test-fixtures {:local/root "test-fixtures"}
                  io.github.tonsky/clj-reload   {:mvn/version "1.0.0"}
                  vvvvalvalval/scope-capture    {:mvn/version "0.3.3"}
-                 djblue/portal                 {:mvn/version "0.67.1"}}}
+                 djblue/portal                 {:mvn/version "0.68.1"}}}
 
   :nrepl
-  {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}}
+  {:extra-deps {nrepl/nrepl {:mvn/version "1.8.0"}}
    :jvm-opts   ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                 "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
                 "--enable-native-access=ALL-UNNAMED"]

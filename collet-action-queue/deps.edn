@@ -2,19 +2,20 @@
  {:description       "Queue actions for Collet"
   :public-namespaces [collet.actions.queue]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-queue.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure         {:mvn/version "1.12.5"}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure         {:mvn/version "1.12.6"}
         io.velio/collet-core        {:local/root "../collet-core"}
-        techascent/tech.ml.dataset  {:mvn/version "8.024"}
+        techascent/tech.ml.dataset  {:mvn/version "8.027"}
         io.zalky/cues               {:mvn/version "0.2.1"
                                      :exclusions  [com.taoensso/encore
                                                    net.openhft/chronicle-queue]}
-        com.taoensso/encore         {:mvn/version "3.169.1"}
-        net.openhft/chronicle-queue {:mvn/version "2026.5"
+        com.taoensso/encore         {:mvn/version "3.172.1"}
+        net.openhft/chronicle-queue {:mvn/version "2026.7"
                                      :exclusions  [net.openhft/chronicle-analytics]}
-        org.slf4j/slf4j-nop         {:mvn/version "2.0.18"}}
+        org.slf4j/slf4j-nop         {:mvn/version "2.0.20"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}

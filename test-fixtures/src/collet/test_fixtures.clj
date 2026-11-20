@@ -62,9 +62,12 @@
                                               result (get run name)]
                                           (swap! results assoc
                                             name
-                                            (if (seq? result)
-                                              (doall result)
-                                              result))))})]
+                                            (cond
+                                              (:ds-seq (meta result))
+                                              (try (with-meta (into [] result) (dissoc (meta result) :collet/close))
+                                                   (finally (when-let [close (:collet/close (meta result))] (close))))
+                                              (seq? result) (doall result)
+                                              :else result))))})]
     (try
       (let [run (start ctx pipeline config)]
         (deliver run-ready run)

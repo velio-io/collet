@@ -1,0 +1,418 @@
+{
+  "title": "Collet MCP authoring: field-trial fixes and acceptance",
+  "date": "2026-11-15",
+  "baseline": "docs/mcp-field-trial-2026-11-14.json",
+  "method": {
+    "boundary": "The external acceptance clients use only MCP for Collet discovery, source changes, validation, inspection, preparation, execution, history and recovery. Recipes and optional dependency coordinates come from the server. They do not call Collet functions or reuse prepared contexts. Separate white-box tests and the worktree nREPL verify implementation details.",
+    "clients": [
+      "MCP TypeScript SDK 1.32.2",
+      "tools-only",
+      "text-only, ignoring structuredContent"
+    ],
+    "protocols": [
+      "2025-06-18",
+      "2025-11-25"
+    ],
+    "packaged_operation": "The application JAR is copied to a temporary directory and launched outside the checkout. Docker serves the same UI, documentation, schemas and catalogue.",
+    "dependency_trial": "An isolated Maven cache is seeded only with this checkout's unpublished core, HTTP and file JARs/POMs. Optional integrations are absent from the initial application classpath; preparation resolves their transitive dependencies using the recipe advertised by MCP.",
+    "scope": "Local behavioural acceptance and client-observed response measurements; not a throughput, multi-user load or production deployment benchmark."
+  },
+  "findings": [
+    {
+      "id": "MCP-01",
+      "status": "fixed",
+      "change": "Authoring task outputs use the normal artifact formatting and handoff rules. Inspection labels dataset batches and mapper-row selectors. Default Arrow remains enabled.",
+      "evidence": [
+        "SDK orders recipe returns EUR 20 and USD 9 in authoring and saved runs",
+        "Core scratch handoff tests cover nested schemas, empty batches, flatten/latest state and cleanup",
+        "MCP-to-Postgres integration verifies persisted daily totals"
+      ]
+    },
+    {
+      "id": "MCP-02",
+      "status": "fixed",
+      "change": "List tools accept their advertised arguments and return bounded cursor pages. Related storage entities are read with set-based pulls.",
+      "evidence": [
+        "Every advertised tool is invoked through Streamable HTTP",
+        "All external client modes rediscover saved pipelines and runs"
+      ]
+    },
+    {
+      "id": "MCP-03",
+      "status": "fixed",
+      "change": "add-task applies taskEdn. Structural edits have operation-specific required fields, reject unknown arguments and report the accepted change separately from the client's description.",
+      "evidence": [
+        "Wire test inspects the accepted task source",
+        "Missing taskEdn returns one diagnostic at taskEdn",
+        "History retains verified summaries and client descriptions"
+      ]
+    },
+    {
+      "id": "MCP-04",
+      "status": "fixed",
+      "change": "A build-time compatibility manifest supplies exact optional package versions and complete dependency EDN. Setup and migration documentation are bundled without making optional integrations runtime dependencies.",
+      "evidence": [
+        "Native HTTP-to-file pipeline runs through MCP",
+        "Isolated Maven-cache trial",
+        "Independent package-version manifest tests",
+        "JAR and Docker catalogue/resource checks"
+      ]
+    },
+    {
+      "id": "MCP-05",
+      "status": "fixed",
+      "change": "Passive validation checks literal slicer reducers and the actual retry backoff contract. Integer multipliers are normalized for execution. Diagnostics identify the relevant EDN path.",
+      "evidence": [
+        "The :summ typo fails Check at the columns path",
+        "Integer and floating retry multipliers are exercised",
+        "Iterator recipe succeeds with configuration and explicit backoff"
+      ]
+    },
+    {
+      "id": "MCP-06",
+      "status": "fixed",
+      "change": "Mutations return receipts and polling returns status. Results, logs and metrics are requested separately. Discovery, documentation and history support focused reads and cursors. Source reads remain complete.",
+      "evidence": [
+        "Wire-budget regression tests",
+        "External clients assert ordinary responses fit 16 KiB",
+        "Text-only client completes all recipes",
+        "Documentation search, section and resource reads"
+      ]
+    },
+    {
+      "id": "MCP-07",
+      "status": "fixed",
+      "change": "Saved runs require an explicit draft configuration reference or an explicit empty configuration. Known missing configuration selectors fail before action execution.",
+      "evidence": [
+        "Configured sensor pipeline succeeds as an exact saved version",
+        "Execution captures source/configuration revisions",
+        "Restart discards configuration and rejects old-instance starts"
+      ]
+    },
+    {
+      "id": "MCP-08",
+      "status": "fixed",
+      "change": "One Malli contract supplies advertised JSON schemas and server-side argument validation. Tool errors preserve isError plus structured code, path, diagnostics and recovery information.",
+      "evidence": [
+        "SDK validates advertised output schemas",
+        "All-tool wire contract test",
+        "Conflict and invalid-operation responses are machine-readable"
+      ]
+    },
+    {
+      "id": "MCP-09",
+      "status": "fixed",
+      "change": "The bundled extensibility guide explains SCI custom forms, direct clj/* actions and file-backed actions. Core I/O descriptors return action-specific examples and known effects.",
+      "evidence": [
+        "Catalogue and descriptor tests",
+        "Extensibility documentation is available through tools and resources"
+      ]
+    },
+    {
+      "id": "MCP-10",
+      "status": "fixed",
+      "change": "Execution annotations conservatively report possible external effects and instance-scoped idempotency. Repeating the same start returns the same execution; different arguments cannot reuse its key.",
+      "evidence": [
+        "Wire annotations and idempotency tests",
+        "Every external saved-run journey retries its start",
+        "Restart rejects the recorded stale-instance command"
+      ]
+    }
+  ],
+  "additional_regressions_fixed": [
+    "A terminal :state-format :latest scalar no longer passes through doall.",
+    "One-character task names work with temporary Arrow outputs.",
+    "Cached input inspection preserves EDN key types and never fabricates batch-container field selectors.",
+    "Event pagination advances even when a long first event exceeds the conservative 4 KiB page allowance.",
+    "Run completion, pause and resume emit lifecycle notifications. Long-poll clients no longer wait for the timeout after durable completion; the browser receives the same state change.",
+    "All task tabs, including Logs, Metrics and Settings, remain visible at the tested desktop width.",
+    "Text-only saved definition reads identify the pipeline and immutable version explicitly; acceptance clients read back each saved version."
+  ],
+  "limits": {
+    "status_and_mutation_bytes": 4096,
+    "default_detail_bytes": 16384,
+    "maximum_requested_detail_bytes": 65536,
+    "default_items": 20,
+    "maximum_items": 100,
+    "source_characters": 262144,
+    "http_body_bytes": 524288,
+    "events_per_execution": 1000,
+    "event_bytes_per_execution": 1048576,
+    "event_bytes_per_application": 16777216,
+    "durable": [
+      "Draft source/history",
+      "Saved versions",
+      "Run/task lifecycle, timing, retries and available output counts"
+    ],
+    "transient": [
+      "Configuration",
+      "Prepared authoring contexts",
+      "Detailed events",
+      "Action aggregates",
+      "Observed samples"
+    ],
+    "notice": "Display bounds never limit how much data an action reads or writes. Explicit source reads are not clipped."
+  },
+  "measurements": {
+    "client_trials": [
+      {
+        "passed": true,
+        "mode": "SDK",
+        "firstSuccessCalls": 7,
+        "calls": 68,
+        "responseBytes": 126628,
+        "largestResponse": 9512,
+        "maxCompletionNotificationLagMs": 11,
+        "medianMs": 8,
+        "transcript": "/var/folders/sz/zk26spy53sjfkx0gq43whdyh0000gn/T/collet-mcp-acceptance-QJarW3/transcript.jsonl"
+      },
+      {
+        "passed": true,
+        "mode": "tools-only",
+        "firstSuccessCalls": 5,
+        "calls": 61,
+        "responseBytes": 116336,
+        "largestResponse": 9512,
+        "maxCompletionNotificationLagMs": 10,
+        "medianMs": 6,
+        "transcript": "/var/folders/sz/zk26spy53sjfkx0gq43whdyh0000gn/T/collet-mcp-acceptance-dAkx8l/transcript.jsonl"
+      },
+      {
+        "passed": true,
+        "mode": "text-only",
+        "firstSuccessCalls": 4,
+        "calls": 63,
+        "responseBytes": 119134,
+        "largestResponse": 9512,
+        "maxCompletionNotificationLagMs": 9,
+        "medianMs": 8,
+        "transcript": "/var/folders/sz/zk26spy53sjfkx0gq43whdyh0000gn/T/collet-mcp-acceptance-3ADw7e/transcript.jsonl"
+      }
+    ],
+    "isolated_maven_cache": {
+      "passed": true,
+      "mode": "SDK",
+      "firstSuccessCalls": 6,
+      "calls": 68,
+      "responseBytes": 114477,
+      "largestResponse": 9512,
+      "medianMs": 9,
+      "transcript": "/var/folders/sz/zk26spy53sjfkx0gq43whdyh0000gn/T/collet-mcp-acceptance-YFhpy5/transcript.jsonl"
+    },
+    "baseline": {
+      "tool_calls": 94,
+      "total_response_bytes": 964148,
+      "largest_response_bytes": 154597
+    },
+    "interpretation": "The trials follow comparable pipeline goals but use different discovery and repair sequences, so totals are not a controlled before/after benchmark. Call counts include asynchronous status changes. Completion lag is measured only for freshly awaited normal runs; request latency is not pipeline execution time."
+  },
+  "checks": {
+    "worktree_nrepl": {
+      "status": "passed",
+      "port": 51976,
+      "reload": "(user/reload)"
+    },
+    "core_package": {
+      "status": "passed",
+      "command": "bb test:module collet-core",
+      "results": [
+        {
+          "tests": 100,
+          "assertions": 787
+        }
+      ]
+    },
+    "app_package": {
+      "status": "passed",
+      "command": "bb test:module collet-app",
+      "results": [
+        {
+          "tests": 43,
+          "assertions": 660
+        }
+      ],
+      "final_isolated_runner": {
+        "command": "clojure -M:test",
+        "directory": "collet-app",
+        "results": [
+          {
+            "tests": 43,
+            "assertions": 664
+          }
+        ],
+        "status": "passed"
+      }
+    },
+    "unit": {
+      "status": "passed",
+      "command": "bb test:unit",
+      "package_results": [
+        {
+          "tests": 26,
+          "assertions": 170
+        },
+        {
+          "tests": 100,
+          "assertions": 787
+        },
+        {
+          "tests": 8,
+          "assertions": 19
+        },
+        {
+          "tests": 0,
+          "assertions": 0
+        },
+        {
+          "tests": 2,
+          "assertions": 11
+        },
+        {
+          "tests": 2,
+          "assertions": 16
+        },
+        {
+          "tests": 3,
+          "assertions": 20
+        },
+        {
+          "tests": 42,
+          "assertions": 163
+        },
+        {
+          "tests": 39,
+          "assertions": 612
+        },
+        {
+          "tests": 1,
+          "assertions": 11
+        },
+        {
+          "tests": 1,
+          "assertions": 2
+        },
+        {
+          "tests": 8,
+          "assertions": 67
+        },
+        {
+          "tests": 0,
+          "assertions": 0
+        },
+        {
+          "tests": 1,
+          "assertions": 35
+        },
+        {
+          "tests": 2,
+          "assertions": 14
+        }
+      ]
+    },
+    "browser": {
+      "status": "passed",
+      "tests": 41,
+      "seconds": 45.0,
+      "command": "WORKBENCH_URL=http://127.0.0.1:8091 npm run test:ui"
+    },
+    "docker": {
+      "passed": true,
+      "ui": true,
+      "tools": 23,
+      "resources": true,
+      "compatibilityVersion": "0.0.0-local",
+      "optionalRuntimePresent": false
+    },
+    "restart": {
+      "status": "passed",
+      "history_revisions": 3,
+      "concurrent_edits": "One accepted, one recoverable conflict",
+      "invalid_source": "Restored verbatim after JVM restart",
+      "configuration": "Not persisted",
+      "old_execution": "Unavailable",
+      "stale_instance_start": "Rejected",
+      "saved_run": "Durable completed state; transient events unavailable"
+    },
+    "completion_race": {
+      "status": "passed",
+      "regression": "saved-run-completion-wakes-long-poll",
+      "before": "The deterministic finalization race failed the completion assertion.",
+      "after": "Three assertions pass; an actual run completion wakes the waiting client."
+    },
+    "formatting": {
+      "changed_app_clojure": "Passed; 28 files",
+      "changed_frontend": "Pinned Prettier 3.6.2 passed",
+      "runtime_clojure": "Passed",
+      "global_check": "Two pre-existing formatting findings preserved",
+      "pre_existing_files": [
+        "collet-core/src/collet/artifact.clj",
+        "dev/playground.clj"
+      ]
+    },
+    "diff_check": {
+      "status": "passed",
+      "command": "git diff --check"
+    },
+    "integration": {
+      "check": "integration",
+      "command": "bb test:integration",
+      "exitCode": 0,
+      "seconds": 265.5,
+      "log": "/tmp/collet-integration-final.log",
+      "status": "passed",
+      "package_results": [
+        {
+          "tests": 1,
+          "assertions": 1
+        },
+        {
+          "tests": 4,
+          "assertions": 52
+        },
+        {
+          "tests": 5,
+          "assertions": 53
+        },
+        {
+          "tests": 1,
+          "assertions": 4
+        },
+        {
+          "tests": 1,
+          "assertions": 1
+        },
+        {
+          "tests": 3,
+          "assertions": 4
+        }
+      ]
+    },
+    "verify": {
+      "check": "verify",
+      "command": "bb verify",
+      "exitCode": 0,
+      "seconds": 177.5,
+      "log": "/tmp/collet-verify-final.log",
+      "status": "passed"
+    },
+    "release-plan": {
+      "check": "release-plan",
+      "command": "bb release:plan",
+      "exitCode": 0,
+      "seconds": 2.5,
+      "log": "/tmp/collet-release-plan-final.log",
+      "status": "passed"
+    },
+    "cleanup": "Temporary acceptance JVMs, frontend server and Docker container stopped. Existing development REPL and original field-trial server preserved."
+  },
+  "reproduction": {
+    "client_directory": "collet-app/ui",
+    "sdk": "COLLET_MCP_URL=http://127.0.0.1:8091/mcp npm run test:mcp",
+    "tools_only": "node tests/mcp/acceptance.mjs --tools-only",
+    "text_only": "node tests/mcp/acceptance.mjs --text-only",
+    "restart": "Run restart.mjs record STATE_FILE, stop and restart the same packaged application/database, then run restart.mjs verify STATE_FILE.",
+    "browser": "WORKBENCH_URL=http://127.0.0.1:8091 npm run test:ui",
+    "docker_probe": "Run tests/mcp/docker-smoke.mjs from a Node container sharing the default local acceptance image's network namespace. It expects local compatibility version 0.0.0-local.",
+    "local_versions": "Unpublished Collet versions must be locally installed or seeded for the optional-dependency execution trial; this acceptance does not publish artifacts. See collet-app/deploy.md."
+  }
+}

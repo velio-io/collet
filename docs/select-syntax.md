@@ -67,7 +67,7 @@ In addition select DSL supports some additional functions to make it more powerf
                  {:first-name "Bob" :last-name "Smith" :age 40}]}}
 
 ;; notice how you can combine :$/cat and :$/cond functions
-{:return [:state :users [:$/cat :first-name [:$/cond [:> :age 18]]]]}
+{:return [:state :users [:$/cat :first-name [:$/cond [:> [:age] 18]]]]}
 
 ;; will return:
 ["Jane" "Bob"]

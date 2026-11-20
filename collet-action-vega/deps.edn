@@ -2,15 +2,16 @@
  {:description       "Vega rendering actions for Collet"
   :public-namespaces [collet.actions.vega]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-vega.edn"}
 
  :paths ["src" "resources"]
- :deps {org.clojure/clojure            {:mvn/version "1.12.5"}
+ :deps {org.clojure/clojure            {:mvn/version "1.12.6"}
         io.velio/collet-core           {:local/root "../collet-core"}
         io.velio/collet-action-file    {:local/root "../collet-action-file"}
-        com.cnuernber/charred          {:mvn/version "1.041"}
-        org.graalvm.polyglot/js        {:mvn/version "25.1.3" :extension "pom"}
-        org.graalvm.js/js-scriptengine {:mvn/version "25.1.3"}}
+        com.cnuernber/charred          {:mvn/version "1.043"}
+        org.graalvm.polyglot/js        {:mvn/version "25.4.4.1.1" :extension "pom"}
+        org.graalvm.js/js-scriptengine {:mvn/version "25.4.4.1.1"}}
  :aliases
  {:test        {:extra-paths ["test" "test-resources"]
                 :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}

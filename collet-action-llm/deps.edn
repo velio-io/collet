@@ -2,15 +2,22 @@
  {:description       "LLM actions for Collet"
   :public-namespaces [collet.actions.llm]
   :publish?          true
-  :kind              :library}
+  :release-blocker   "Publish the reviewed SDK lifecycle fix and replace 0.6.4-collet.1-SNAPSHOT with its Maven release."
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-llm.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure             {:mvn/version "1.12.5"}
-        io.velio/collet-core            {:local/root "../collet-core"}
-        com.cnuernber/charred           {:mvn/version "1.041"}
-        metosin/malli                   {:mvn/version "0.20.1"}
-        net.clojars.wkok/openai-clojure {:mvn/version "0.23.0"}
-        org.apache.tika/tika-core       {:mvn/version "3.3.2"}}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure                 {:mvn/version "1.12.6"}
+        io.velio/collet-core                {:local/root "../collet-core"}
+        com.cnuernber/charred               {:mvn/version "1.043"}
+        metosin/malli                       {:mvn/version "0.20.3"}
+        net.clojars.deadmeme5441/clojure-llm-sdk {:mvn/version "0.6.4-collet.1-SNAPSHOT"}
+        com.networknt/json-schema-validator {:mvn/version "3.0.9"}
+        ;; Keep NetworkNT's Jackson 3 databind and format modules aligned.
+        tools.jackson.core/jackson-databind {:mvn/version "3.3.0"}
+        tools.jackson.dataformat/jackson-dataformat-yaml {:mvn/version "3.3.0"}
+        net.clojars.wkok/openai-clojure     {:mvn/version "0.23.0"}
+        org.apache.tika/tika-core           {:mvn/version "4.1.0"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}}

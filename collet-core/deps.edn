@@ -2,32 +2,34 @@
  {:description       "Collet workflow engine core"
   :public-namespaces [collet.core
                       collet.store
-                      collet.store.datalevin]
+                      collet.store.datalevin
+                      collet.validation]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-core.edn"}
 
  :paths ["src" "resources"]
 
  :deps
- {org.clojure/clojure                  {:mvn/version "1.12.5"}
-  org.datalevin/datalevin-embedded     {:mvn/version "1.0.0"}
+ {org.clojure/clojure                  {:mvn/version "1.12.6"}
+  org.datalevin/datalevin-embedded     {:mvn/version "1.2.5"}
   weavejester/dependency               {:mvn/version "1.0.1"}
-  metosin/malli                        {:mvn/version "0.20.1"}
+  metosin/malli                        {:mvn/version "0.20.3"}
   diehard/diehard                      {:mvn/version "0.12.1"}
   clj-commons/pomegranate              {:mvn/version "1.3.27"}
-  org.babashka/sci                     {:mvn/version "0.15.56"}
+  org.babashka/sci                     {:mvn/version "0.15.59"}
   com.brunobonacci/mulog               {:mvn/version "0.10.1"}
-  org.slf4j/slf4j-nop                  {:mvn/version "2.0.18"}
-  techascent/tech.ml.dataset           {:mvn/version "8.024"}
+  org.slf4j/slf4j-nop                  {:mvn/version "2.0.20"}
+  techascent/tech.ml.dataset           {:mvn/version "8.027"}
   org.apache.arrow/arrow-vector        {:mvn/version "19.0.0"}
   org.apache.arrow/arrow-c-data        {:mvn/version "19.0.0"}
   org.apache.arrow/arrow-memory-unsafe {:mvn/version "19.0.0"}
-  org.duckdb/duckdb_jdbc               {:mvn/version "1.5.5.1"}
+  org.duckdb/duckdb_jdbc               {:mvn/version "1.5.6.0"}
   com.cnuernber/jarrow                 {:mvn/version "1.000"}
   org.apache.commons/commons-compress  {:mvn/version "1.28.0"}
-  at.yawk.lz4/lz4-java                 {:mvn/version "1.11.2"}
+  at.yawk.lz4/lz4-java                 {:mvn/version "1.12.0"}
   net.java.dev.jna/jna                 {:mvn/version "5.19.1"}
-  com.github.luben/zstd-jni            {:mvn/version "1.5.7-11"}}
+  com.github.luben/zstd-jni            {:mvn/version "1.5.7-23"}}
 
  :aliases
  {:test
@@ -57,4 +59,4 @@
                  "--enable-native-access=ALL-UNNAMED"]
    :extra-deps  {eftest/eftest              {:mvn/version "0.6.0"}
                  vvvvalvalval/scope-capture {:mvn/version "0.3.3"}
-                 djblue/portal              {:mvn/version "0.67.1"}}}}}
+                 djblue/portal              {:mvn/version "0.68.1"}}}}}

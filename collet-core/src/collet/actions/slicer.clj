@@ -1,9 +1,11 @@
 (ns collet.actions.slicer
   (:require
    [collet.action :as action]
+   [collet.actions.join :as join]
    [collet.arrow :as collet.arrow]
    [collet.conditions :as collet.conds]
    [collet.select :as collet.select]
+   [collet.stream :as stream]
    [collet.utils :as utils]
    [ham-fisted.api :as hamf]
    [tech.v3.dataset :as ds]
@@ -29,14 +31,9 @@
       (with-meta (assoc (meta dataset) :arrow-columns arrow-columns)))))
 
 
-(defn do-join
+(defn- in-memory-join
   [dataset {:keys [with cat? source target]}]
-  (let [dataset        (if (utils/ds-seq? dataset)
-                         (concat-dataset-seq dataset)
-                         dataset)
-        join-ds        (if (utils/ds-seq? with)
-                         (concat-dataset-seq with)
-                         (utils/make-dataset with {:cat? cat?}))
+  (let [join-ds        (utils/make-dataset with {:cat? cat?})
         source-key     (if (or (keyword? source) (string? source))
                          source
                          :_collet_join_source)
@@ -61,6 +58,15 @@
                         left-ds
                         right-ds)]
     (apply dissoc joined-ds helper-columns)))
+
+
+(defn do-join [dataset {:keys [with strict] :as options}]
+  (if (or (utils/ds-seq? dataset) (utils/ds-seq? with))
+    (join/join dataset options)
+    (if strict
+      (let [batches (join/join dataset options)]
+        (try (ds/->dataset (stream/rows batches)) (finally ((:collet/close (meta batches))))))
+      (in-memory-join dataset options))))
 
 
 (defn prep-column
@@ -185,8 +191,8 @@
   (let [[f-key f-path] (first by)]
     (if (utils/ds-seq? dataset)
       (let [arrow-columns (-> dataset meta :arrow-columns)]
-        (-> (map #(flatten-mapper % f-key f-path arrow-columns) dataset)
-            (with-meta (meta dataset))))
+        (stream/view #(map (fn [batch] (flatten-mapper batch f-key f-path arrow-columns)) dataset)
+                     (dissoc (meta dataset) :arrow-columns :rows-count)))
       (flatten-mapper dataset f-key f-path))))
 
 
@@ -229,16 +235,13 @@
 (defn do-filter
   [dataset {:keys [by predicate]}]
   (if (utils/ds-seq? dataset)
-    (let [{:keys [arrow-columns] :as ds-meta} (-> dataset meta)
-          dataset-seq (cond->> dataset
-                        (some? arrow-columns)
-                        (map (fn [dataset]
-                               (ds/row-map dataset #(collet.arrow/prep-record % arrow-columns))))
-                        :always
-                        (map (fn [dataset]
-                               (filterer dataset by predicate))))]
-      ;; arrow-columns are not needed because we already parsed all rows
-      (with-meta dataset-seq (dissoc ds-meta :arrow-columns)))
+    (let [schema (:arrow-columns (meta dataset))]
+      (stream/view #(map (fn [batch]
+                           (filterer (cond-> batch schema (ds/row-map (fn [row] (collet.arrow/prep-record row schema))))
+                                     by
+                                     predicate))
+                         dataset)
+                   (dissoc (meta dataset) :rows-count)))
     (filterer dataset by predicate)))
 
 
@@ -261,8 +264,19 @@
                      (some? rows) (ds/select-rows rows)
                      (some? drop-rows) (ds/drop-rows drop-rows)))]
     (if (utils/ds-seq? dataset)
-      (-> (map selecter dataset)
-          (with-meta (meta dataset)))
+      (let [metadata (meta dataset)
+            schema   (:arrow-columns metadata)]
+        (stream/view #(map selecter dataset)
+                     (cond-> metadata
+                       (or rows drop-rows) (dissoc :rows-count)
+                       (and schema (or columns drop-cols))
+                       (assoc :arrow-columns
+                         (assoc (collet.arrow/normalize-schema schema)
+                           :fields
+                           (let [fields (:fields (collet.arrow/normalize-schema schema))
+                                 by-key (into {} (map (juxt :key identity)) fields)]
+                             (filterv #(not (contains? (set drop-cols) (:key %)))
+                                      (if columns (keep by-key columns) fields))))))))
       (selecter dataset))))
 
 
@@ -276,13 +290,30 @@
                      (apply with (collet.arrow/prep-record row arrow-columns) args))
                    (fn [row]
                      (apply with row args)))]
-      (-> (map #(ds/row-map % map-fn) dataset)
-          (with-meta (dissoc ds-meta :arrow-columns))))
+      (stream/view #(map (fn [batch] (ds/row-map batch map-fn)) dataset) (dissoc ds-meta :arrow-columns)))
     (ds/dataset? dataset)
     (ds/row-map dataset with)
     :otherwise
     (cond-> (map with dataset)
       as-dataset? (ds/->dataset))))
+
+
+(defn- do-partition [data {:keys [size as] :or {as :items}}]
+  (when-not (pos-int? size)
+    (throw (ex-info "Partition size must be positive." {:path [:size]})))
+  (let [batched? (utils/ds-seq? data)
+        schema   (:arrow-columns (meta data))
+        rows     (fn [] (if batched? (stream/rows data) (ds/rows data)))
+        fields   (:fields (if schema (collet.arrow/normalize-schema schema) (collet.arrow/infer-schema! (rows))))
+        columns  {:version 1
+                  :fields  [{:key     as
+                             :name    (name as)
+                             :type    :list
+                             :element (if (seq fields) {:type :struct :fields fields} {:type :map})}]}
+        groups   (fn [] (partition-all size (cond->> (rows) schema (map #(collet.arrow/prep-record % schema)))))]
+    (if batched?
+      (stream/view #(map (fn [group] (ds/->dataset {as [(vec group)]})) (groups)) {:arrow-columns columns})
+      (vary-meta (ds/->dataset {as (mapv vec (groups))}) assoc :arrow-columns columns))))
 
 
 (def slicer-params-spec
@@ -293,6 +324,8 @@
      ::flatten        [:tuple [:= :flatten]
                        [:map
                         [:by [:map-of ::simple-value collet.select/select-path]]]]
+     ::partition      [:tuple [:= :partition]
+                       [:map [:size pos-int?] [:as {:optional true} :keyword]]]
      ::group          [:tuple [:= :group]
                        [:map
                         [:by ::simple-or-path]
@@ -300,13 +333,19 @@
                         [:group-col {:optional true} ::simple-value]]]
      ::join           [:tuple [:= :join]
                        [:map
-                        [:with [:or utils/dataset? [:sequential map?]]]
+                        [:with [:or utils/dataset? [:fn sequential?]]]
                         [:source ::simple-or-path]
                         [:target ::simple-or-path]
+                        [:strict {:optional true} [:map [:source-hash ::simple-or-path] [:target-hash ::simple-or-path]]]
                         [:cat? {:optional true} :boolean]]]
      ::fold           [:tuple [:= :fold]
                        [:map
                         [:by [:or ::simple-value [:sequential ::simple-value]]]
+                        [:columns {:optional true}
+                         [:map-of ::simple-value
+                          [:or
+                           [:enum :values :distinct :count-distinct :first-value :row-count :mean :sum]
+                           [:tuple [:enum :values :distinct :count-distinct :first-value :row-count :mean :sum] ::simple-value]]]]
                         [:rollup {:optional true} [:or :boolean [:sequential ::simple-value]]]
                         [:rollup-except {:optional true} :boolean]]]
      ::filter         [:tuple [:= :filter]
@@ -328,23 +367,24 @@
                         [:with [:or fn? list?]]
                         [:as-dataset? {:optional true} :boolean]]]}}
    [:map
-    [:sequence [:or utils/dataset? [:sequential utils/dataset?] [:sequential :any]]]
+    [:sequence [:or utils/dataset? [:fn sequential?]]]
     [:cat? {:optional true} :boolean]
     [:apply {:optional true}
-     [:+ [:or ::flatten ::group ::join ::fold ::filter ::order ::select ::map]]]]])
+     [:+ [:or ::flatten ::partition ::group ::join ::fold ::filter ::order ::select ::map]]]]])
 
 
 (defn prep-dataset
   "Creates a dataset from the provided sequence.
    Can modify the dataset shape by applying flatten-by, group-by and join-with options."
   {:malli/schema [:=> [:cat slicer-params-spec]
-                  [:or utils/linked-hash-map? utils/dataset? [:sequential utils/dataset?]]]}
+                  [:or utils/linked-hash-map? utils/dataset? [:fn sequential?]]]}
   [{:keys [apply cat? parse] data :sequence}]
   (let [dataset (utils/make-dataset data {:cat? cat? :parse parse})]
     (reduce
      (fn [d [op args]]
        (case op
          :flatten (do-flatten d args)
+         :partition (do-partition d args)
          :group (do-group-by d args)
          :join (do-join d args)
          :fold (do-fold-by d args)

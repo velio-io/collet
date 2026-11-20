@@ -2,14 +2,15 @@
  {:description       "File actions for Collet"
   :public-namespaces [collet.actions.file]
   :publish?          true
-  :kind              :library}
+  :kind              :library
+  :catalogue         "collet/catalogue/collet-action-file.edn"}
 
- :paths ["src"]
- :deps {org.clojure/clojure         {:mvn/version "1.12.5"}
+ :paths ["src" "resources"]
+ :deps {org.clojure/clojure         {:mvn/version "1.12.6"}
         io.velio/collet-core        {:local/root "../collet-core"}
         io.velio/collet-action-http {:local/root "../collet-action-http"}
-        com.cnuernber/charred       {:mvn/version "1.041"}
-        techascent/tech.ml.dataset  {:mvn/version "8.024"}}
+        com.cnuernber/charred       {:mvn/version "1.043"}
+        techascent/tech.ml.dataset  {:mvn/version "8.027"}}
  :aliases
  {:test        {:extra-paths ["test"]
                 :extra-deps  {io.velio/collet-test-fixtures {:local/root "../test-fixtures"}

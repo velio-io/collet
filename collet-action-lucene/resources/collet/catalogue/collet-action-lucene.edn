@@ -1,0 +1,22 @@
+[{:type          :collet.actions.lucene/index
+  :purpose       "Index records from supported files into Lucene"
+  :effects       "filesystem read and index write"
+  :package       "collet-action-lucene"
+  :coordinate    "io.velio/collet-action-lucene"
+  :namespace     "collet.actions.lucene"
+  :params-schema [:map [:index-path :string] [:docs-path {:optional true} :string] [:input {:optional true} :any] [:extensions {:optional true} [:set :any]] [:exclude-patterns {:optional true} [:set :any]]
+                  [:dataset-opts {:optional true} :map] [:commit-every-n {:optional true} :int] [:fail-fast? {:optional true} :boolean] [:open-mode {:optional true} [:enum :create :create-or-append :append]]
+                  [:ram-buffer-mb {:optional true} number?] [:analyzer {:optional true} :any]]
+  :example       "{:name :index :type :collet.actions.lucene/index :params {:index-path \"data/index\" :docs-path \"data/orders\" :extensions #{:parquet}}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type          :collet.actions.lucene/query
+  :purpose       "Search a Lucene index"
+  :effects       "filesystem read"
+  :package       "collet-action-lucene"
+  :coordinate    "io.velio/collet-action-lucene"
+  :namespace     "collet.actions.lucene"
+  :params-schema [:map [:index :string] [:query :any] [:limit {:optional true} :int]]
+  :example       "{:name :search :type :collet.actions.lucene/query :params {:index \"data/index\" :query \"currency:EUR\" :limit 20}}"
+  :notes         "Supports QueryParser strings and runtime Lucene Query objects."
+  :documentation "collet://docs/actions"}]

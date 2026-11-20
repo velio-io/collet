@@ -3,85 +3,53 @@
    [collet.action :as action]
    [collet.actions.common :as common]
    [collet.arrow :as collet.arrow]
+   [collet.stream :as stream]
    [collet.utils :as utils]
    [tech.v3.dataset :as ds]))
 
 
 (def mapper-params-spec
   [:map
-   [:sequence [:or utils/dataset? [:sequential utils/dataset?] [:sequential :any]]]
+   [:sequence [:or utils/dataset? [:fn sequential?]]]
    [:cat? {:optional true} :boolean]])
 
 
 (def mapper-state-spec
-  [:map
-   [:current :any]
-   [:idx :int]
-   [:next :boolean]
-   [:dataset [:or utils/dataset? [:sequential utils/dataset?] [:sequential :any]]]])
+  [:map [:current :any] [:idx :int] [:next :boolean]])
+
+
+(defn- initial-state [input cat?]
+  (if (utils/ds-seq? input)
+    (cond-> {:remaining (stream/rows input) :arrow-columns (:arrow-columns (meta input))}
+      (:rows-count (meta input)) (assoc :rows-count (:rows-count (meta input))))
+    (let [dataset (if (and (sequential? input) (not (counted? input)))
+                    (if cat? (sequence cat input) input)
+                    (try (utils/make-dataset input {:cat? cat?}) (catch Exception _ input)))]
+      (cond-> {:remaining (if (ds/dataset? dataset) (ds/rows dataset) dataset)}
+        (or (ds/dataset? dataset) (counted? dataset))
+        (assoc :dataset
+          dataset :rows-count
+          (if (ds/dataset? dataset) (ds/row-count dataset) (count dataset)))))))
 
 
 (defn map-sequence
-  "Will read values from collection one by one and put them into the action state.
-   Useful for iterating over collections."
-  {:malli/schema [:=>
-                  [:cat mapper-params-spec
-                   [:maybe mapper-state-spec]]
-                  mapper-state-spec]}
-  [{:keys [cat?] data-seq :sequence} prev-state]
-  (let [state    (if (nil? prev-state)
-                   ;; initialize action state
-                   (let [dataset (try (utils/make-dataset data-seq {:cat? cat?})
-                                      ;; if seq cannot be converted to dataset, use it as is
-                                      (catch Exception _e data-seq))
-                         ds?     (ds/dataset? dataset)
-                         ds-seq? (utils/ds-seq? dataset)]
-                     {:dataset       dataset
-                      :rows-count    (cond ds? (ds/row-count dataset)
-                                           ds-seq? (apply + (map ds/row-count dataset))
-                                           :otherwise (count dataset))
-                      :arrow-columns (-> dataset meta :arrow-columns)
-                      :ds?           ds?
-                      :ds-seq?       ds-seq?
-                      :ds-seq-idx    0
-                      :ds-seq-offset 0
-                      :idx           0})
-                   ;; use previously created state
-                   (update prev-state :idx inc))
-
-        {:keys [dataset arrow-columns rows-count idx
-                ds? ds-seq? ds-seq-idx ds-seq-offset]}
-        state
-
-        next-idx (inc idx)
-        next?    (< next-idx rows-count)]
-    ;; return the next state
-    (if ds-seq?
-      (let [current-dataset      (nth dataset ds-seq-idx)
-            current-dataset-size (ds/row-count current-dataset)
-            [ds-seq-idx ds-seq-offset current-dataset]
-            (if (< idx (+ current-dataset-size ds-seq-offset))
-              [ds-seq-idx ds-seq-offset current-dataset]
-              [(inc ds-seq-idx)
-               (+ ds-seq-offset current-dataset-size)
-               (nth dataset (inc ds-seq-idx))])
-            current-dataset-idx  (- idx ds-seq-offset)
-            current-item         (cond-> (ds/row-at current-dataset current-dataset-idx)
-                                   (some? arrow-columns)
-                                   (collet.arrow/prep-record arrow-columns))]
-        (assoc state
-          :current current-item
-          :ds-seq-idx ds-seq-idx
-          :ds-seq-offset ds-seq-offset
-          :idx idx
-          :next next?))
-
-      (assoc state
-        :current (if ds?
-                   (ds/row-at dataset idx)
-                   (nth dataset idx))
-        :idx idx
-        :next next?))))
+  "Advance a row cursor. Only the next row is needed to decide whether to continue."
+  {:malli/schema [:=> [:cat mapper-params-spec [:maybe mapper-state-spec]] mapper-state-spec]}
+  [{:keys [cat?] input :sequence} prev-state]
+  (let [state (or prev-state (initial-state input cat?))
+        rows  (seq (if prev-state (::remaining (meta state)) (:remaining state)))
+        tail  (next rows)
+        item  (first rows)]
+    ;; Keep the cursor out of action observations and result serialization.
+    (with-meta
+      (assoc (dissoc state :remaining)
+        :current (when rows
+                   (cond-> (if (map? item) (into {} item) item)
+                     (:arrow-columns state) (collet.arrow/prep-record (:arrow-columns state))))
+        :idx (inc (get state :idx -1))
+        :collet.mapper/empty? (nil? rows)
+        :next (boolean tail))
+      {::remaining tail})))
 
 
 (defmethod action/action-fn :mapper

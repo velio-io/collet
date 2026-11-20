@@ -1,0 +1,105 @@
+[{:type          :counter
+  :purpose       "Increment a stateful counter"
+  :effects       "pure"
+  :package       "collet-core"
+  :coordinate    "io.velio/collet-core"
+  :namespace     "collet.actions.counter"
+  :params-schema [:map [:start {:optional true} number?] [:step {:optional true} number?] [:end {:optional true} number?]]
+  :example       "{:name :page :type :counter :params {:start 0 :step 1 :end 10}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type          :mapper
+  :purpose       "Iterate over a sequence, exposing the current item"
+  :effects       "pure"
+  :package       "collet-core"
+  :coordinate    "io.velio/collet-core"
+  :namespace     "collet.actions.mapper"
+  :params-schema [:map [:sequence :any] [:cat? {:optional true} :boolean]]
+  :example       "{:name :mapper :type :mapper :selectors {rows [:inputs :load]} :params {:sequence rows}}"
+  :notes         "Advances one row with one-row lookahead. File-backed batch inputs supply an exact total only when metadata contains it."
+  :documentation "collet://docs/actions"}
+ {:type          :stats
+  :purpose       "Count and describe a sequence"
+  :effects       "pure"
+  :package       "collet-core"
+  :coordinate    "io.velio/collet-core"
+  :namespace     "collet.actions.stats"
+  :params-schema [:map [:sequence :any] [:cat? {:optional true} :boolean]]
+  :example       "{:name :stats :type :stats :selectors {rows [:inputs :load]} :params {:sequence rows}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type          :fold
+  :purpose       "Collect an item into accumulated state"
+  :effects       "pure"
+  :package       "collet-core"
+  :coordinate    "io.velio/collet-core"
+  :namespace     "collet.actions.fold"
+  :params-schema [:map [:item :any] [:into {:optional true} :any] [:op {:optional true} [:enum :concat]] [:in {:optional true} [:vector :any]] [:with {:optional true} :any]]
+  :example       "{:name :collect :type :fold :selectors {item [:state :map :current]} :params {:item item}}"
+  :notes         ""
+  :documentation "collet://docs/actions"}
+ {:type :slicer
+  :purpose "Filter, select, group, join, order, or transform rows"
+  :effects "depends on supplied functions"
+  :package "collet-core"
+  :coordinate "io.velio/collet-core"
+  :namespace "collet.actions.slicer"
+  :params-schema
+  [:schema
+   {:registry
+    {:column  [:or :keyword :string :int]
+     :path    [:or :keyword :string :int [:vector :any]]
+     :reducer [:enum :values :distinct :count-distinct :first-value :row-count :mean :sum]}}
+   [:map
+    [:sequence :any]
+    [:cat? {:optional true} :boolean]
+    [:parse {:optional true} :map]
+    [:apply {:optional true}
+     [:sequential
+      [:or
+       [:tuple [:= :flatten] [:map [:by [:map-of :column [:vector :any]]]]]
+       [:tuple [:= :partition] [:map [:size [:int {:min 1}]] [:as {:optional true} :keyword]]]
+       [:tuple [:= :group] [:map [:by :path] [:join-groups {:optional true} :boolean] [:group-col {:optional true} :column]]]
+       [:tuple [:= :join] [:map [:with :any] [:source :path] [:target :path] [:strict {:optional true} [:map [:source-hash :path] [:target-hash :path]]] [:cat? {:optional true} :boolean]]]
+       [:tuple [:= :fold]
+        [:map [:by [:or :column [:sequential :column]]]
+         [:columns {:optional true} [:map-of :column [:or :reducer [:tuple :reducer :column]]]]
+         [:rollup {:optional true} [:or :boolean [:sequential :column]]]
+         [:rollup-except {:optional true} :boolean]]]
+       [:tuple [:= :filter] [:map [:by :any] [:predicate :any]]]
+       [:tuple [:= :order] [:map [:by :path] [:comp :any]]]
+       [:tuple [:= :select]
+        [:map
+         [:columns {:optional true} [:sequential :column]]
+         [:drop-cols {:optional true} [:sequential :column]]
+         [:rows {:optional true} [:sequential :int]]
+         [:drop-rows {:optional true} [:sequential :int]]]]
+       [:tuple [:= :map] [:map [:with :any] [:as-dataset? {:optional true} :boolean]]]]]]]]
+  :tags [:filter :aggregate :sum :daily :totals :group :transform :select :sort]
+  :input-representation "Rows, a dataset, or dataset batches; callbacks receive rows."
+  :output-representation "Dataset or dataset batches; use slicer/mapper for row processing."
+  :example "{:name :slice :type :slicer :params {:sequence [{:paid true}] :apply [[:select {:columns [:paid]}]]}}"
+  :notes "Partition and join return dataset batches for batch inputs. Use :strict {:source-hash ... :target-hash ...} to validate both full inputs before consuming joined rows."
+  :documentation "collet://docs/actions"}
+ {:type :switch
+  :purpose "Run the actions of the first matching condition"
+  :effects "depends on nested actions"
+  :package "collet-core"
+  :coordinate "io.velio/collet-core"
+  :namespace "collet.actions.switch"
+  :params-schema
+  [:map [:selectors {:optional true} :map] [:case [:vector [:map [:condition :any] [:actions [:vector :map]]]]]]
+  :example "{:name :route :type :switch :params {:case [{:condition :default :actions [{:name :value :type :clj/identity :params [1]}]}]}}"
+  :notes ""
+  :documentation "collet://docs/actions"}
+ {:type          :enrich
+  :purpose       "Apply another action to each selected item and collect results"
+  :effects       "depends on nested action"
+  :package       "collet-core"
+  :coordinate    "io.velio/collet-core"
+  :namespace     "collet.actions.enrich"
+  :params-schema [:or :map [:vector :any]]
+  :example       "{:name :enriched :type :enrich :action :clj/identity :target [:inputs :load] :selectors {item [:$enrich/item]} :params [item]}"
+  :notes         "Enrich uses top-level :action and :target, not a nested :params wrapper. Expanded during preparation."
+  :documentation "collet://docs/actions"
+  :action-schema [:map [:action :keyword] [:target [:vector :any]] [:fold-in {:optional true} [:vector :any]]]}]

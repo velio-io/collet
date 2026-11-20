@@ -4,7 +4,10 @@
    [clojure.test :refer :all]
    [collet.actions.mapper :as sut]
    [collet.arrow :as collet.arrow]
+   [collet.core :as collet]
+   [collet.stream :as stream]
    [collet.test-fixtures :as tf]
+   [collet.utils :as utils]
    [tech.v3.dataset :as ds]))
 
 
@@ -51,7 +54,7 @@
           (collet.arrow/write writer data)))
       (let [params {:sequence (collet.arrow/read-dataset "tmp/mapper-arrow-test.arrow" columns)}
             result (sut/map-sequence params nil)]
-        (is (= 10 (:rows-count result)))
+        (is (nil? (:rows-count result)))
         (is (= {:a 1 :b 2 :c "text"} (:current result)))
         (is (:next result))
 
@@ -63,3 +66,32 @@
           (is (= 9 (:idx result)))
           (is (= {:a 19 :b 20 :c "last item"} (:current result)))))
       (io/delete-file "tmp/mapper-arrow-test.arrow"))))
+
+
+(deftest first-row-needs-no-total
+  (let [opened      (atom [])
+        source      (stream/view #(map (fn [n] (swap! opened conj n) (ds/->dataset (if (= n 1) [] [{:n n} {:n n}])))
+                                       (list 0 1 2 3 4))
+                                 {})
+        first-state (sut/map-sequence {:sequence source} nil)]
+    (is (= [0] @opened))
+    (is (= {:n 0} (:current first-state)))
+    (is (:next first-state))
+    (is (= [0 0 2 2 3 3 4 4]
+           (loop [s     first-state
+                  items []]
+             (let [items (conj items (get-in s [:current :n]))]
+               (if (:next s) (recur (sut/map-sequence {:sequence []} s) items) items)))))
+    (is (= [0 1 2 3 4] @opened))))
+
+
+(deftest empty-mapper-stops-before-following-effects
+  (let [seen (atom 0)
+        run  (:task-fn (collet/compile-task
+                        (utils/eval-ctx)
+                        {:name     :empty
+                         :iterator {:next [:true? [:$mapper/has-next-item]]}
+                         :actions  [{:name :row :type :mapper :params {:sequence []}}
+                                    {:name :effect :type :custom :fn (fn [] (swap! seen inc))}]}))]
+    (is (empty? (seq (run {:state {} :config {}}))))
+    (is (zero? @seen))))

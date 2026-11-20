@@ -332,6 +332,7 @@
             run      (tf/run-pipeline! pipeline {:connection connection-map})
             datasets (:query run)
             columns  (-> datasets meta :arrow-columns)]
+        (is (= :done (:run/status run)) (pr-str (:run/error run)))
         (is (= 1 (count datasets)))
         (is (utils/ds-seq? datasets))
         (is (= [22] (map ds/row-count datasets)))

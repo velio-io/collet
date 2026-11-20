@@ -131,7 +131,9 @@
   (walk/prewalk
    (fn [x]
      (cond
-       (ds-seq? x) (list (ds/select-rows (first x) (range (min 100 (ds/row-count (first x))))))
+       (ds-seq? x) (if-let [batch (first x)]
+                     (list (ds/select-rows batch (range (min 100 (ds/row-count batch)))))
+                     [])
        (ds/dataset? x) (ds/select-rows x (range (min 100 (ds/row-count x))))
        (and (sequential? x) (not (map-entry? x))) (take 100 x)
        (fn? x) (-> ^Fn x .getClass .getName)
@@ -204,5 +206,7 @@
 
   ([ctx form vars]
    (let [ctx-fork (sci/fork ctx)
-         new-ctx  (sci/merge-opts ctx-fork {:namespaces {'user vars}})]
+         ;; Wrap values in SCI Vars so option merging does not traverse runtime datasets.
+         bindings (into {} (map (fn [[symbol value]] [symbol (sci/new-var symbol value)])) vars)
+         new-ctx  (sci/merge-opts ctx-fork {:namespaces {'user bindings}})]
      (sci/eval-form new-ctx form))))
