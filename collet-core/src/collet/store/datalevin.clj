@@ -453,21 +453,11 @@
     {:limit (max 0 (min 1000 limit)) :before Long/MAX_VALUE}))
 
 
-(defn- pull-page
-  "Select ordered IDs before pulling. A pull in the limited query projects every matching entity."
-  [conn pattern {:keys [find in order-by] :as ids-query} & inputs]
-  (let [query {:find     (conj find '(pull ?e pattern))
-               :in       (into '[$ ?ids-query pattern] (rest in))
-               :where    [[(list* 'q '?ids-query in) [find]]]
-               :order-by order-by}]
-    (apply d/q query (d/db conn) ids-query pattern inputs)))
-
-
 (defn- entity-page [conn page where pattern timestamp legacy-sort]
   (let [{:keys [limit before]} (page-options page)
         cursor?                (map? page)
         fields                 (if cursor? '[?e] legacy-sort)
-        query                  {:find     fields
+        query                  {:find     (conj fields (list 'pull '?e pattern))
                                 :in       '[$ ?before ?size ?timestamp ?oldest]
                                 :where    (cond-> (conj where '[(< ?e ?before)])
                                             (not cursor?) (conj '[(get-else $ ?e ?timestamp ?oldest) ?time]))
@@ -476,7 +466,7 @@
     (if (zero? limit)
       []
       (mapv (fn [row] (cond-> (peek row) cursor? (assoc :cursor (str (first row)))))
-            (pull-page conn pattern query before limit timestamp Long/MIN_VALUE)))))
+            (d/q query (d/db conn) before limit timestamp Long/MIN_VALUE)))))
 
 
 (def ^:private pipeline-deletion-pattern
@@ -489,7 +479,10 @@
 (defn- retract-pipeline [db name {:keys [version latest-version busy-run?]}]
   (let [versions (d/q '[:find [(pull ?p pattern) ...]
                         :in $ pattern ?name ?wanted
-                        :where [?p :pipeline/name ?name] [?p :pipeline/plan] [?p :pipeline/version ?v]
+                        :where
+                        [?p :pipeline/name ?name]
+                        [?p :pipeline/plan]
+                        [?p :pipeline/version ?v]
                         (or [(nil? ?wanted)] [(= ?wanted ?v)])]
                       db
                       pipeline-deletion-pattern
@@ -602,45 +595,28 @@
     (pull-draft (d/db conn) id))
 
   (get-draft [_ id revision]
-    (let [db      (d/db conn)
-          pattern (conj draft-edit-metadata-pattern :draft.edit/source)]
-      (or (d/q '[:find (pull ?edit-ref pattern) .
-                 :in $ ?draft-ref ?revision pattern
-                 :where [(datalevin.core/entid $ ?draft-ref) ?draft]
-                 [(vector ?draft ?revision) ?key]
-                 [(vector :draft.edit/key ?key) ?edit-ref]]
-               db
-               [:draft/id id]
-               revision
-               pattern)
-          ;; Datalevin does not backfill tuples for existing edits.
-          (d/q '[:find (pull ?edit pattern) .
-                 :in $ ?id ?revision pattern
-                 :where [?draft :draft/id ?id]
-                 [?edit :draft.edit/draft ?draft]
-                 [?edit :draft.edit/revision ?revision]]
-               db
-               id
-               revision
-               pattern))))
+    (d/q '[:find (pull ?edit-ref pattern) .
+           :in $ ?draft-ref ?revision pattern
+           :where [(datalevin.core/entid $ ?draft-ref) ?draft]
+           [(vector ?draft ?revision) ?key]
+           [(vector :draft.edit/key ?key) ?edit-ref]]
+         (d/db conn)
+         [:draft/id id]
+         revision
+         (conj draft-edit-metadata-pattern :draft.edit/source)))
 
   (draft-history [_ id page]
-    (let [{:keys [limit before]} (page-options page)]
-      (if (zero? limit)
-        []
-        (mapv peek
-              (pull-page conn
-                         draft-edit-metadata-pattern
-                         '{:find     [?revision ?e]
-                           :in       [$ ?draft-ref ?before ?size]
-                           :where    [[(datalevin.core/entid $ ?draft-ref) ?d]
-                                      [?e :draft.edit/draft ?d] [?e :draft.edit/revision ?revision]
-                                      [(< ?revision ?before)]]
-                           :order-by [[?revision :desc]]
-                           :limit    [?size]}
-                         [:draft/id id]
-                         before
-                         limit)))))
+    (let [{:keys [limit before]} (page-options page)
+          db (d/db conn)]
+      (if-let [draft-eid (when (and (pos? limit) (pos? before))
+                           (d/entid db [:draft/id id]))]
+        (->> (d/rseek-datoms db :ave :draft.edit/key [draft-eid (dec before)] nil limit)
+             ;; A reverse seek can continue into preceding drafts or attributes.
+             (take-while (fn [{:keys [a v]}] (and (= a :draft.edit/key) (= draft-eid (first v)))))
+             (mapv :e)
+             (d/pull-many db draft-edit-metadata-pattern)
+             (filterv some?))
+        [])))
 
   (update-draft! [this id expected source author summary]
     (store/update-draft! this id expected source author summary {}))

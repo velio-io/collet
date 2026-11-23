@@ -654,7 +654,14 @@
   (with-store [db]
     (let [first-plan  (store/save-pipeline! db {} (dissoc pipeline-v1 :version))
           second-plan (store/save-pipeline! db {} (assoc (dissoc pipeline-v1 :version) :max-parallelism 2))
+          other-plan  (store/save-pipeline! db {} (assoc pipeline-v1 :name :other))
+          plans       [first-plan second-plan other-plan]
+          plan-key    (juxt :pipeline/name :pipeline/version)
           ids         [(random-uuid) (random-uuid)]]
+      (d/transact! (:conn db)
+        (mapv (fn [{:keys [name version]}]
+                {:db/id [:pipeline/key [name version]] :pipeline/created-at 1})
+              plans))
       (doseq [[id created-at] (map vector ids [20 10])]
         (store/create-run! db
                            {:run/id         id
@@ -663,7 +670,13 @@
                             :run/started-at created-at
                             :run/pipeline   {:pipeline/name :orders :pipeline/version (:version second-plan)}}
                            []))
-      (is (= [(:version second-plan) (:version first-plan)] (mapv :pipeline/version (store/list-pipelines db 10))))
+      (is (= [[:orders 2] [:other 1] [:orders 1]]
+             (mapv plan-key (store/list-pipelines db 10))))
+      (let [first-page  (store/list-pipelines db {:limit 2})
+            [last-plan] (store/list-pipelines db {:limit 2 :cursor (:cursor (peek first-page))})]
+        (is (= [[:other 1] [:orders 2]] (mapv plan-key first-page)))
+        (is (= [:orders 1] (plan-key last-plan)))
+        (is (empty? (store/list-pipelines db {:cursor (:cursor last-plan)}))))
       (let [pulled  (atom [])
             track   (fn [id] (swap! pulled conj id) id)
             pattern [(list :run/id :xform track)]]
@@ -733,6 +746,8 @@
       (let [reopened (datalevin/store {:dir (str path)})]
         (try
           (is (= 1 (:draft/revision (store/get-draft reopened id))))
+          (is (= (:draft/source (store/get-draft reopened id))
+                 (:draft.edit/source (store/get-draft reopened id 1))))
           (is (= {:code :draft-conflict :current (store/get-draft reopened id)}
                  (try (store/delete-draft! reopened id 0) (catch ExceptionInfo e (ex-data e)))))
           (store/delete-draft! reopened id 1)
@@ -744,23 +759,23 @@
       (finally (store/close! db) (delete-store! path)))))
 
 
-(deftest draft-revisions-remain-readable-without-a-tuple
-  (let [path   (temporary-store-path)
-        id     (random-uuid)
-        schema (dissoc @#'datalevin/schema :draft.edit/key)]
-    (try
-      (let [conn (d/get-conn (str path) schema)]
-        (try
-          (d/transact! conn
-            [{:db/id -1 :draft/id id :draft/revision 0 :draft/source "{}"}
-             {:draft.edit/draft -1 :draft.edit/revision 0 :draft.edit/source "{}"}])
-          (finally (d/close conn))))
-      (let [db (datalevin/store {:dir (str path)})]
-        (try
-          (is (= {:draft.edit/revision 0 :draft.edit/source "{}"}
-                 (store/get-draft db id 0)))
-          (finally (store/close! db))))
-      (finally (delete-store! path)))))
+(deftest draft-history-pages-within-one-draft
+  (with-store [db]
+    (let [id        (random-uuid)
+          revisions #(mapv :draft.edit/revision (store/draft-history db id %))]
+      (doseq [draft-id [(random-uuid) id (random-uuid)]]
+        (store/create-draft! db {:draft/id draft-id :draft/source "0"})
+        (dotimes [revision 3]
+          (store/update-draft! db draft-id revision (str (inc revision)) "agent" "Edit")))
+      (is (= [3 2 1 0] (revisions 10)))
+      (is (= [3 2] (revisions {:limit 2})))
+      (is (= [1 0] (revisions {:limit 2 :cursor "2"})))
+      (is (= [0] (revisions {:limit 4 :cursor "1"})))
+      (is (= [] (revisions {:limit 2 :cursor "0"})))
+      (is (= [] (revisions {:limit 0})))
+      (is (= [] (store/draft-history db (random-uuid) {:limit 2})))
+      (is (= [(dissoc (store/get-draft db id 3) :draft.edit/source)]
+             (store/draft-history db id {:limit 1}))))))
 
 
 (deftest finalization-rechecks-the-release-set-before-skipping-a-write
@@ -889,6 +904,7 @@
       (is (= v1 (store/load-pipeline db :orders)))
       (is (nil? (store/load-pipeline db :orders 2)))
       (is (= [1] (mapv :pipeline/version (store/list-pipelines db 100))))
+      (is (= [1] (mapv :pipeline/version (store/list-pipelines db {:limit 2}))))
       (is (= 3 (:version (store/save-pipeline! db {} (assoc v1 :max-parallelism 3)))))
       (is (= "pipeline-changed" (try (store/delete-pipeline! db :orders {:latest-version 1}) nil (catch Exception e (:code (ex-data e))))))
       (let [run-ids (mapv (fn [version]

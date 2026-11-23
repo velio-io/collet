@@ -12,7 +12,7 @@
 
  :deps
  {org.clojure/clojure                  {:mvn/version "1.12.6"}
-  org.datalevin/datalevin-embedded     {:mvn/version "1.2.5"}
+  org.datalevin/datalevin-embedded     {:mvn/version "1.2.11"}
   weavejester/dependency               {:mvn/version "1.0.1"}
   metosin/malli                        {:mvn/version "0.20.3"}
   diehard/diehard                      {:mvn/version "0.12.1"}
